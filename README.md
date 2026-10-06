@@ -1,4 +1,4 @@
-## v0.16.36 · punts fotogràfics històrics i selecció SHP directa
+## v0.16.37 · punts fotogràfics històrics i selecció SHP directa
 
 Punts fotogràfics amb sèrie temporal i control de visibilitat, més selecció successiva de geometries SHP directament sobre el mapa.
 

@@ -158,6 +158,65 @@ async function cloudFetch(path,{method='GET',body=null,auth=true,headers={}}={})
   if(!r.ok){const msg=data?.msg||data?.message||data?.error_description||data?.error||`HTTP ${r.status}`;const e=new Error(msg);e.status=r.status;throw e;}
   return data;
 }
+
+function cloudObjectPath(...parts){return parts.map(x=>encodeURIComponent(String(x??'').replace(/[^a-zA-Z0-9._-]/g,'_'))).join('/');}
+async function cloudBinaryFetch(path,{method='GET',body=null,contentType='application/octet-stream',headers={}}={}){
+  const cfg=cloudConfig();if(!cfg.enabled)throw new Error('Supabase no está configurado todavía');
+  let session=loadCloudSession();if(session?.refresh_token&&sessionExpired(session))session=await refreshCloudSession();
+  if(!session?.access_token)throw new Error('Inicia sesión para acceder a los archivos de nube');
+  const h={'apikey':cfg.key,'Authorization':`Bearer ${session.access_token}`,...headers};
+  if(contentType)h['Content-Type']=contentType;
+  const r=await fetch(cfg.url+path,{method,headers:h,body});
+  if(!r.ok){let msg=`HTTP ${r.status}`;try{const t=await r.text();if(t){try{const j=JSON.parse(t);msg=j?.message||j?.error||j?.msg||t;}catch{msg=t;}}}catch{}throw new Error(msg);}
+  return r;
+}
+async function cloudUploadBlob(objectPath,blob){
+  if(!(blob instanceof Blob))return null;
+  const p=objectPath.split('/').map(encodeURIComponent).join('/');
+  await cloudBinaryFetch(`/storage/v1/object/geocauce-files/${p}`,{method:'POST',body:blob,contentType:blob.type||'application/octet-stream',headers:{'x-upsert':'true','cache-control':'3600'}});
+  return objectPath;
+}
+async function cloudDownloadBlob(objectPath){
+  if(!objectPath)return null;const p=String(objectPath).split('/').map(encodeURIComponent).join('/');
+  const r=await cloudBinaryFetch(`/storage/v1/object/authenticated/geocauce-files/${p}`,{method:'GET',contentType:null});return await r.blob();
+}
+async function cloudUploadProjectAssets(uid,projectId,{manual=false}={}){
+  const photos=await dbAll('photos').catch(()=>[]),rasters=await dbAll('rasters').catch(()=>[]),vectorLayers=await dbAll('vectorLayers').catch(()=>[]),cacheKey=`geocauce-cloud-assets-${projectId}`;
+  let cache={};try{cache=JSON.parse(localStorage.getItem(cacheKey)||'{}')||{};}catch{cache={};}
+  const result={photos:[],rasters:[],vectorLayers:[]};let done=0,uploaded=0;
+  const total=photos.reduce((n,r)=>n+(r.blob instanceof Blob?1:0),0)+rasters.reduce((n,r)=>n+(r.blob instanceof Blob?1:0)+(r.sourceBlob instanceof Blob?1:0),0)+vectorLayers.reduce((n,r)=>n+1+(r.renderBlob instanceof Blob?1:0),0);
+  const sigBlob=(b,extra='')=>b instanceof Blob?`${b.size}:${b.type||''}:${extra}`:'';
+  const tinyHash=str=>{let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return (h>>>0).toString(36);};
+  const put=async(path,blob,sig,label)=>{done++;if(cache[path]===sig)return path;if(manual&&total>2)toast(`Nube · ${done}/${total} · ${label}`,900);await cloudUploadBlob(path,blob);cache[path]=sig;uploaded++;return path;};
+  for(const rec of photos){const x={...rec};delete x.blob;const path=rec.blob instanceof Blob?`${cloudObjectPath(uid,projectId,'photos',rec.id)}.bin`:null;if(path)await put(path,rec.blob,sigBlob(rec.blob,rec.date||rec.importedAt||''),rec.name||'foto');result.photos.push({...x,cloudBlobPath:path,cloudBlobType:rec.blob?.type||null,cloudBlobSize:rec.blob?.size||0});}
+  for(const rec of rasters){const x={...rec};delete x.blob;delete x.sourceBlob;delete x.image;const base=cloudObjectPath(uid,projectId,'rasters',rec.id),previewPath=rec.blob instanceof Blob?`${base}.preview`:null,sourcePath=rec.sourceBlob instanceof Blob?`${base}.source`:null,extra=rec.importedAt||rec.meta?.importedAt||rec.meta?.sourceWidth||'';if(previewPath)await put(previewPath,rec.blob,sigBlob(rec.blob,extra),rec.name||'mapa');if(sourcePath)await put(sourcePath,rec.sourceBlob,sigBlob(rec.sourceBlob,extra),(rec.name||'mapa')+' · original');result.rasters.push({...x,cloudPreviewPath:previewPath,cloudSourcePath:sourcePath,cloudPreviewType:rec.blob?.type||null,cloudSourceType:rec.sourceBlob?.type||null,cloudPreviewSize:rec.blob?.size||0,cloudSourceSize:rec.sourceBlob?.size||0});}
+  for(const rec of vectorLayers){const x={...rec};delete x.features;delete x.renderBlob;const base=cloudObjectPath(uid,projectId,'vectors',rec.id),geomPath=`${base}.geometry.json`,renderPath=rec.renderBlob instanceof Blob?`${base}.render`:null,geomText=JSON.stringify(rec.features||[]),geomBlob=new Blob([geomText],{type:'application/json'}),geomSig=`${geomBlob.size}:application/json:${tinyHash(geomText)}`;await put(geomPath,geomBlob,geomSig,(rec.name||'SHP')+' · geometria');if(renderPath)await put(renderPath,rec.renderBlob,sigBlob(rec.renderBlob,vectorRenderSignature(rec)),(rec.name||'SHP')+' · mapa lleuger');result.vectorLayers.push({...x,cloudFeaturesPath:geomPath,cloudRenderPath:renderPath,cloudFeaturesSize:geomBlob.size,cloudRenderType:rec.renderBlob?.type||null,cloudRenderSize:rec.renderBlob?.size||0});}
+  localStorage.setItem(cacheKey,JSON.stringify(cache));if(manual&&uploaded===0&&total)toast('Archivos cloud ya actualizados · guardando cambios…',1200);return result;
+}
+
+async function cloudRefreshProjectCatalog({quiet=true}={}){
+  if(!cloudConfigured()||!navigator.onLine||!loadCloudSession()?.access_token)return false;
+  try{
+    const rows=await cloudFetch('/rest/v1/projects?select=*&order=updated_at.desc');if(!Array.isArray(rows))return false;
+    for(const row of rows){const meta={...(row.metadata||{}),id:row.id,name:row.name||row.metadata?.name||'Proyecto',zone:row.zone??row.metadata?.zone??'',torrent:row.torrent??row.metadata?.torrent??'',crs:row.crs||row.metadata?.crs||'EPSG:25831',dbName:row.metadata?.dbName||`GeoCauceDB_${row.id}`,ownerUserId:row.owner_id,_cloudUpdatedAt:Date.parse(row.updated_at||0)||0};const i=projectCatalog.findIndex(p=>p.id===row.id),hasLocal=!!localStorage.getItem(projectStateKey(row.id));if(i<0)projectCatalog.push({...meta,_cloudOnly:!hasLocal});else{const local=projectCatalog[i];projectCatalog[i]={...meta,...local,ownerUserId:row.owner_id,_cloudUpdatedAt:meta._cloudUpdatedAt,_cloudOnly:!hasLocal};}}
+    saveProjectCatalog();if(state.screen==='projects')renderProjectHome();return true;
+  }catch(e){cloudLastError=`No se pudo leer la nube: ${e.message||e}`;refreshAccountUi();if(!quiet)toast(cloudLastError,5000);return false;}
+}
+async function restoreProjectFromCloud(projectId,{manual=false}={}){
+  if(!cloudConfigured()||!navigator.onLine||!loadCloudSession()?.access_token)return false;
+  try{
+    if(manual)toast('Descargando proyecto de Supabase…',1600);
+    const rows=await cloudFetch(`/rest/v1/project_snapshots?project_id=eq.${encodeURIComponent(projectId)}&select=*`);const snap=Array.isArray(rows)?rows[0]:null;if(!snap?.state)throw new Error('No hay una copia cloud de este proyecto');
+    const sv={...snap.state,projectId,appVersion:'0.16.37-android-alpha'};localStorage.setItem(projectStateKey(projectId),JSON.stringify(sv));if(Array.isArray(snap.palette)&&snap.palette.length){sectionPalette=snap.palette;saveSectionPalette();}
+    const assets=sv.assetMetadata||{};await dbClear('photos').catch(()=>{});await dbClear('rasters').catch(()=>{});await dbClear('rasterStyleTiles').catch(()=>{});await dbClear('vectorLayers').catch(()=>{});
+    for(const ph of assets.photos||[]){const rec={...ph};delete rec.cloudBlobPath;delete rec.cloudBlobType;delete rec.cloudBlobSize;if(ph.cloudBlobPath){try{rec.blob=await cloudDownloadBlob(ph.cloudBlobPath);await dbPut('photos',rec);nativeSyncPhotoMeta(rec);}catch(e){console.warn('Foto cloud',ph.id,e);}}}
+    for(const r of assets.rasters||[]){const rec={...r};for(const k of ['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize'])delete rec[k];try{if(r.cloudPreviewPath)rec.blob=await cloudDownloadBlob(r.cloudPreviewPath);if(r.cloudSourcePath)rec.sourceBlob=await cloudDownloadBlob(r.cloudSourcePath);if(rec.styleCache)rec.styleCache={...rec.styleCache,ready:false,missing:true};if(rec.blob||rec.sourceBlob){await dbPut('rasters',rec);nativeSyncRasterMeta(rec);}}catch(e){console.warn('Raster cloud',r.id,e);}}
+    for(const vl of assets.vectorLayers||[]){const rec={...vl};for(const k of ['cloudFeaturesPath','cloudRenderPath','cloudFeaturesSize','cloudRenderType','cloudRenderSize'])delete rec[k];try{if(vl.cloudFeaturesPath){const b=await cloudDownloadBlob(vl.cloudFeaturesPath);rec.features=JSON.parse(await b.text());}else rec.features=[];if(vl.cloudRenderPath)rec.renderBlob=await cloudDownloadBlob(vl.cloudRenderPath);await dbPut('vectorLayers',rec);}catch(e){console.warn('Vector cloud',vl.id,e);}}
+    const p=projectById(projectId);if(p){p._cloudOnly=false;p._cloudPulledAt=Date.now();p._cloudUpdatedAt=Date.parse(snap.updated_at||0)||p._cloudUpdatedAt||0;saveProjectCatalog();}
+    cloudLastSyncAt=Date.now();cloudLastError='';refreshAccountUi();if(manual)toast('Proyecto restaurado desde la nube ✓',3000);return true;
+  }catch(e){cloudLastError=`No se pudo restaurar: ${e.message||e}`;refreshAccountUi();if(manual)toast(cloudLastError,5500);return false;}
+}
+
 async function refreshCloudSession(){
   const old=loadCloudSession();if(!old?.refresh_token)throw new Error('No hay sesión para renovar');
   const cfg=cloudConfig();if(!cfg.enabled)throw new Error('Supabase no está configurado');
@@ -191,9 +250,9 @@ function openAuthModal(context='entry',mode='signin'){
 }
 function closeAuthModal(){$('#authModal').classList.add('hidden');$('#authModal').setAttribute('aria-hidden','true');setAuthMessage('');}
 function enterAppCore(){if(projectCatalog.length)showProjectHome();else showProjectCreate(null,'splash');refreshAccountUi();}
-function enterApp(){
+async function enterApp(){
   const session=loadCloudSession(),choice=authEntryChoice();
-  if(session?.access_token){setAuthEntryChoice('account');enterAppCore();if(sessionExpired(session)&&navigator.onLine)refreshCloudSession().then(()=>{refreshAccountUi();scheduleCloudSync(500);}).catch(()=>refreshAccountUi());return;}
+  if(session?.access_token){setAuthEntryChoice('account');try{if(sessionExpired(session)&&navigator.onLine)await refreshCloudSession();if(navigator.onLine)await cloudRefreshProjectCatalog();}catch(e){console.warn('Cloud entry',e);}enterAppCore();refreshAccountUi();scheduleCloudSync(500);return;}
   if(choice==='offline'){enterAppCore();return;}
   if(choice==='account'){enterAppCore();return;}
   openAuthModal('entry','signin');
@@ -207,10 +266,10 @@ async function submitAuth(){
   try{
     if(authUiMode==='signup'){
       const data=await signUpCloud(email,password);
-      if(data?.access_token){setAuthMessage('Cuenta creada y sesión iniciada.','success');closeAuthModal();refreshAccountUi();if(authUiContext==='entry')enterAppCore();else{scheduleCloudSync(100);openAccountManage();}}
+      if(data?.access_token){setAuthMessage('Cuenta creada y sesión iniciada.','success');closeAuthModal();refreshAccountUi();if(navigator.onLine)await cloudRefreshProjectCatalog();if(authUiContext==='entry')enterAppCore();else{scheduleCloudSync(100);openAccountManage();}}
       else{setAuthMode('signin');$('#authEmail').value=email;setAuthMessage('Cuenta creada. Revisa tu correo para confirmarla y después inicia sesión.','success');}
     }else{
-      await signInCloud(email,password);closeAuthModal();refreshAccountUi();if(authUiContext==='entry')enterAppCore();else{scheduleCloudSync(100);openAccountManage();}
+      await signInCloud(email,password);closeAuthModal();refreshAccountUi();if(navigator.onLine)await cloudRefreshProjectCatalog();if(authUiContext==='entry')enterAppCore();else{scheduleCloudSync(100);openAccountManage();}
     }
   }catch(e){setAuthMessage(e.message||String(e));}
   finally{btn.disabled=false;}
@@ -252,14 +311,17 @@ function renderAccountManageBody(){
 function currentStatePayloadForCloud(){
   if(!state.projectId)return null;try{return JSON.parse(localStorage.getItem(projectStateKey(state.projectId))||'null');}catch{return null;}
 }
-async function cloudStructuredSnapshot(){
+async function cloudStructuredSnapshot(assetMetadata=null){
   persistStateLocalOnly();
   const base=currentStatePayloadForCloud()||{};
-  let photos=[],rasters=[],vectorLayers=[];
-  try{photos=(await dbAll('photos')).map(rec=>{const x={...rec};delete x.blob;return x;});}catch(e){console.warn('Cloud photo metadata',e);}
-  try{rasters=(await dbAll('rasters')).map(rec=>{const x={...rec};delete x.blob;delete x.sourceBlob;delete x.image;return x;});}catch(e){console.warn('Cloud raster metadata',e);}
-  try{vectorLayers=(await dbAll('vectorLayers')).map(rec=>{const x={...rec};delete x.features;delete x.renderBlob;return x;});}catch(e){console.warn('Cloud vector metadata',e);}
-  return {...base,cloudSchema:3,appSettings:cloneAny(appSettings),assetMetadata:{photos,rasters,vectorLayers}};
+  if(!assetMetadata){
+    let photos=[],rasters=[],vectorLayers=[];
+    try{photos=(await dbAll('photos')).map(rec=>{const x={...rec};delete x.blob;return x;});}catch(e){console.warn('Cloud photo metadata',e);}
+    try{rasters=(await dbAll('rasters')).map(rec=>{const x={...rec};delete x.blob;delete x.sourceBlob;delete x.image;return x;});}catch(e){console.warn('Cloud raster metadata',e);}
+    try{vectorLayers=(await dbAll('vectorLayers')).map(rec=>{const x={...rec};delete x.features;delete x.renderBlob;return x;});}catch(e){console.warn('Cloud vector metadata',e);}
+    assetMetadata={photos,rasters,vectorLayers};
+  }
+  return {...base,cloudSchema:4,appSettings:cloneAny(appSettings),assetMetadata};
 }
 async function syncCurrentProjectToCloud({manual=false}={}){
   if(cloudSyncRunning||!state.projectId||!state.project)return false;
@@ -268,22 +330,24 @@ async function syncCurrentProjectToCloud({manual=false}={}){
   if(!navigator.onLine){cloudLastError='Sin conexión · pendiente de sincronizar';refreshAccountUi();if(manual)toast('Sin conexión · los cambios quedan guardados en SQLite');return false;}
   cloudSyncRunning=true;cloudLastError='';refreshAccountUi();
   try{
-    const payload=await cloudStructuredSnapshot();
     const session2=sessionExpired(loadCloudSession())?await refreshCloudSession():loadCloudSession();const uid=session2?.user?.id;if(!uid)throw new Error('Sesión sin identificador de usuario');
+    if(manual)toast('Sincronizando datos y archivos…',1400);
+    const assetMetadata=await cloudUploadProjectAssets(uid,state.projectId,{manual});
+    const payload=await cloudStructuredSnapshot(assetMetadata);
     const p=state.project;const now=new Date().toISOString();if(p.ownerUserId!==uid){p.ownerUserId=uid;p.updatedAt=Date.now();saveProjectCatalog();state.project=p;nativeSyncProject(payload);}
     const row={id:p.id,owner_id:uid,name:p.name||'Proyecto',zone:p.zone||null,torrent:p.torrent||null,crs:p.crs||'EPSG:25831',metadata:p,updated_at:now};
     await cloudFetch('/rest/v1/projects?on_conflict=id',{method:'POST',body:[row],headers:{Prefer:'resolution=merge-duplicates,return=minimal'}});
     const snap={project_id:p.id,owner_id:uid,state:payload,palette:sectionPalette||[],updated_at:now};
     await cloudFetch('/rest/v1/project_snapshots?on_conflict=project_id',{method:'POST',body:[snap],headers:{Prefer:'resolution=merge-duplicates,return=minimal'}});
-    cloudLastSyncAt=Date.now();cloudLastError='';if(manual)toast('Proyecto sincronizado ✓');refreshAccountUi();return true;
+    cloudLastSyncAt=Date.now();cloudLastError='';p._cloudOnly=false;p._cloudSyncedAt=cloudLastSyncAt;p._cloudUpdatedAt=Date.parse(now)||cloudLastSyncAt;saveProjectCatalog();if(manual)toast('Proyecto y archivos sincronizados ✓');refreshAccountUi();return true;
   }catch(e){cloudLastError=`Pendiente: ${e.message||e}`;console.warn('Cloud sync',e);if(manual)toast(`No se pudo sincronizar: ${e.message||e}`,5000);refreshAccountUi();return false;}
   finally{cloudSyncRunning=false;}
 }
 function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);if(!loadCloudSession()?.access_token||!cloudConfigured())return;cloudSyncTimer=setTimeout(()=>syncCurrentProjectToCloud(),delay);}
 function persistStateLocalOnly(){
-  if(!state.projectId)return;syncCurrentCampaign();const payload={appVersion:'0.16.36-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));touchProject();nativeSyncProject(payload);return payload;
+  if(!state.projectId)return;syncCurrentCampaign();const payload={appVersion:'0.16.37-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));touchProject();nativeSyncProject(payload);return payload;
 }
-window.addEventListener('online',()=>{refreshAccountUi();scheduleCloudSync(800);});window.addEventListener('offline',refreshAccountUi);
+window.addEventListener('online',()=>{refreshAccountUi();cloudRefreshProjectCatalog().catch(()=>{});scheduleCloudSync(800);});window.addEventListener('offline',refreshAccountUi);
 
 const SECTION_PALETTE_KEY='geocauce-section-palette-v1';
 const DEFAULT_SECTION_COLORS=[
@@ -506,8 +570,8 @@ function renderProjectHome(){
   [...projectCatalog].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).forEach(p=>{
     const st=projectStats(p.id),card=document.createElement('article');card.className='project-card'+(p.id===active?' active':'');
     const where=[p.torrent,p.zone].filter(Boolean).join(' · ')||'Zona sin especificar';
-    const desc=p.objective||p.notes||'Sin descripción del estudio.';
-    card.innerHTML=`<div class="project-card-head">${iconImg('icons/proyecto.png')}<div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(where)}</p></div></div>
+    const desc=p.objective||p.notes||'Sin descripción del estudio.',cloudTag=p._cloudOnly?' · ☁ nube':'';
+    card.innerHTML=`<div class="project-card-head">${iconImg('icons/proyecto.png')}<div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(where)}${cloudTag}</p></div></div>
       <div class="project-card-meta"><span><b>${st.campaigns}</b> campañas</span><span><b>${st.elements}</b> elementos</span><span>Autor: <b>${escapeHtml(p.author||'—')}</b></span><span>CRS: <b>${escapeHtml(p.crs||'EPSG:25831')}</b></span></div>
       <div class="project-card-desc">${escapeHtml(desc)}</div>
       <div class="project-card-actions"><button class="open-project icon-text">${iconImg('icons/proyecto.png')}<span>Abrir</span></button><button class="edit-project icon-text">${iconImg('icons/editar_propiedad.png')}<span>Información</span></button><button class="delete-project icon-only" title="Eliminar proyecto">${iconImg('icons/eliminar.svg')}</button></div>`;
@@ -556,7 +620,9 @@ async function openProject(id,opt={}){
   if(state.view3d?.active)exit3DMode({quiet:true});
   const p=projectById(id);if(!p)return;if(state.projectId&&!opt.skipSave)persistState();
   if(dbp){try{const old=await dbp;old.close();}catch{}dbp=null;dbpName=null;}
-  state.projectId=id;state.project=p;localStorage.setItem(ACTIVE_PROJECT_KEY,id);restoreState(id);state.rasters=[];
+  state.projectId=id;state.project=p;localStorage.setItem(ACTIVE_PROJECT_KEY,id);
+  const needsCloudRestore=!localStorage.getItem(projectStateKey(id))||p._cloudOnly===true;if(needsCloudRestore&&loadCloudSession()?.access_token&&navigator.onLine)await restoreProjectFromCloud(id,{manual:true});
+  restoreState(id);state.rasters=[];
   hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';
   updateProjectUi();scheduleCloudSync(1200);renderMaterials();updateMaterialButton();updateCampaignUi();$('#eraserSize').value=state.eraseSize;$$('[data-erase-mode]').forEach(b=>b.classList.toggle('active',b.dataset.eraseMode===state.eraseMode));setTool(state.tool,{quiet:true});renderSectionList();updateCompass();updateGnssUi();setTimeout(resize,20);await loadRasters();await hydrateReferenceLayersAfterOpen();touchProject();
 }
@@ -2918,14 +2984,14 @@ async function exportProjectPackage(){
   const rr=rasters.map(r=>{const x={...r};delete x.blob;delete x.sourceBlob;return{...x,blobAsset:addAsset(r.blob,r.name+'.preview'),sourceAsset:addAsset(r.sourceBlob,r.name)};});
   const pp=photos.map(r=>{const x={...r};delete x.blob;return{...x,blobAsset:addAsset(r.blob,r.name)};});
   const vv=vectorLayers.map(r=>{const x={...r};delete x.features;delete x.renderBlob;const geom=new Blob([JSON.stringify(r.features||[])],{type:'application/json'});return{...x,featuresAsset:addAsset(geom,(r.name||r.id)+'.geometry.json'),renderAsset:addAsset(r.renderBlob,(r.name||r.id)+'.vector.png')};});
-  const header={format:'GeoCaucePackage',containerVersion:1,appVersion:'0.16.36',exportedAt:Date.now(),project:cloneAny(state.project),state:sv,sectionPalette:cloneAny(sectionPalette),rasters:rr,photos:pp,vectorLayers:vv,assets:assets.map(a=>({name:a.name,type:a.type,size:a.size}))};
+  const header={format:'GeoCaucePackage',containerVersion:1,appVersion:'0.16.37',exportedAt:Date.now(),project:cloneAny(state.project),state:sv,sectionPalette:cloneAny(sectionPalette),rasters:rr,photos:pp,vectorLayers:vv,assets:assets.map(a=>({name:a.name,type:a.type,size:a.size}))};
   const enc=new TextEncoder(),magic=enc.encode(PACKAGE_MAGIC),hb=enc.encode(JSON.stringify(header)),len=new ArrayBuffer(4);new DataView(len).setUint32(0,hb.length,true);const parts=[magic,len,hb,...assets.map(a=>a.blob)];
   const blob=new Blob(parts,{type:'application/octet-stream'});downloadBlob(blob,`${safeSlug(state.project?.name)}_${isoToday()}.geocauce`);toast(`Copia creada · ${formatBytes(blob.size)}`,3600);
 }
 function formatBytes(n){if(!Number.isFinite(n))return '—';const u=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++;}return `${n.toFixed(i?1:0)} ${u[i]}`;}
 async function importProjectPackage(file){
   if(!file)return;try{toast('Leyendo proyecto…',1800);const enc=new TextEncoder(),magic=enc.encode(PACKAGE_MAGIC),prefix=new Uint8Array(await file.slice(0,magic.length+4).arrayBuffer());for(let i=0;i<magic.length;i++)if(prefix[i]!==magic[i])throw Error('No es una copia GeoCauce V0.11 válida');const hlen=new DataView(prefix.buffer,prefix.byteOffset+magic.length,4).getUint32(0,true);if(hlen<=0||hlen>20_000_000)throw Error('Cabecera de proyecto inválida');const hstart=magic.length+4,h=JSON.parse(new TextDecoder().decode(await file.slice(hstart,hstart+hlen).arrayBuffer()));if(h.format!=='GeoCaucePackage')throw Error('Formato no reconocido');let offset=hstart+hlen;const assetBlobs=[];for(const a of h.assets||[]){assetBlobs.push(file.slice(offset,offset+a.size,a.type||'application/octet-stream'));offset+=a.size;}
-    if(state.projectId)persistState();const id='P'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),base=h.project||{},name0=base.name||'Proyecto importado',same=projectCatalog.some(p=>p.name===name0),meta={...base,id,name:same?`${name0} (importado)`:name0,createdAt:Date.now(),updatedAt:Date.now(),dbName:`GeoCauceDB_${id}`};projectCatalog.push(meta);saveProjectCatalog();localStorage.setItem(ACTIVE_PROJECT_KEY,id);const sv={...(h.state||{}),appVersion:'0.16.36',projectId:id};localStorage.setItem(projectStateKey(id),JSON.stringify(sv));if(Array.isArray(h.sectionPalette)&&h.sectionPalette.length){sectionPalette=h.sectionPalette;saveSectionPalette();}
+    if(state.projectId)persistState();const id='P'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),base=h.project||{},name0=base.name||'Proyecto importado',same=projectCatalog.some(p=>p.name===name0),meta={...base,id,name:same?`${name0} (importado)`:name0,createdAt:Date.now(),updatedAt:Date.now(),dbName:`GeoCauceDB_${id}`};projectCatalog.push(meta);saveProjectCatalog();localStorage.setItem(ACTIVE_PROJECT_KEY,id);const sv={...(h.state||{}),appVersion:'0.16.37',projectId:id};localStorage.setItem(projectStateKey(id),JSON.stringify(sv));if(Array.isArray(h.sectionPalette)&&h.sectionPalette.length){sectionPalette=h.sectionPalette;saveSectionPalette();}
     if(dbp){try{const d=await dbp;d.close();}catch{}dbp=null;dbpName=null;}state.projectId=id;state.project=meta;
     for(const r of h.rasters||[]){const rec={...r,blob:r.blobAsset!=null?assetBlobs[r.blobAsset]:null,sourceBlob:r.sourceAsset!=null?assetBlobs[r.sourceAsset]:null};delete rec.blobAsset;delete rec.sourceAsset;if(rec.styleCache)rec.styleCache={...rec.styleCache,ready:false,missing:true};if(rec.blob){await dbPut('rasters',rec);nativeSyncRasterMeta(rec);}}
     for(const ph of h.photos||[]){const rec={...ph,blob:ph.blobAsset!=null?assetBlobs[ph.blobAsset]:null};delete rec.blobAsset;if(rec.blob){await dbPut('photos',rec);nativeSyncPhotoMeta(rec);}}
@@ -2966,7 +3032,7 @@ function restoreState(projectId=state.projectId){
 
 function geoJsonGeometry(f){if(f.closed)return{type:'Polygon',coordinates:[[...f.points,f.points[0]].map(p=>[p.x,p.y])]};if(f.type==='watercourse'&&courseFragments(f).length>1)return{type:'MultiLineString',coordinates:courseFragments(f).map(a=>a.map(p=>[p.x,p.y]))};return{type:'LineString',coordinates:(f.points||[]).map(p=>[p.x,p.y])};}
 function exportGeoJSON(){
-  const fc={type:'FeatureCollection',geocauce:{version:'0.16.36',project:state.project?{id:state.project.id,name:state.project.name,zone:state.project.zone,torrent:state.project.torrent,author:state.project.author,institution:state.project.institution,startDate:state.project.startDate,crs:state.project.crs,objective:state.project.objective,methodology:state.project.methodology,notes:state.project.notes}:null,campaign:cloneAny(currentCampaign())},features:state.features.map(f=>({type:'Feature',properties:{id:f.id,type:f.type,material:f.material||null,campaign:state.campaign,created_campaign:f.createdCampaign||null,date:f.date,area_m2:featureArea(f),erased_zones:(f.erasures||[]).length,dem_source:f.sectionProfile?.sourceName||f.longitudinalProfile?.sourceName||null,section_length_m:f.sectionProfile?.length||null,profile_edited:!!f.sectionProfile?.manual?.length},geometry:geoJsonGeometry(f)}))};
+  const fc={type:'FeatureCollection',geocauce:{version:'0.16.37',project:state.project?{id:state.project.id,name:state.project.name,zone:state.project.zone,torrent:state.project.torrent,author:state.project.author,institution:state.project.institution,startDate:state.project.startDate,crs:state.project.crs,objective:state.project.objective,methodology:state.project.methodology,notes:state.project.notes}:null,campaign:cloneAny(currentCampaign())},features:state.features.map(f=>({type:'Feature',properties:{id:f.id,type:f.type,material:f.material||null,campaign:state.campaign,created_campaign:f.createdCampaign||null,date:f.date,area_m2:featureArea(f),erased_zones:(f.erasures||[]).length,dem_source:f.sectionProfile?.sourceName||f.longitudinalProfile?.sourceName||null,section_length_m:f.sectionProfile?.length||null,profile_edited:!!f.sectionProfile?.manual?.length},geometry:geoJsonGeometry(f)}))};
   downloadBlob(new Blob([JSON.stringify(fc,null,2)],{type:'application/geo+json'}),`${safeSlug(state.project?.name)}_${state.campaign}.geojson`);
 }
 async function downloadBlob(blob,name){
