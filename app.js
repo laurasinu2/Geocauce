@@ -2757,8 +2757,12 @@ function saveDemGroup(){const ids=$$('#demGroupMembers input:checked').map(x=>x.
 
 async function loadRasters(){
   const all=await dbAll('rasters');
-  for(const saved of all){try{const rec=await rebuildStoredDemHillshade(saved),image=await createImageBitmap(rec.blob),r={...rec,image};if(r.lightMode==null&&r.meta?.sourceType==='geotiff'&&r.sourceBlob?.size>48*1024*1024)r.lightMode=true;normalizeRasterOrientation(r);state.rasters.push(r);if(rec!==saved||r.meta?.displayNorthUpFix||r.lightMode!==saved.lightMode)await dbPut('rasters',stripRaster(r));}catch(e){console.warn('Raster guardado no legible',saved.name,e);}}
-  normalizeDemGroups();renderLayers();drawAll();
+  if(!all.length){normalizeDemGroups();renderLayers();drawAll();return;}
+  const loaded=new Array(all.length);let cursor=0;
+  const worker=async()=>{while(cursor<all.length){const i=cursor++,saved=all[i];try{const rec=await rebuildStoredDemHillshade(saved),image=await createImageBitmap(rec.blob),r={...rec,image};if(r.lightMode==null&&r.meta?.sourceType==='geotiff'&&r.sourceBlob?.size>48*1024*1024)r.lightMode=true;normalizeRasterOrientation(r);loaded[i]=r;if(rec!==saved||r.meta?.displayNorthUpFix||r.lightMode!==saved.lightMode)await dbPut('rasters',stripRaster(r));}catch(e){console.warn('Raster guardado no legible',saved.name,e);}}};
+  // Dos workers reducen bastante la espera con varias capas sin disparar el pico de RAM en iOS.
+  await Promise.all([worker(),worker()]);
+  state.rasters.push(...loaded.filter(Boolean));normalizeDemGroups();renderLayers();drawAll();
 }
 function renderLayers(){
   syncHistoricalPhotoToggle();renderImportQueue();renderDemGroups();
