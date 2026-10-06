@@ -1,0 +1,1223 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#f2efe6" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="GeoCauce" />
+  <title>GeoCauce · v0.16.36 alpha</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="mobile-pwa.css" />
+</head>
+<body>
+  <div id="app">
+    <section id="splash" class="screen splash-screen">
+      <div class="topo topo-a"></div><div class="topo topo-b"></div>
+      <div class="splash-note note-tr">observar<br>interpretar<br>mapear</div>
+      <div class="splash-note note-bl">rocas<br>cauces<br>territorio<br>historias</div>
+      <div class="brand-wrap">
+        <img class="geocauce-logo geocauce-symbol" src="logo-geocauce.png" alt="GeoCauce">
+        <div class="android-brand-name">Geo<span>Cauce</span></div>
+        <div class="android-brand-subtitle">cartografía geológica de campo</div>
+        <p class="tagline">Del terreno al mapa</p>
+        <button id="enterBtn" class="primary big">Entrar <span>→</span></button>
+        <button id="openCampaignBtn" class="secondary big"><img class="splash-btn-icon" src="icons/proyecto.png" alt=""> &nbsp; Abrir proyecto</button>
+      </div>
+      <div class="landscape-sketch" aria-hidden="true"></div>
+    </section>
+
+    <div id="authModal" class="modal auth-modal hidden" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="auth-card">
+        <button id="authCloseBtn" class="auth-close icon-only" type="button" title="Cerrar"><img src="icons/cerrar.png" alt=""></button>
+        <div class="auth-brand">
+          <img src="logo-geocauce.png" alt="GeoCauce">
+          <div>
+            <h2 id="authTitle">Iniciar sesión</h2>
+            <b>GeoCauce</b>
+            <span class="auth-gold-line"></span>
+          </div>
+        </div>
+        <form id="authForm" class="auth-form">
+          <label><span>Correo</span><div class="auth-input-wrap"><img src="icons/correo.svg" alt=""><input id="authEmail" type="email" autocomplete="email" placeholder="tu.correo@ejemplo.com" required></div></label>
+          <label><span>Contraseña</span><div class="auth-input-wrap"><img src="icons/candado.svg" alt=""><input id="authPassword" type="password" autocomplete="current-password" minlength="6" placeholder="••••••••" required><button id="authTogglePassword" type="button" class="auth-eye icon-only" title="Mostrar contraseña"><img src="icons/ojo.svg" alt=""></button></div></label>
+          <label id="authConfirmWrap" class="hidden"><span>Repite la contraseña</span><div class="auth-input-wrap"><img src="icons/candado.svg" alt=""><input id="authConfirmPassword" type="password" autocomplete="new-password" minlength="6" placeholder="••••••••"></div></label>
+          <p id="authMessage" class="auth-message hidden"></p>
+          <button id="authSubmitBtn" class="primary auth-primary" type="submit">Entrar <span>→</span></button>
+        </form>
+        <div class="auth-divider"><span></span><b>o</b><span></span></div>
+        <button id="authOfflineBtn" class="secondary auth-offline" type="button"><img src="icons/offline.svg" alt=""><span><b>Entrar sin conexión</b><small>Los datos se guardan en este dispositivo</small></span></button>
+        <p class="auth-switch"><span id="authSwitchLead">¿No tienes cuenta?</span> <button id="authSwitchMode" type="button">Crear cuenta</button></p>
+      </div>
+    </div>
+
+    <section id="projectScreen" class="screen project-screen hidden">
+      <header class="project-home-header">
+        <div class="project-home-brand"><img src="logo-geocauce.png" alt=""><div><b>GeoCauce</b><span>Proyectos de campo</span></div></div>
+        <div class="project-home-right">
+          <button id="projectAccountBtn" class="account-chip" type="button">
+            <span class="account-avatar"><img src="icons/cuenta.svg" alt=""></span>
+            <span class="account-chip-copy"><b id="projectAccountName">Sin cuenta</b><small id="projectAccountStatus">Datos en local</small></span>
+          </button>
+          <button id="projectSettingsBtn" class="secondary icon-only" type="button" title="Ajustes (próximamente)"><img src="icons/ajustes.svg" alt=""></button>
+          <button id="projectHomeBack" class="secondary icon-text"><img src="icons/cerrar.png" alt=""><span>Volver</span></button>
+        </div>
+      </header>
+      <main class="project-home-main">
+        <div class="project-home-title">
+          <div><h2>Mis proyectos</h2><p>Cada proyecto mantiene sus propios mapas, campañas, fotografías y cartografía.</p></div>
+          <div class="project-home-actions"><button id="projectHomeImport" class="secondary icon-text"><img src="icons/importar.png" alt=""><span>Importar proyecto</span></button><button id="projectHomeNew" class="primary icon-text"><img src="icons/proyecto.png" alt=""><span>Nuevo proyecto</span></button></div>
+        </div>
+        <div id="projectList" class="project-card-list"></div>
+      </main>
+    </section>
+
+    <section id="projectCreateScreen" class="screen project-create-screen hidden">
+      <header class="project-home-header">
+        <div class="project-home-brand"><img src="logo-geocauce.png" alt=""><div><b id="projectCreateHeader">Nuevo proyecto</b><span id="projectCreateSub">Datos generales del estudio</span></div></div>
+        <div class="project-home-right">
+          <button id="projectCreateAccountBtn" class="account-chip" type="button"><span class="account-avatar"><img src="icons/cuenta.svg" alt=""></span><span class="account-chip-copy"><b id="projectCreateAccountName">Sin cuenta</b><small id="projectCreateAccountStatus">Datos en local</small></span></button>
+          <button id="projectCreateBack" class="secondary icon-text"><img src="icons/cerrar.png" alt=""><span>Volver</span></button>
+        </div>
+      </header>
+      <main class="project-create-main">
+        <form id="projectForm" class="project-form-card project-form-screen">
+          <div class="project-form-body">
+            <label class="project-field wide"><span>Nombre del proyecto *</span><input id="projectName" required maxlength="80" placeholder="p. ej. Torrent de Santa Maria"></label>
+            <div class="project-form-grid">
+              <label class="project-field"><span>Zona</span><input id="projectZone" maxlength="80" placeholder="Montserrat"></label>
+              <label class="project-field"><span>Torrente / sector</span><input id="projectTorrent" maxlength="80" placeholder="Nombre del torrente"></label>
+              <label class="project-field"><span>Autor principal</span><input id="projectAuthor" maxlength="80" placeholder="Nombre y apellidos"></label>
+              <label class="project-field"><span>Institución / equipo</span><input id="projectInstitution" maxlength="100" placeholder="Universidad, grupo, empresa…"></label>
+              <label class="project-field"><span>Fecha de inicio</span><input id="projectStartDate" type="date"></label>
+              <label class="project-field"><span>Sistema de coordenadas</span><select id="projectCrs"><option value="EPSG:25830">ETRS89 / UTM 30N · EPSG:25830</option><option value="EPSG:25831">ETRS89 / UTM 31N · EPSG:25831</option></select></label>
+            </div>
+            <label class="project-field wide"><span>Objetivo del estudio</span><textarea id="projectObjective" rows="2" placeholder="Qué se quiere cartografiar o analizar"></textarea></label>
+            <label class="project-field wide"><span>Metodología / criterios de campo</span><textarea id="projectMethodology" rows="2" placeholder="Criterios, escala aproximada, convenciones…"></textarea></label>
+            <label class="project-field wide"><span>Observaciones generales</span><textarea id="projectNotes" rows="2" placeholder="Notas que deban acompañar todo el proyecto"></textarea></label>
+          </div>
+          <div class="project-form-actions"><button id="projectFormCancel" type="button" class="secondary">Cancelar</button><button type="submit" class="primary"><span id="projectFormSubmitLabel">Crear proyecto</span></button></div>
+        </form>
+      </main>
+    </section>
+
+    <section id="settingsScreen" class="screen settings-screen hidden">
+      <header class="settings-header">
+        <div class="settings-brand"><img src="logo-geocauce.png" alt="GeoCauce"><div><b>GeoCauce</b><span>Configuración</span></div></div>
+        <div class="settings-header-actions">
+          <button id="settingsAccountChip" class="account-chip" type="button"><span class="account-avatar"><img src="icons/cuenta.svg" alt=""></span><span class="account-chip-copy"><b id="settingsAccountName">Sin cuenta</b><small id="settingsAccountStatus">Datos en local</small></span></button>
+          <button id="settingsBackBtn" class="secondary icon-text" type="button"><img src="icons/cerrar.png" alt=""><span>Volver</span></button>
+        </div>
+      </header>
+      <main class="settings-main">
+        <div class="settings-title"><div><h2>Configuración</h2><p>Preferencias de campo, unidades, GNSS, almacenamiento y sincronización.</p></div></div>
+
+        <section class="settings-profile-card">
+          <div class="settings-profile-main"><span class="settings-profile-avatar"><img src="icons/cuenta.svg" alt=""></span><div><h3 id="settingsProfileName">Modo local</h3><p id="settingsProfileEmail">Sin cuenta vinculada</p><p id="settingsProfileInstitution">Los proyectos se guardan en este dispositivo</p></div></div>
+          <div class="settings-profile-actions"><button id="settingsAccountAction" class="secondary icon-text"><img src="icons/cuenta.svg" alt=""><span>Cuenta</span></button><button id="settingsSyncAction" class="secondary icon-text"><img src="icons/sincronizar.svg" alt=""><span>Sincronizar</span></button></div>
+        </section>
+
+        <div class="settings-grid">
+          <section class="settings-card">
+            <header><img src="icons/herramienta.png" alt=""><div><b>Interacción de campo</b><small>Cómo se usa el mapa con lápiz y dedo.</small></div></header>
+            <div class="settings-row"><div><b>Modo de entrada</b><small>En modo lápiz, el dedo solo navega y selecciona.</small></div><select id="settingInputMode"><option value="pen">Lápiz para editar · dedo para navegar</option><option value="finger">Permitir edición con dedo</option></select></div>
+            <div class="settings-row"><div><b>Herramienta persistente</b><small>Mantener depósito, canal, pintar o rellenar activos hasta cambiar de herramienta.</small></div><label class="switch"><input id="settingPersistentTool" type="checkbox" checked><span></span></label></div>
+          </section>
+
+          <section class="settings-card">
+            <header><img src="icons/editar_propiedad.png" alt=""><div><b>Unidades y coordenadas</b><small>Formato de medidas y posición.</small></div></header>
+            <div class="settings-row"><div><b>Longitudes</b><small>Anchuras, profundidades y distancias.</small></div><select id="settingLengthUnit"><option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option><option value="km">km</option></select></div>
+            <div class="settings-row"><div><b>Tamaño de clasto</b><small>Unidad por defecto en fichas.</small></div><select id="settingClastUnit"><option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option></select></div>
+            <div class="settings-row"><div><b>Área</b></div><select id="settingAreaUnit"><option value="m2">m²</option><option value="ha">ha</option><option value="cm2">cm²</option></select></div>
+            <div class="settings-row"><div><b>Volumen</b></div><select id="settingVolumeUnit"><option value="m3">m³</option><option value="cm3">cm³</option></select></div>
+            <div class="settings-row"><div><b>Coordenadas mostradas</b></div><select id="settingCoordMode"><option value="project">CRS del proyecto</option><option value="utm">UTM · CRS del projecte/mapa</option><option value="latlon">Latitud / longitud</option></select></div>
+          </section>
+
+          <section class="settings-card">
+            <header><img src="icons/gps.png" alt=""><div><b>GPS</b><small>Precisión y captura automática.</small></div></header>
+            <div class="settings-row"><div><b>Precisión mínima para capturar punto</b><small>Avisa si la precisión GNSS es peor.</small></div><select id="settingGpsAccuracy"><option value="3">3 m</option><option value="5">5 m</option><option value="10">10 m</option><option value="20">20 m</option><option value="0">Sin límite</option></select></div>
+            <div class="settings-row"><div><b>Guardar rumbo en fotografías</b></div><label class="switch"><input id="settingPhotoHeading" type="checkbox" checked><span></span></label></div>
+            <div class="settings-row"><div><b>Guardar altitud GNSS</b></div><label class="switch"><input id="settingGpsAltitude" type="checkbox" checked><span></span></label></div>
+            <div class="settings-row"><div><b>Mostrar precisión en el mapa</b></div><label class="switch"><input id="settingShowAccuracy" type="checkbox" checked><span></span></label></div>
+          </section>
+
+          <section class="settings-card">
+            <header><img src="icons/libreta.png" alt=""><div><b>Libreta de campo</b><small>Preferencias de las páginas nuevas.</small></div></header>
+            <div class="settings-row"><div><b>Fondo por defecto</b></div><select id="settingNotebookBg"><option value="white">Blanco</option><option value="lines">Líneas</option><option value="grid">Cuadrícula</option><option value="dots">Puntos</option></select></div>
+            <div class="settings-row"><div><b>Guardado automático</b><small>Guardar la tinta mientras trabajas.</small></div><label class="switch"><input id="settingNotebookAutosave" type="checkbox" checked><span></span></label></div>
+          </section>
+
+          <section class="settings-card">
+            <header><img src="icons/rio.png" alt=""><div><b>Cursos y tramos</b><small>Nomenclatura de las fichas longitudinales.</small></div></header>
+            <div class="settings-row"><div><b>Patrón de tramo</b><small>Usa {CURS} para la abreviatura y {N} para el número.</small></div><input id="settingReachPattern" class="settings-text-input" value="{CURS}-{N}" maxlength="40"></div>
+            <div class="settings-row settings-row-stack"><div><b>Códigos de cambio de tramo</b><small>Uno por línea: CODI | Descripción. Puedes dejarlos vacíos y escribir a mano en la ficha.</small></div><textarea id="settingReachCodes" class="settings-textarea" rows="4" placeholder="RUP | Ruptura de pendiente
+CON | Confluencia"></textarea></div>
+          </section>
+
+          <section class="settings-card mobile-ui-settings-card">
+            <header><img src="icons/mapa.png" alt=""><div><b>Interfaz móvil</b><small>Elige cómo se presenta GeoCauce en pantallas pequeñas.</small></div></header>
+            <div class="settings-row"><div><b>Modo de interfaz</b><small>Automático usa la interfaz simplificada en móvil y conserva la completa en tablet/ordenador.</small></div><select id="settingMobileUi"><option value="auto">Automático</option><option value="simple">Simplificada</option><option value="full">Completa</option></select></div>
+          </section>
+
+          <section class="settings-card storage-card">
+            <header><img src="icons/proyecto.png" alt=""><div><b>Almacenamiento local</b><small>Datos disponibles aunque no haya Internet.</small></div></header>
+            <div class="storage-total"><span>Uso estimado</span><b id="settingsLocalTotal">Calculando…</b></div>
+            <div class="storage-bar"><span id="settingsLocalBar"></span></div>
+            <dl class="storage-breakdown"><dt>Mapas</dt><dd id="settingsLocalMaps">—</dd><dt>Fotografías</dt><dd id="settingsLocalPhotos">—</dd><dt>Libreta</dt><dd id="settingsLocalNotebook">—</dd><dt>Campañas y cartografía</dt><dd id="settingsLocalData">—</dd></dl>
+            <div class="settings-inline-actions"><button id="settingsExportBackup" class="secondary icon-text"><img src="icons/guardar.png" alt=""><span>Exportar copia</span></button><button id="settingsImportBackup" class="secondary icon-text"><img src="icons/importar.png" alt=""><span>Importar copia</span></button></div>
+          </section>
+
+          <section class="settings-card storage-card">
+            <header><img src="icons/nube.svg" alt=""><div><b>Almacenamiento en la nube</b><small>Supabase es una copia; SQLite sigue siendo la fuente local.</small></div></header>
+            <div class="storage-total"><span>Estado</span><b id="settingsCloudState">Sin cuenta</b></div>
+            <div class="storage-bar cloud"><span id="settingsCloudBar"></span></div>
+            <dl class="storage-breakdown"><dt>Datos estructurados conocidos</dt><dd id="settingsCloudData">—</dd><dt>Última sincronización</dt><dd id="settingsCloudLastSync">—</dd><dt>Pendiente</dt><dd id="settingsCloudPending">—</dd></dl>
+            <p class="settings-note">Se sincronizan también los metadatos de fotografías y mapas, pero los archivos binarios de fotos y GeoTIFF permanecen locales; su subida al Storage se añadirá aparte.</p>
+            <button id="settingsCloudSyncBtn" class="primary full icon-text"><img src="icons/sincronizar.svg" alt=""><span>Sincronizar ahora</span></button>
+          </section>
+        </div>
+      </main>
+    </section>
+
+    <section id="mapScreen" class="screen map-screen hidden">
+      <canvas id="mapCanvas"></canvas>
+      <canvas id="inkCanvas"></canvas>
+      <canvas id="terrain3dCanvas" class="terrain3d-canvas hidden" aria-label="Vista 3D del terreno"></canvas>
+
+      <div id="emptyMapHint" class="empty-map-hint">
+        <b>GeoCauce</b>
+        <span>Importa un mapa propio desde el botón de capas</span>
+      </div>
+
+      <div class="north-block">
+        <button id="compassBtn" class="compass-btn icon-only" title="Orientación · tocar para Norte arriba">
+          <img id="northIcon" src="icons/norte.png" alt="Norte">
+        </button>
+        <div id="rotationReadout" class="rotation-readout">0°</div>
+        <div id="scaleBar" class="scale-bar"><span></span><b>—</b></div>
+      </div>
+
+      <div class="map-quick-actions">
+        <button id="fitAllBtn" class="map-mini-btn icon-only" title="Ver toda la cartografía"><img src="icons/centrar.png" alt=""></button>
+        <button id="zoomInBtn" class="map-mini-btn icon-only" title="Acercar"><img src="icons/acercar.png" alt=""></button>
+        <button id="zoomOutBtn" class="map-mini-btn icon-only" title="Alejar"><img src="icons/alejar.png" alt=""></button>
+        <button id="locateQuickBtn" class="map-mini-btn icon-only" title="Centrar en mi posición"><img src="icons/mi_posicion.png" alt=""></button>
+        <button id="view3dBtn" class="map-mini-btn icon-only" title="Cambiar entre vista 2D y 3D"><img src="icons/vista3d.png" alt="Vista 3D"></button>
+      </div>
+
+      <div id="terrain3dHud" class="terrain3d-hud hidden">
+        <div class="terrain3d-hud-main">
+          <b>Vista 3D</b>
+          <span id="terrain3dSource">MDT/LiDAR</span>
+          <span class="terrain3d-sep">·</span>
+          <span>Textura: capas visibles</span>
+        </div>
+        <div class="terrain3d-controls">
+          <label>Exageración
+            <select id="terrain3dExaggeration">
+              <option value="1" selected>1× real</option>
+              <option value="1.5">1,5×</option>
+              <option value="2">2×</option>
+              <option value="3">3×</option>
+            </select>
+          </label>
+          <button id="terrain3dRefresh" class="secondary compact" type="button">Actualizar superficie</button>
+          <button id="terrain3dReset" class="secondary compact" type="button">Recentrar</button>
+        </div>
+      </div>
+
+      <button id="projectBtn" class="project-map-btn icon-text" title="Proyecto actual"><img src="icons/proyecto.png" alt=""><span id="projectBtnLabel">Proyecto</span></button>
+
+      <div class="top-right">
+        <button id="searchBtn" class="square-btn text-icon-btn" title="Buscar">⌕</button>
+        <button id="legendBtn" class="square-btn icon-only" title="Leyenda"><img src="icons/material.png" alt=""></button>
+        <button id="campaignBtn" class="pill compact icon-text" title="Campañas"><img src="icons/visita.png" alt=""><span id="campaignBtnLabel">Día 01</span></button>
+        <button id="layersBtn" class="square-btn icon-only" title="Capas"><img src="icons/capas.png" alt=""><span id="layersQueueBadge" class="layers-queue-badge hidden">0</span></button>
+      </div>
+      <div id="gnssBadge" class="gnss-badge hidden">⌖ GNSS</div>
+      <div id="readOnlyBadge" class="readonly-badge hidden">🔒 Día anterior · solo lectura</div>
+
+      <div id="toolMenu" class="floating-menu tool-menu hidden">
+        <button data-action="undo"><img src="icons/deshacer.png" alt=""><span>Deshacer último</span></button>
+        <button data-tool="pan"><img src="icons/mover.png" alt=""><span>Mover mapa</span></button>
+        <button data-tool="mapInk"><img src="icons/editar.png" alt=""><span>Anotar sobre el mapa</span></button>
+        <div class="menu-sep"></div>
+        <button data-tool="boundary"><img src="icons/editar.png" alt=""><span>Dibujar límite</span></button>
+        <button data-tool="editContour"><img src="icons/editar_propiedad.png" alt=""><span>Editar / continuar contorno</span></button>
+        <button data-tool="fill"><img src="icons/rellenar.png" alt=""><span>Rellenar</span></button>
+        <button data-tool="paint"><img src="icons/pintar.png" alt=""><span>Pintar</span></button>
+        <div class="menu-sep"></div>
+        <button data-tool="basin"><img src="icons/mapa.png" alt=""><span>Delimitar conca</span></button>
+        <button data-tool="watercourse"><img src="icons/rio.png" alt=""><span>Curs / canal</span></button>
+        <button data-tool="reach"><img src="icons/etiqueta.png" alt=""><span>Dividir per trams</span></button>
+        <button data-tool="section"><img src="icons/seccion.svg" alt=""><span>Sección</span></button>
+        <button data-tool="photo"><img src="icons/camara.png" alt=""><span>Foto</span></button>
+        <button data-tool="historicalPhoto"><img src="icons/fotos.png" alt=""><span>Punt fotogràfic històric</span></button>
+        <button data-tool="gps"><img src="icons/gps.png" alt=""><span>Punto GPS</span></button>
+        <button data-tool="select"><img src="icons/seleccionar.png" alt=""><span>Seleccionar</span></button>
+        <div class="menu-sep"></div>
+        <button data-tool="erase"><img src="icons/borrador.png" alt=""><span>Borrador</span></button>
+        <div id="toolModeHint" class="tool-option tool-mode-hint">✦ Modo lápiz: la herramienta permanece activa; usa el dedo para navegar.</div>
+      </div>
+
+
+
+      <div id="mapContextMenu" class="map-context-menu hidden" role="menu" aria-label="Accions al punt del mapa">
+        <button type="button" data-map-context-action="photo"><img src="icons/camara.png" alt=""><span>Fer foto</span></button>
+        <button type="button" data-map-context-action="page"><img src="icons/pagina.png" alt=""><span>Nova pàgina vinculada</span></button>
+        <button type="button" data-map-context-action="note"><img src="icons/libreta.png" alt=""><span>Nota ràpida</span></button>
+        <button type="button" data-map-context-action="stop"><img src="icons/gps.png" alt=""><span>Punt de parada</span></button>
+      </div>
+
+      <div id="mapInkPanel" class="map-ink-panel hidden" aria-label="Anotacions del mapa">
+        <div class="map-ink-head"><b>Anotacions</b><button id="mapInkUndo" class="icon-only" type="button" title="Desfer última anotació"><img src="icons/deshacer.png" alt=""></button></div>
+        <div class="map-ink-colors">
+          <button type="button" data-map-ink-color="#d73a49" style="--ink:#d73a49" title="Vermell"></button><button type="button" data-map-ink-color="#1f2b31" style="--ink:#1f2b31" title="Negre"></button><button type="button" data-map-ink-color="#2473a7" style="--ink:#2473a7" title="Blau"></button><button type="button" data-map-ink-color="#2f7d4a" style="--ink:#2f7d4a" title="Verd"></button><button type="button" data-map-ink-color="#d5892f" style="--ink:#d5892f" title="Taronja"></button><button type="button" data-map-ink-color="#7b54a6" style="--ink:#7b54a6" title="Lila"></button>
+          <input id="mapInkColor" type="color" value="#d73a49" title="Color personalitzat">
+        </div>
+        <label class="map-ink-width">Grosor <input id="mapInkWidth" type="range" min="1" max="24" step="1" value="4"></label>
+        <div class="map-ink-actions"><button type="button" data-map-ink-mode="pen" class="active"><img src="icons/editar.png" alt=""> Dibuixar</button><button type="button" data-map-ink-mode="eraser"><img src="icons/borrador.png" alt=""> Goma</button><button id="mapInkClear" type="button" class="danger">Netejar</button></div>
+      </div>
+
+      <div id="eraserMenu" class="eraser-menu hidden">
+        <div class="eraser-title">Borrador</div>
+        <button data-erase-mode="zone" class="active"><img src="icons/borrador.png" alt=""> Borrar zona</button>
+        <button data-erase-mode="feature"><img src="icons/eliminar.svg" alt=""> Borrar elemento</button>
+        <label>Grosor <input id="eraserSize" type="range" min="12" max="90" value="38"></label>
+      </div>
+
+
+
+      <aside id="projectPanel" class="side-panel left-panel project-panel hidden">
+        <header><strong><img class="header-icon" src="icons/proyecto.png" alt=""> Proyecto</strong><button class="panel-close icon-only" data-close="projectPanel"><img src="icons/cerrar.png" alt=""></button></header>
+        <div id="projectSummary" class="project-summary"></div>
+        <div id="nativeAndroidCard" class="native-android-card hidden">
+          <div><b>Android nativo</b><small id="nativeAndroidLabel">SQLite activo</small></div>
+          <div class="native-android-actions"><button id="nativeDbInfoBtn" class="secondary compact">Estado SQLite</button><button id="nativeDbExportBtn" class="secondary compact">Exportar .db</button></div>
+        </div>
+        <button id="settingsFromMapBtn" class="secondary full icon-text"><img src="icons/ajustes.svg" alt=""><span>Configuración</span></button>
+        <button id="editProjectBtn" class="secondary full icon-text"><img src="icons/editar_propiedad.png" alt=""><span>Información del proyecto</span></button>
+        <button id="switchProjectBtn" class="secondary full icon-text"><img src="icons/proyecto.png" alt=""><span>Cambiar de proyecto</span></button>
+        <button id="createProjectFromMapBtn" class="ghost full icon-text"><img src="icons/duplicar.png" alt=""><span>Nuevo proyecto</span></button>
+        <div class="panel-divider"></div>
+        <button id="downloadContentsBtn" class="primary full icon-text"><img src="icons/ficha.png" alt=""><span>Descargar contenidos</span></button>
+        <button id="backupProjectBtn" class="secondary full icon-text"><img src="icons/guardar.png" alt=""><span>Guardar copia completa</span></button>
+        <button id="importProjectBtn" class="ghost full icon-text"><img src="icons/importar.png" alt=""><span>Importar proyecto</span></button>
+      </aside>
+
+      <aside id="campaignPanel" class="side-panel right-panel hidden">
+        <header><strong><img class="header-icon" src="icons/visita.png" alt=""> Campañas</strong><button class="panel-close icon-only" data-close="campaignPanel"><img src="icons/cerrar.png" alt=""></button></header>
+        <p class="panel-help campaign-help">Cada <b>Nuevo día</b> hereda el estado anterior, pero los días anteriores quedan <b>bloqueados e inmutables</b>. GeoCauce guarda solo las diferencias para ahorrar espacio.</p>
+        <div id="campaignList" class="campaign-list"></div>
+        <button id="newDayBtn" class="primary full icon-text"><img src="icons/duplicar.png" alt=""><span>Nuevo día</span></button>
+        <div id="compareBlock" class="compare-block">
+          <label class="compare-toggle"><input id="comparePreviousToggle" type="checkbox"> Mostrar día anterior debajo</label>
+          <label>Opacidad anterior <input id="compareOpacity" type="range" min="0.1" max="0.8" step="0.05" value="0.35"></label>
+        </div>
+      </aside>
+
+      <aside id="materialPanel" class="side-panel right-panel hidden">
+        <header><strong><img class="header-icon" src="icons/material.png" alt=""> Material</strong><button class="panel-close icon-only" data-close="materialPanel"><img src="icons/cerrar.png" alt=""></button></header>
+        <div id="materialList"></div>
+      </aside>
+
+      <aside id="layersPanel" class="side-panel right-panel hidden">
+        <header><strong><img class="header-icon" src="icons/capas.png" alt=""> Mapas y capas</strong><button class="panel-close icon-only" data-close="layersPanel"><img src="icons/cerrar.png" alt=""></button></header>
+        <button id="historicalPhotoToggle" class="secondary full layer-global-btn icon-text active" type="button" aria-pressed="true"><img src="icons/fotos.png" alt=""><span>Punts fotogràfics · visibles</span></button>
+        <button id="fitVisibleBtn" class="secondary full layer-global-btn icon-text"><img src="icons/centrar.png" alt=""> Ver mapas visibles</button>
+        <button id="demGroupsBtn" class="secondary full layer-global-btn icon-text"><img src="icons/mapa.png" alt=""> Mosaics DEM</button>
+        <div id="demGroupsList" class="dem-groups-list"></div>
+        <section id="importQueueSection" class="import-queue-section hidden">
+          <div class="import-queue-head"><div><b>Carregant / pendents</b><small>Els fitxers es processen en cua i no apareixen al mapa fins que premis Carregar.</small></div><button id="loadReadyImportsBtn" class="primary-small" disabled>Carregar preparats</button></div>
+          <div id="importQueueList" class="import-queue-list"></div>
+        </section>
+        <div id="layersList" class="layers-list"></div>
+        <label class="import-btn icon-text"><img src="icons/importar.png" alt=""> Importar mapa
+          <input id="mapFileInput" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.svg,.tif,.tiff,.cog,.pgw,.jgw,.tfw,.wld" hidden>
+        </label>
+        <div class="vector-import-options">
+          <label><span>Nom de la capa</span><input id="vectorImportName" type="text" placeholder="Opcional · usa el nom del SHP"></label>
+          <label><span>Ús de les dades</span><select id="vectorImportRole"><option value="reference">Referència</option><option value="watercourse">Riu / cauce</option><option value="basin">Conca</option><option value="limit">Límit</option><option value="path">Camí / traçat</option><option value="other">Altres…</option></select></label>
+          <label id="vectorCustomRoleLabel"><span>Tipus personalitzat</span><input id="vectorImportCustomRole" class="hidden" type="text" placeholder="Ex. canals històrics"></label>
+          <label for="vectorImportColor"><span>Color de la nova capa SHP / ZIP</span><input id="vectorImportColor" type="color" value="#6b5d82" aria-label="Color de la nova capa vectorial"></label>
+        </div>
+        <label class="import-btn icon-text"><img src="icons/importar.png" alt=""> Importar capa vectorial SHP / ZIP
+          <input id="vectorFileInput" type="file" multiple accept=".zip,.shp,.shx,.dbf,.prj,.cpg,.qmd" hidden>
+        </label>
+        <p class="panel-help"><b>GeoTIFF:</b> define la extensión cartográfica del proyecto. <b>SHP:</b> selecciona un ZIP que contenga .shp + .dbf + .prj + .shx (también puede estar dentro de una carpeta del ZIP), o selecciona los archivos sueltos. Las capas vectoriales son solo de referencia y no cambian el zoom general.</p>
+        <div class="subsection-title"><img src="icons/seccion.svg" alt=""> Secciones</div>
+        <div id="sectionList" class="section-list"></div>
+        <button id="exportGeojsonBtn" class="secondary full icon-text"><img src="icons/guardar.png" alt=""> Exportar GeoJSON</button>
+        <button id="clearProjectBtn" class="ghost full danger icon-text"><img src="icons/eliminar.svg" alt=""> Vaciar datos del proyecto</button>
+      </aside>
+
+      <div id="demGroupModal" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="dem-group-card">
+          <header><div><img src="icons/mapa.png" alt=""><div><b>Mosaic DEM</b><small>Agrupa diversos DEM i tracta'ls com una sola superfície.</small></div></div><button id="demGroupClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+          <label class="dem-group-name">Nom del mosaic <input id="demGroupName" type="text" placeholder="Ex. DEM vall completa"></label>
+          <div id="demGroupMembers" class="dem-group-members"></div>
+          <label class="dem-group-active"><input id="demGroupActive" type="checkbox" checked> Fer aquest mosaic actiu</label>
+          <p class="panel-help">El mosaic és virtual: els fitxers originals no es dupliquen. Perfils, seccions, 3D i extensió de treball consulten automàticament el DEM amb més resolució disponible a cada punt.</p>
+          <footer><button id="demGroupCancel" class="secondary">Cancel·lar</button><button id="demGroupSave" class="primary">Guardar mosaic</button></footer>
+        </div>
+      </div>
+
+      <aside id="searchPanel" class="side-panel left-panel search-panel hidden">
+        <header><strong><span class="panel-symbol">⌕</span> Buscar</strong><button class="panel-close icon-only" data-close="searchPanel"><img src="icons/cerrar.png" alt=""></button></header>
+        <label class="search-box"><input id="searchInput" type="search" placeholder="DEP-042, arena, sección…" autocomplete="off"></label>
+        <div id="searchResults" class="search-results"><p class="muted">Escribe para buscar en la campaña actual.</p></div>
+      </aside>
+
+      <aside id="legendPanel" class="side-panel right-panel legend-panel hidden">
+        <header><strong><img class="header-icon" src="icons/material.png" alt=""> Leyenda</strong><button class="panel-close icon-only" data-close="legendPanel"><img src="icons/cerrar.png" alt=""></button></header>
+        <p class="panel-help">Simbología utilizada en la campaña que estás viendo.</p>
+        <div id="legendList" class="legend-list"></div>
+      </aside>
+
+      <div id="featureCard" class="feature-card feature-card-rich feature-card-universal hidden" role="dialog" aria-label="Elemento seleccionado">
+        <div id="featureCardDragBar" class="feature-card-dragbar" title="Arrossega per moure" aria-label="Arrossega per moure la targeta"><span></span></div>
+        <button id="featureCardClose" class="close-x icon-only" title="Cerrar"><img src="icons/cerrar.png" alt=""></button>
+        <div id="featurePreviewWrap" class="feature-preview-wrap hidden">
+          <img id="featurePreviewImg" alt="Fotografía asociada">
+          <button id="featurePreviewOpen" class="feature-preview-open" type="button" title="Abrir fotografías" aria-label="Abrir fotografías"></button>
+          <span id="featurePhotoCount" class="feature-photo-count hidden">1 foto</span>
+        </div>
+        <div class="feature-card-body">
+          <div class="feature-card-heading-row">
+            <div>
+              <strong id="featureCardTitle">DEP-001</strong>
+              <span id="featureCardType" class="feature-card-type">Depósito</span>
+            </div>
+          </div>
+
+          <div class="feature-card-meta-grid">
+            <div id="featureDateTile" class="feature-meta-tile">
+              <img src="icons/visita.png" alt=""><span><small>Fecha</small><b id="featureCardDate">—</b></span>
+            </div>
+            <div id="featureHeadingTile" class="feature-meta-tile hidden">
+              <img src="icons/brujula.png" alt=""><span><small>Dirección</small><b id="featureCardHeading">—</b></span>
+            </div>
+            <div id="featureGnssTile" class="feature-meta-tile hidden">
+              <img src="icons/gps.png" alt=""><span><small>GNSS</small><b id="featureCardGnss">—</b></span>
+            </div>
+          </div>
+
+          <div class="feature-card-secondary-meta">
+            <div id="featureMeasureTile" class="feature-secondary-item"><img src="icons/mapa.png" alt=""><span><small id="featureMeasureLabel">Medida</small><b id="featureArea">—</b></span></div>
+            <div class="feature-secondary-item"><img src="icons/ficha.png" alt=""><span><small>Campaña</small><b id="featureCampaign">Día 01</b></span></div>
+          </div>
+
+          <button id="openSheetBtn" class="primary feature-primary-action icon-text"><img id="openPrimaryIcon" src="icons/ficha.png" alt=""><span>Abrir</span></button>
+
+          <button id="featureMoreBtn" class="feature-more-toggle" type="button" aria-expanded="false"><span class="feature-more-chevron">⌄</span><span>Más opciones</span></button>
+          <div id="featureMoreMenu" class="feature-secondary-actions hidden">
+            <button id="notesBtn" class="icon-text"><img src="icons/pagina.png" alt=""><span>Nota</span></button>
+            <button id="featurePhotoBtn" class="icon-text"><img src="icons/fotos.png" alt=""><span>Fotos</span></button>
+            <button id="changesBtn" class="icon-text"><img src="icons/cambio.png" alt=""><span>Cambios</span></button>
+            <button id="editContourBtn" class="icon-text"><img src="icons/editar_propiedad.png" alt=""><span>Editar</span></button>
+            <button id="featureStyleBtn" class="icon-text"><img src="icons/material.png" alt=""><span>Estil</span></button>
+            <button id="deleteFeatureBtn" class="danger-action icon-text"><img src="icons/eliminar.svg" alt=""><span>Eliminar</span></button>
+          </div>
+        </div>
+      </div>
+
+      <div id="featureStyleModal" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="feature-style-card">
+          <header><b>Estil de l’element</b><button id="featureStyleClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+          <label>Color <input id="featureStyleColor" type="color" value="#2e78ad"></label>
+          <label>Amplada <input id="featureStyleWidth" type="range" min="0.5" max="14" step="0.5" value="3"><output id="featureStyleWidthOut">3.0 px</output></label>
+          <label>Tipus de traç <select id="featureStyleDash"><option value="solid">Continu</option><option value="dash">Discontinu</option><option value="dot">Puntejat</option><option value="dashdot">Ratlla-punt</option></select></label>
+          <footer><button id="featureStyleReset" class="secondary">Restablir</button><button id="featureStyleSave" class="primary">Guardar</button></footer>
+        </div>
+      </div>
+
+      <div id="vectorStyleModal" class="modal hidden" aria-label="Estil de la capa vectorial">
+        <div class="modal-backdrop"></div>
+        <div class="vector-style-card">
+          <header>
+            <div><img src="icons/material.png" alt=""><span><b>Simbologia de capa</b><small id="vectorStyleSubtitle">Capa vectorial</small></span></div>
+            <button id="vectorStyleClose" class="icon-only" title="Tancar"><img src="icons/cerrar.png" alt=""></button>
+          </header>
+          <div class="vector-style-body">
+            <section class="vector-style-controls">
+              <label class="vector-style-field"><span>Tipus de símbol</span><select id="vectorStyleRenderer"><option value="single">Símbol únic</option></select></label>
+              <div id="vectorStyleGeomInfo" class="vector-style-info">Geometria</div>
+
+              <fieldset id="vectorLineStylePanel" class="vector-style-panel">
+                <legend>Línia / contorn</legend>
+                <div class="vector-style-color-row">
+                  <span>Color</span>
+                  <button id="vectorStrokeColorBtn" class="vector-color-button" type="button"><span class="vector-color-swatch"></span><code>#6B5D82</code></button>
+                </div>
+                <div class="vector-style-grid">
+                  <label>Amplada <span><input id="vectorStrokeWidth" type="number" min="0.1" max="40" step="0.1"><select id="vectorStrokeUnit"><option value="px">px</option><option value="mm">mm</option></select></span></label>
+                  <label>Desplaçament <span><input id="vectorStrokeOffset" type="number" min="-40" max="40" step="0.1"><select id="vectorOffsetUnit"><option value="px">px</option><option value="mm">mm</option></select></span></label>
+                  <label>Estil <select id="vectorStrokeDash"><option value="solid">Línia sòlida</option><option value="dash">Discontínua</option><option value="dot">Puntejada</option><option value="dashdot">Ratlla-punt</option></select></label>
+                  <label>Extrems <select id="vectorLineCap"><option value="round">Arrodonits</option><option value="butt">Plans</option><option value="square">Quadrats</option></select></label>
+                  <label>Unions <select id="vectorLineJoin"><option value="round">Arrodonides</option><option value="bevel">Bisell</option><option value="miter">Mitra</option></select></label>
+                </div>
+              </fieldset>
+
+              <fieldset id="vectorFillStylePanel" class="vector-style-panel hidden">
+                <legend>Relleno</legend>
+                <div class="vector-style-color-row">
+                  <span>Color de relleno</span>
+                  <button id="vectorFillColorBtn" class="vector-color-button" type="button"><span class="vector-color-swatch"></span><code>#6B5D82</code></button>
+                </div>
+                <div class="vector-style-grid">
+                  <label>Estil de relleno <select id="vectorFillStyle"><option value="none">Sense relleno</option><option value="solid">Sòlid</option><option value="diagonal">Ratllat diagonal</option><option value="cross">Trama creuada</option><option value="dots">Punts</option></select></label>
+                  <label>Opacitat relleno <span><input id="vectorFillOpacity" type="range" min="0" max="1" step="0.01"><output id="vectorFillOpacityOut">0%</output></span></label>
+                </div>
+              </fieldset>
+
+              <fieldset id="vectorPointStylePanel" class="vector-style-panel hidden">
+                <legend>Punts</legend>
+                <div class="vector-style-color-row">
+                  <span>Color</span>
+                  <button id="vectorPointColorBtn" class="vector-color-button" type="button"><span class="vector-color-swatch"></span><code>#6B5D82</code></button>
+                </div>
+                <div class="vector-style-grid">
+                  <label>Mida <span><input id="vectorPointSize" type="number" min="1" max="50" step="0.5"><select id="vectorPointUnit"><option value="px">px</option><option value="mm">mm</option></select></span></label>
+                  <label>Forma <select id="vectorPointShape"><option value="circle">Cercle</option><option value="square">Quadrat</option><option value="diamond">Rombe</option><option value="cross">Creu</option></select></label>
+                </div>
+              </fieldset>
+
+              <fieldset class="vector-style-panel">
+                <legend>Capa</legend>
+                <div class="vector-style-grid">
+                  <label>Opacitat global <span><input id="vectorLayerOpacity" type="range" min="0" max="1" step="0.01"><output id="vectorLayerOpacityOut">85%</output></span></label>
+                </div>
+              </fieldset>
+            </section>
+
+            <section class="vector-style-preview-wrap">
+              <b>Previsualització</b>
+              <div class="vector-style-preview-bg"><canvas id="vectorStylePreview" width="560" height="360"></canvas></div>
+              <small class="muted">L’estil només canvia la visualització. La geometria i els atributs del SHP no es modifiquen.</small>
+            </section>
+          </div>
+          <footer><button id="vectorStyleReset" class="secondary" type="button">Restablir</button><span id="vectorStyleStatus" class="muted"></span><button id="vectorStyleCancel" class="secondary" type="button">Cancel·lar</button><button id="vectorStyleSave" class="primary" type="button">Guardar estil</button></footer>
+        </div>
+      </div>
+
+      <div id="vectorColorModal" class="modal hidden" aria-label="Selector avançat de color">
+        <div class="modal-backdrop"></div>
+        <div class="vector-color-card">
+          <header><b>Seleccionar color</b><button id="vectorColorClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+          <div class="vector-color-body">
+            <div class="vector-color-main">
+              <input id="vectorColorNative" type="color" value="#6b5d82" aria-label="Color">
+              <div class="vector-color-current"><span id="vectorColorCurrent"></span><code id="vectorColorHexText">#6B5D82</code></div>
+              <div id="vectorColorPalette" class="vector-color-palette"></div>
+            </div>
+            <div class="vector-color-fields">
+              <label>HTML <input id="vectorColorHex" type="text" value="#6B5D82" maxlength="7"></label>
+              <div class="vector-color-triplet"><label>R <input id="vectorColorR" type="number" min="0" max="255"></label><label>G <input id="vectorColorG" type="number" min="0" max="255"></label><label>B <input id="vectorColorB" type="number" min="0" max="255"></label></div>
+              <label>H <span><input id="vectorColorH" type="range" min="0" max="360" step="1"><output id="vectorColorHOut">0°</output></span></label>
+              <label>S <span><input id="vectorColorS" type="range" min="0" max="100" step="1"><output id="vectorColorSOut">0%</output></span></label>
+              <label>V <span><input id="vectorColorV" type="range" min="0" max="100" step="1"><output id="vectorColorVOut">0%</output></span></label>
+              <label>Opacitat <span><input id="vectorColorOpacity" type="range" min="0" max="100" step="1"><output id="vectorColorOpacityOut">100%</output></span></label>
+            </div>
+          </div>
+          <footer><button id="vectorColorCancel" class="secondary" type="button">Cancel·lar</button><button id="vectorColorApply" class="primary" type="button">Acceptar</button></footer>
+        </div>
+      </div>
+
+      <div id="rasterStyleModal" class="modal hidden" aria-label="Estil del raster">
+        <div class="modal-backdrop"></div>
+        <div class="raster-style-card">
+          <header>
+            <div><img src="icons/material.png" alt=""><span><b>Estil del GeoTIFF / MDT</b><small id="rasterStyleSubtitle">Simbologia del raster</small></span></div>
+            <button id="rasterStyleClose" class="icon-only" title="Tancar"><img src="icons/cerrar.png" alt=""></button>
+          </header>
+
+          <div class="raster-style-body">
+            <section class="raster-style-controls">
+              <div class="raster-style-section raster-style-general">
+                <h3>Representació</h3>
+                <label class="raster-style-field"><span>Renderitzador</span><select id="rasterStyleRenderer"><option value="original">Original</option><option value="rgb">Color multibanda</option><option value="unique">Valors únics</option><option value="gray">Gris monobanda</option><option value="pseudocolor">Pseudocolor monobanda</option></select></label>
+                <div id="rasterStyleBandInfo" class="raster-style-band-info">Banda 1</div>
+                <label class="raster-style-dem"><input id="rasterStyleIsDem" type="checkbox"> Tractar aquesta banda com a MDE/elevació</label>
+              </div>
+
+              <div id="rasterStyleGrayPanel" class="raster-style-section hidden">
+                <h3>Escala de grisos</h3>
+                <div class="raster-style-range"><label>Mínim <input id="rasterStyleGrayMin" type="number" step="any"></label><label>Màxim <input id="rasterStyleGrayMax" type="number" step="any"></label></div>
+              </div>
+
+              <div id="rasterStyleUniquePanel" class="raster-style-section hidden">
+                <h3>Valors únics</h3>
+                <div class="raster-style-ramp-row">
+                  <label>Rampa<select id="rasterStyleUniqueRamp"><option value="spectral">Spectral</option><option value="viridis">Viridis</option><option value="turbo">Turbo</option><option value="cividis">Cividis</option><option value="blues">Blues</option><option value="greens">Greens</option><option value="reds">Reds</option><option value="greys">Greys</option><option value="magma">Magma</option><option value="rocket">Rocket</option><option value="random">Colors variats</option></select></label>
+                  <div id="rasterStyleUniqueRampSwatch" class="raster-ramp-swatch" aria-hidden="true"></div>
+                  <button id="rasterStyleClassify" class="secondary" type="button">Llegir valors</button>
+                </div>
+                <small id="rasterStyleClassStatus" class="muted">Prem “Llegir valors” per detectar les classes.</small>
+                <div class="raster-class-table raster-unique-table"><div class="raster-class-head"><span>Valor</span><span>Color</span><span>Etiqueta</span><span>✓</span></div><div id="rasterStyleClasses"></div></div>
+              </div>
+
+              <div id="rasterStylePseudoPanel" class="raster-style-section hidden">
+                <h3>Pseudocolor</h3>
+                <div class="raster-style-grid-two">
+                  <label>Interpolació<select id="rasterStyleInterpolation"><option value="linear">Lineal</option><option value="discrete">Discreta</option><option value="exact">Exacta</option></select></label>
+                  <label>Rampa<select id="rasterStyleRamp"><option value="spectral">Spectral</option><option value="viridis">Viridis</option><option value="turbo">Turbo</option><option value="cividis">Cividis</option><option value="blues">Blues</option><option value="greens">Greens</option><option value="reds">Reds</option><option value="greys">Greys</option><option value="magma">Magma</option><option value="mako">Mako</option><option value="rocket">Rocket</option><option value="rdgy">RdGy</option></select></label>
+                </div>
+                <div class="raster-style-ramp-visual"><div id="rasterStyleRampSwatch" class="raster-ramp-swatch"></div><label class="raster-style-check"><input id="rasterStyleInvert" type="checkbox"> Invertir</label></div>
+                <div class="raster-style-range"><label>Mínim <input id="rasterStyleMin" type="number" step="any"></label><label>Màxim <input id="rasterStyleMax" type="number" step="any"></label></div>
+
+                <div class="raster-classify-toolbar">
+                  <label>Mode<select id="rasterStyleClassMode"><option value="continuous">Continu</option><option value="equal">Interval igual</option><option value="quantile">Quantil</option></select></label>
+                  <label>Classes<input id="rasterStyleClassCount" type="number" min="2" max="32" step="1" value="5"></label>
+                  <label>Precisió<input id="rasterStylePrecision" type="number" min="0" max="8" step="1" value="4"></label>
+                  <button id="rasterStylePseudoClassify" class="secondary" type="button">Classificar</button>
+                </div>
+                <small id="rasterStylePseudoStatus" class="muted">Defineix el mode i prem “Classificar”. Els intervals es poden editar després.</small>
+                <div class="raster-break-table">
+                  <div class="raster-break-head"><span>Interval</span><span>Color</span><span>Etiqueta</span><span>✓</span></div>
+                  <div id="rasterStyleBreaks"></div>
+                </div>
+              </div>
+
+              <div id="rasterStyleAdjustPanel" class="raster-style-section hidden">
+                <h3>Ajust visual</h3>
+                <label>Brillantor <input id="rasterStyleBrightness" type="range" min="-100" max="100" step="1" value="0"><output id="rasterStyleBrightnessOut">0</output></label>
+                <label>Contrast <input id="rasterStyleContrast" type="range" min="-100" max="100" step="1" value="0"><output id="rasterStyleContrastOut">0</output></label>
+                <label>Gamma <input id="rasterStyleGamma" type="range" min="0.2" max="3" step="0.05" value="1"><output id="rasterStyleGammaOut">1.00</output></label>
+                <label>Saturació <input id="rasterStyleSaturation" type="range" min="-100" max="100" step="1" value="0"><output id="rasterStyleSaturationOut">0</output></label>
+              </div>
+            </section>
+
+            <section class="raster-style-preview-wrap">
+              <div class="raster-style-preview-title"><b>Previsualització</b><small>La rampa i els intervals s’apliquen aquí en directe.</small></div>
+              <div class="raster-style-preview-bg"><canvas id="rasterStylePreview" width="560" height="430"></canvas></div>
+              <small id="rasterStylePreviewInfo" class="muted">El render final es genera una sola vegada en guardar.</small>
+              <p class="raster-style-note">En guardar, GeoCauce pre-renderitza <b>tots els píxels</b> en teseles. Després el mapa només carrega la imatge ja preparada; el GeoTIFF original queda intacte per als càlculs.</p>
+            </section>
+          </div>
+          <footer><button id="rasterStyleReset" class="secondary" type="button">Restablir estil</button><span id="rasterStyleSaveStatus" class="muted"></span><button id="rasterStyleCancel" class="secondary" type="button">Cancel·lar</button><button id="rasterStyleSave" class="primary" type="button">Guardar i generar mapa</button></footer>
+        </div>
+      </div>
+
+      <button id="notebookBtn" class="notebook-fab icon-only" title="Libreta de campo"><img src="icons/libreta.png" alt="Libreta"></button>
+      <button id="profileSheetFab" class="profile-sheet-fab icon-text hidden" title="Fitxa longitudinal del curs actiu"><img src="icons/ficha.png" alt="Fitxa"><span id="profileSheetFabLabel">Fitxa</span></button>
+
+      <div class="bottom-bar">
+        <button id="toolBtn" class="pill icon-text"><img src="icons/herramienta.png" alt=""><span>Herramienta</span></button>
+        <button id="activeToolBtn" class="pill icon-text"><img id="activeToolIcon" src="icons/mover.png" alt=""><span>Mover</span></button>
+        <button id="materialBtn" class="pill icon-text"><img src="icons/material.png" alt=""><span>Material</span></button>
+      </div>
+
+      <input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
+
+      <div id="importProgress" class="import-progress hidden">
+        <div class="import-progress-card">
+          <b id="importProgressTitle">Importando mapa…</b>
+          <div class="progress-track"><span id="importProgressBar"></span></div>
+          <small id="importProgressText">Preparando…</small>
+        </div>
+      </div>
+    </section>
+
+
+    <div id="newDayModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <form id="newDayForm" class="new-day-card">
+        <div class="project-form-head"><div><img src="icons/visita.png" alt=""><span><b>Nueva campaña</b><small>El día anterior quedará bloqueado e intacto</small></span></div><button id="newDayClose" type="button" class="icon-only"><img src="icons/cerrar.png" alt=""></button></div>
+        <div class="project-form-body">
+          <div class="project-form-grid">
+            <label class="project-field"><span>Fecha</span><input id="newDayDate" type="date" required></label>
+            <label class="project-field"><span>Autor / observador</span><input id="newDayAuthor" maxlength="80"></label>
+            <label class="project-field wide"><span>Situación desde la visita anterior</span><select id="newDayEvent"><option value="none">Sin evento conocido</option><option value="torrentada">Torrentada</option><option value="heavy_rain">Lluvia intensa</option><option value="other">Otro evento</option></select></label>
+          </div>
+          <label class="project-field wide"><span>Observaciones iniciales</span><textarea id="newDayNotes" rows="3" placeholder="Cambios esperados, condiciones del cauce, incidencias…"></textarea></label>
+          <div class="immutable-note">🔒 Al crear la campaña, la versión desde la que partes queda en <b>solo lectura</b>. Nunca se sobrescribe.</div>
+        </div>
+        <div class="project-form-actions"><button id="newDayCancel" type="button" class="secondary">Cancelar</button><button type="submit" class="primary">Crear nueva campaña</button></div>
+      </form>
+    </div>
+
+    <div id="accountModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="account-manage-card">
+        <header><div><span class="account-avatar"><img src="icons/cuenta.svg" alt=""></span><div><b>Cuenta y sincronización</b><small id="accountManageSubtitle">Datos locales</small></div></div><button id="accountManageClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <div id="accountManageBody" class="account-manage-body"></div>
+        <footer><button id="accountManagePrimary" class="primary">Iniciar sesión</button><button id="accountManageSecondary" class="secondary">Crear cuenta</button></footer>
+      </div>
+    </div>
+
+    <div id="sheetModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="notebook-sheet">
+        <div class="sheet-toolbar">
+          <div><button data-sheet-tool="pen" class="active icon-text"><img src="icons/editar.png" alt=""> Lápiz</button><button data-sheet-tool="eraser" class="icon-text"><img src="icons/borrador.png" alt=""> Goma</button><button id="sheetUndo" class="icon-text"><img src="icons/deshacer.png" alt=""> Deshacer</button></div>
+          <button id="sheetClose" class="icon-text"><img src="icons/cerrar.png" alt=""> Cerrar</button>
+        </div>
+        <div id="sheetReadOnlyBanner" class="readonly-modal-banner hidden">🔒 Día anterior · ficha en solo lectura</div>
+        <div class="sheet-header">
+          <b id="sheetId">DEP-001</b><b id="sheetMaterial">MATERIAL</b><span id="sheetDate"></span><span id="sheetCamp">V03</span><span id="sheetArea">—</span>
+        </div>
+        <div id="sheetWritingArea" class="sheet-writing-area ruled">
+          <div class="sheet-template">
+            <div>Anchura:</div><div>____________________________ m</div>
+            <div>Longitud:</div><div>____________________________ m</div>
+            <div>Prof. media:</div><div>____________________________ m</div>
+            <div>Prof. máxima:</div><div>____________________________ m</div>
+            <div>Tamaño dominante:</div><div>________________________________________</div>
+            <div class="wide-label">Descripción:</div><div class="wide-lines">____________________________________________________________<br>____________________________________________________________<br>____________________________________________________________</div>
+            <div class="wide-label">Observaciones:</div><div class="wide-lines">____________________________________________________________<br>____________________________________________________________</div>
+            <div class="photos-label">Fotos:</div><div id="sheetPhotos" class="sheet-photos"></div>
+            <div class="volume-label">Vol. estimado: __________________ m³</div>
+          </div>
+          <canvas id="sheetCanvas"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div id="sectionModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="section-sheet section-sheet-v10 section-fitxa3-sheet">
+        <div class="section-head">
+          <b><img class="header-icon" src="icons/seccion.svg" alt=""> FITXA III · <span id="sectionId">SEC-001</span></b>
+          <div><button id="sectionCodesBtn" class="secondary compact">Codis</button><select id="sectionCampaign" disabled></select><button id="sectionClose" class="icon-text"><img src="icons/cerrar.png" alt=""> Tancar</button></div>
+        </div>
+        <div id="sectionReadOnlyBanner" class="readonly-modal-banner hidden">🔒 Dia anterior · secció en només lectura</div>
+        <div class="section-fitxa-tabs">
+          <button id="sectionPage1Btn" class="secondary active">Esquema</button>
+          <button id="sectionPage2Btn" class="secondary">Taula de camp</button>
+          <button id="sectionPage3Btn" class="secondary">FIC</button>
+        </div>
+        <div class="section-fitxa-scroll">
+          <section class="section-fitxa-page" data-section-fitxa-page="1">
+            <div class="section-fitxa-title">FITXA III- SECCIÓ TRANSVERSAL</div>
+            <table class="section-fitxa-meta">
+              <tr><th>Nom torrent:</th><td id="sectionTorrentName">—</td><th>Nom tram:</th><td id="sectionReachName">—</td></tr>
+              <tr><th>Nom secció:</th><td><input id="sectionNameInput" type="text" maxlength="40"></td><th>Data visita:</th><td><input id="sectionVisitDate" type="date"></td></tr>
+              <tr><th>Fotografia:</th><td colspan="3"><span class="muted">↑ (riu amunt) ↓ (riu avall)</span></td></tr>
+            </table>
+            <div class="section-fitxa-subtitle"><b>Esquema</b> <span>(geometria amb acotacions de pendent, bancs, riu)</span></div>
+            <div class="section-profilebar section-profilebar-compact">
+              <div class="section-dem-status"><b id="sectionDemStatus">Perfil topogràfic</b><span id="sectionDemMeta">Buscant MDE/LiDAR…</span></div>
+              <div class="section-profile-actions section-profile-actions-compact">
+                <label><input id="showDemProfile" type="checkbox" checked> MDE</label>
+                <label><input id="showManualProfile" type="checkbox" checked> Camp</label>
+                <label><input id="showSectionRefs" type="checkbox" checked> Referències</label>
+                <details class="section-more-menu">
+                  <summary title="Més opcions">⋮</summary>
+                  <div class="section-more-popover">
+                    <button id="sectionRebuildProfile" class="secondary icon-text"><img src="icons/centrar.png" alt=""> Recalcular des del MDE</button>
+                    <button id="sectionResetProfile" class="secondary icon-text"><img src="icons/deshacer.png" alt=""> Restablir perfil</button>
+                  </div>
+                </details>
+              </div>
+            </div>
+            <div class="section-scale-bar">
+              <label>Quadrícula
+                <select id="sectionGridSelect"><option value="0">OFF</option><option value="0.5">0,5 m</option><option value="1" selected>1 m</option><option value="2">2 m</option><option value="custom">Personalitzada…</option></select>
+              </label>
+              <label id="sectionGridCustomWrap" class="hidden">Pas <input id="sectionGridCustom" type="number" min="0.05" step="0.05" value="1"> m</label>
+              <label>Escala vertical
+                <select id="sectionVerticalScale"><option value="1" selected>×1</option><option value="2">×2</option><option value="5">×5</option></select>
+              </label>
+              <span id="sectionLengthBadge" class="section-length-badge">Longitud: — m</span>
+              <span id="sectionZoomBadge" class="section-length-badge section-zoom-badge">Vista: —</span>
+              <button id="sectionZoomReset" type="button" class="secondary compact" title="Tornar a veure tota la secció">Vista completa</button>
+            </div>
+            <div id="sectionDrawingArea" class="section-drawing-area section-metric-area">
+              <canvas id="sectionCanvas"></canvas>
+            </div>
+            <div class="section-workbench section-workbench-compact">
+              <div class="section-compact-main">
+                <div class="section-tool-row section-tool-row-compact section-tool-row-wrap">
+                  <button data-section-tool="select" class="section-tool-btn" title="Seleccionar objecte"><span class="tool-glyph">⌖</span><small>Selec.</small></button>
+                  <button data-section-tool="profile" class="section-tool-btn profile-tool" title="Corregir perfil"><img src="icons/seccion.svg" alt=""><small>Perfil</small></button>
+                  <button data-section-tool="pen" class="section-tool-btn active" title="Llapis"><img src="icons/editar.png" alt=""><small>Llapis</small></button>
+                  <button data-section-tool="line" class="section-tool-btn" title="Línia per punts"><span class="tool-glyph">╱</span><small>Línia</small></button>
+                  <button data-section-tool="polygon" class="section-tool-btn" title="Polígon"><span class="tool-glyph">⬡</span><small>Polígon</small></button>
+                  <button data-section-tool="tree" class="section-tool-btn" title="Arbre"><span class="tool-glyph">♧</span><small>Arbre</small></button>
+                  <button data-section-tool="shrub" class="section-tool-btn" title="Arbust"><span class="tool-glyph">♣</span><small>Arbust</small></button>
+                  <button data-section-tool="rockSymbol" class="section-tool-btn" title="Bloc de roca"><span class="tool-glyph">⬣</span><small>Bloc</small></button>
+                  <button data-section-tool="measure" class="section-tool-btn" title="Mesura de distància"><span class="tool-glyph">↔</span><small>Mesura</small></button>
+                  <button data-section-tool="height" class="section-tool-btn" title="Mesura d'alçada"><span class="tool-glyph">↕</span><small>Alçada</small></button>
+                  <button data-section-tool="zone" class="section-tool-btn" title="Delimitar una zona sobre el perfil"><span class="tool-glyph">⌜⌟</span><small>Zona</small></button>
+                  <button data-section-tool="paint" class="section-tool-btn" title="Pintar"><img src="icons/pintar.png" alt=""><small>Pintar</small></button>
+                  <button data-section-tool="fill" class="section-tool-btn" title="Omplir"><img src="icons/rellenar.png" alt=""><small>Omplir</small></button>
+                  <button data-section-tool="eraser" class="section-tool-btn" title="Goma"><img src="icons/borrador.png" alt=""><small>Goma</small></button>
+                </div>
+                <div class="section-geometry-options">
+                  <button id="sectionStraightToggle" class="secondary compact active" type="button" title="Segments rectes">Segments rectes</button>
+                  <label>Polígon <select id="sectionGeoClass"><option value="none">Sense classe</option><option value="rock">Roca</option><option value="colluvium">Col·luvi</option><option value="alluvium">Al·luvi</option></select></label>
+                  <label id="sectionZoneSelectorWrap" class="hidden">Zona <select id="sectionZoneClass"><option value="leftSlope">Pendent esquerra</option><option value="leftBank">Banc esquerra</option><option value="channel" selected>Canal</option><option value="rightBank">Banc dret</option><option value="rightSlope">Pendent dreta</option><option value="custom">Personalitzada…</option></select></label>
+                  <input id="sectionZoneCustom" class="section-zone-custom hidden" type="text" maxlength="40" placeholder="Nom de la zona">
+                  <button id="sectionFinishObject" class="primary compact hidden" type="button">Fet</button>
+                  <button id="sectionCancelObject" class="secondary compact hidden" type="button">Cancel·lar</button>
+                  <button id="sectionDeleteObject" class="danger compact hidden icon-text" type="button"><img src="icons/eliminar.svg" alt=""> Eliminar seleccionat</button>
+                  <span class="section-snap-legend">Imant actiu · el cercle indica on s’enganxarà</span>
+                </div>
+                <div class="section-compact-selectors">
+                  <button id="sectionMaterialToggle" class="section-selector-btn" type="button" title="Seleccionar trama"><span id="sectionActivePattern" class="section-pattern-swatch pattern-none"></span><span id="sectionActiveMaterial">Sin trama</span><span>▾</span></button>
+                  <button id="sectionColorToggle" class="section-selector-btn" type="button" title="Seleccionar color"><span id="sectionActiveColor" class="section-active-color"></span><span id="sectionActiveColorName">Negre</span><span>▾</span></button>
+                  <label class="section-opacity-label section-opacity-compact">Opac. <input id="sectionFillOpacity" type="range" min="0.15" max="0.9" step="0.05" value="0.45"></label>
+                  <button id="sectionMeasuresBtn" class="section-selector-btn section-measures-btn" type="button"><img src="icons/ficha.png" alt=""> <span>Mesures i notes</span></button>
+                </div>
+              </div>
+              <div id="sectionMaterialPopover" class="section-compact-popover section-material-popover hidden">
+                <b>Trama / material</b>
+                <div class="section-material-grid">
+                  <button data-section-material="none" class="section-material-btn active"><span class="section-pattern-swatch pattern-none"></span><small>Sense trama</small></button>
+                  <button data-section-material="sand" class="section-material-btn"><span class="section-pattern-swatch pattern-sand"></span><small>Arena</small></button>
+                  <button data-section-material="pebbles" class="section-material-btn"><span class="section-pattern-swatch pattern-pebbles"></span><small>Còdols</small></button>
+                  <button data-section-material="blocks" class="section-material-btn"><span class="section-pattern-swatch pattern-blocks"></span><small>Blocs</small></button>
+                  <button data-section-material="rock" class="section-material-btn"><span class="section-pattern-swatch pattern-rock"></span><small>Roca</small></button>
+                  <button data-section-material="water" class="section-material-btn"><span class="section-pattern-swatch pattern-water"></span><small>Aigua</small></button>
+                </div>
+              </div>
+              <div id="sectionColorPopover" class="section-compact-popover section-color-popover hidden">
+                <div class="section-color-popover-head"><b>Color</b><button id="sectionEditColors" class="secondary compact icon-text"><img src="icons/ajustes.svg" alt=""> Editar</button></div>
+                <div id="sectionColorChips" class="section-color-chips"></div>
+              </div>
+              <div class="section-help-row section-help-row-compact"><span id="sectionToolHint">Llapis fi · escriu i dibuixa amb el color seleccionat.</span></div>
+              <div class="section-footer-summary"><span><b>Longitud:</b> <span id="sectionLengthField">—</span> m</span><span id="sectionMeasureSummary">Sense mesures afegides</span></div>
+            </div>
+            <label class="section-observations-label">Observacions de mesures<textarea id="sectionObservations" rows="3" placeholder="Observacions, fotogrametria/SLAM, incidències…"></textarea></label>
+          </section>
+
+          <section class="section-fitxa-page hidden" data-section-fitxa-page="2">
+            <div class="section-fitxa-title">FITXA III- SECCIÓ TRANSVERSAL</div>
+            <div class="section-fitxa-subtitle section-type-row"><b>Tipus secció ↑ (riu amunt)</b><input id="sectionTypeInput" type="text" maxlength="120" placeholder="ample; moderadament incisiu; incisiu"><span class="muted">(veure Codis)</span></div>
+            <div class="section-table-toolbar">
+              <span class="section-table-toolbar-label">Escriptura:</span>
+              <button id="sectionTablePen" class="secondary compact active icon-text" type="button"><img src="icons/editar.png" alt=""> Llapis</button>
+              <button id="sectionTableEraser" class="secondary compact icon-text" type="button"><img src="icons/borrador.png" alt=""> Goma</button>
+              <button id="sectionTableUndo" class="secondary compact icon-text" type="button"><img src="icons/deshacer.png" alt=""> Desfer</button>
+              <div id="sectionTableQuickColors" class="notebook-quick-colors"></div>
+              <input id="sectionTableInkColor" type="color" value="#1f2b31" title="Paleta completa">
+              <span class="section-table-zoom-tools"><span>Zoom</span><button id="sectionTableZoomOut" class="secondary compact" type="button">−</button><button id="sectionTableZoomReset" class="secondary compact" type="button"><span id="sectionTableZoomLabel">100%</span></button><button id="sectionTableZoomIn" class="secondary compact" type="button">+</button></span>
+            </div>
+            <div class="section-table-zoom-wrap"><div id="sectionFieldTable" class="section-field-table"></div></div>
+            <p class="section-table-help">Escriu directament a les caselles amb l’S Pen. Amb un dit pots desplaçar la fitxa; amb dos dits pots ampliar-la o reduir-la.</p>
+            <p class="section-code-note"><b>Codis certesa:</b> A = observació directa / mesura; B = estimació raonable; C = interpretació / estimada / assumit; D = incert; X = no possible.</p>
+            <div class="section-grain-reference"><b>Referència granulomètrica</b><img src="fitxa3_grain_scale.png" alt="Escala de mida de sediment"></div>
+          </section>
+
+          <section class="section-fitxa-page hidden" data-section-fitxa-page="3">
+            <div class="section-fitxa-title left">FIC (field index Connectivity)</div>
+            <div class="fic-note-toolbar"><span>Notes:</span><button id="ficNotePen" class="secondary active"><img src="icons/editar.png" alt=""> Llapis</button><button id="ficNoteEraser" class="secondary"><img src="icons/borrador.png" alt=""> Goma</button><div id="ficNoteQuickColors" class="notebook-quick-colors"></div><input id="ficNoteColorPicker" type="color" value="#1f2b31" title="Paleta completa"></div>
+            <div id="sectionFicTable" class="reach-sheet-fic-table"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div id="sectionMeasuresModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="section-measures-card">
+        <header><div><img src="icons/ficha.png" alt=""><b>Medidas y notas de la sección</b></div><button id="sectionMeasuresClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <div id="sectionMeasuresReadOnly" class="readonly-modal-banner hidden">🔒 Campaña anterior · solo lectura</div>
+        <div class="section-measure-tools">
+          <button data-measure-tool="pen" class="active icon-text"><img src="icons/editar.png" alt=""> Lápiz</button>
+          <button data-measure-tool="eraser" class="icon-text"><img src="icons/borrador.png" alt=""> Goma</button>
+          <span>Puedes escribir con S Pen o usar el teclado.</span>
+        </div>
+        <div class="section-measures-body">
+          <div class="section-measure-field">
+            <div class="section-measure-field-head"><label for="sectionChannelWidthInput">Anchura del cauce</label><div><input id="sectionChannelWidthInput" type="number" min="0" step="0.01" inputmode="decimal" placeholder="—"><span id="sectionWidthUnit">m</span></div></div>
+            <div class="measure-ink-wrap"><canvas id="sectionWidthInk"></canvas></div>
+            <button type="button" class="measure-clear" data-clear-measure="width">Limpiar escritura</button>
+          </div>
+          <div class="section-measure-field">
+            <div class="section-measure-field-head"><label for="sectionMaxDepthInput">Profundidad máxima</label><div><input id="sectionMaxDepthInput" type="number" min="0" step="0.01" inputmode="decimal" placeholder="—"><span id="sectionDepthUnit">m</span></div></div>
+            <div class="measure-ink-wrap"><canvas id="sectionDepthInk"></canvas></div>
+            <button type="button" class="measure-clear" data-clear-measure="depth">Limpiar escritura</button>
+          </div>
+          <div class="section-measure-field section-measure-note">
+            <div class="section-measure-field-head"><label for="sectionNoteInput">Nota</label></div>
+            <textarea id="sectionNoteInput" rows="2" placeholder="También puedes escribir aquí con teclado"></textarea>
+            <div class="measure-ink-wrap measure-ink-note"><canvas id="sectionNoteInk"></canvas></div>
+            <button type="button" class="measure-clear" data-clear-measure="note">Limpiar escritura</button>
+          </div>
+        </div>
+        <footer><span id="sectionMeasuresHint">La escritura manuscrita se conserva aunque no se transcriba.</span><button id="sectionMeasuresSave" class="primary">Guardar</button></footer>
+      </div>
+    </div>
+
+    <div id="sectionPaletteModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="section-palette-card">
+        <header><div><img src="icons/material.png" alt=""><b>Colores de secciones</b></div><button id="sectionPaletteClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <p>Esta paleta es global: los cambios quedan disponibles en todos los proyectos de GeoCauce.</p>
+        <div id="sectionPaletteRows" class="section-palette-rows"></div>
+        <button id="sectionPaletteAdd" class="secondary full">＋ Añadir color</button>
+        <footer><button id="sectionPaletteReset" class="ghost">Restablecer predeterminados</button><button id="sectionPaletteSave" class="primary">Guardar colores</button></footer>
+      </div>
+    </div>
+
+    <div id="notebookModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="field-notebook">
+        <header class="field-notebook-head">
+          <div><img src="icons/libreta.png" alt=""><b>Libreta de campo</b></div>
+          <span id="notebookPageCount">Página 1 / 1</span>
+          <button id="notebookClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button>
+        </header>
+        <div class="field-notebook-tools">
+          <button data-notebook-tool="pen" class="active icon-text"><img src="icons/editar.png" alt=""> Lápiz</button>
+          <button data-notebook-tool="eraser" class="icon-text"><img src="icons/borrador.png" alt=""> Goma</button>
+          <button id="notebookUndo" class="icon-text"><img src="icons/deshacer.png" alt=""> Deshacer</button>
+          <button id="notebookRedo" class="icon-text">↷ Rehacer</button>
+          <div id="notebookQuickColors" class="notebook-quick-colors" aria-label="Colores rápidos"></div>
+          <button id="notebookFullColorBtn" class="notebook-full-color" title="Elegir cualquier color" aria-label="Elegir cualquier color"><span></span></button>
+          <input id="notebookColorPicker" type="color" class="hidden-color-input" value="#1f2b31" aria-label="Selector de color">
+          <button id="notebookOrientationBtn" class="icon-text notebook-orientation" title="Girar página">↻ <span>Vertical</span></button>
+          <span id="notebookZoomLabel" class="notebook-zoom-label">100%</span>
+          <label class="notebook-bg-label">Fondo: <select id="notebookBg"><option value="white">blanco</option><option value="ruled">líneas</option><option value="grid">cuadrícula</option><option value="dots">puntos</option></select></label>
+        </div>
+        <div id="notebookReadOnly" class="readonly-modal-banner hidden">🔒 Página de una campaña anterior · solo lectura</div>
+        <div id="notebookPageViewport" class="notebook-page-viewport">
+          <div id="notebookPaper" class="notebook-paper bg-white portrait"><canvas id="notebookCanvas"></canvas></div>
+        </div>
+        <div class="notebook-links">
+          <button id="linkPositionBtn" class="icon-text"><img src="icons/gps.png" alt=""> Vincular con posición actual</button>
+          <button id="linkFeatureBtn" class="icon-text"><img src="icons/pagina.png" alt=""> Vincular con elemento seleccionado</button>
+          <span id="notebookLinkSummary"></span>
+        </div>
+        <footer class="field-notebook-foot">
+          <div class="page-nav"><button id="pagePrev">‹</button><span id="pageChips"></span><button id="pageNext">›</button></div>
+          <div class="page-actions"><button id="newNotebookPage" class="icon-text">＋ Nueva página</button><button id="duplicateNotebookPage" class="icon-text"><img src="icons/duplicar.png" alt=""> Duplicar</button><button id="deleteNotebookPage" class="icon-only danger-action"><img src="icons/eliminar.svg" alt=""></button></div>
+        </footer>
+      </div>
+    </div>
+
+    <div id="linkPagesModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="link-pages-card">
+        <header><b id="linkPagesTitle">Vincular páginas</b><button id="linkPagesClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <p>Selecciona una o varias páginas de la libreta.</p>
+        <div id="linkPagesList"></div>
+        <footer><button id="linkPagesCancel" class="secondary">Cancelar</button><button id="linkPagesApply" class="primary">Vincular</button></footer>
+      </div>
+    </div>
+
+    <div id="courseModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <form id="courseForm" class="hydro-form-card">
+        <header><div><img src="icons/rio.png" alt=""><div><b>Nou curs d’aigua</b><small>Defineix el curs abans de guardar el primer traç.</small></div></div><button id="courseModalClose" type="button" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <div class="hydro-form-grid">
+          <label><span>Nom del curs</span><input id="courseName" required placeholder="Torrent Sant Jeroni"></label>
+          <label><span>Abreviatura</span><input id="courseAbbr" required maxlength="12" placeholder="TSJ"></label>
+          <label><span>Tipus</span><select id="courseKind"><option value="main">Curs principal</option><option value="tributary">Afluent</option><option value="secondary">Canal secundari</option><option value="preferential">Flux preferent</option></select></label>
+          <label><span>Conca</span><select id="courseBasin"></select></label>
+          <label class="wide"><span>Ordre inicial dels trams</span><select id="courseDirection"><option value="entry">Sentit d’entrada (ordre de creació)</option><option value="draw">En el sentit del traçat</option><option value="reverse">En sentit contrari al traçat</option></select></label>
+        </div>
+        <footer><button id="courseModalCancel" type="button" class="secondary">Cancelar</button><button type="submit" class="primary">Crear curs</button></footer>
+      </form>
+    </div>
+
+
+    <div id="courseJoinModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="course-join-card">
+        <header><div><img src="icons/rio.png" alt=""><div><b id="courseJoinTitle">Nou traç de curs d’aigua</b><small id="courseJoinDistance"></small></div></div><button id="courseJoinClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <p>Què vols fer amb aquest nou traç?</p>
+        <div class="course-join-options">
+          <button id="courseJoinConnect" class="course-join-option"><b>1 · Lligar-lo ara al mateix curs</b><span>GeoCauce ajustarà l’extrem més proper. Si el traç omple un buit entre dos fragments, pot lligar els dos extrems.</span></button>
+          <button id="courseJoinSame" class="course-join-option"><b>2 · Mateix curs, però deixar-lo separat</b><span>Forma part del mateix riu, però encara no has cartografiat la zona intermèdia.</span></button>
+          <button id="courseJoinNew" class="course-join-option"><b>3 · Crear un altre curs d’aigua</b><span>El traç serà el primer fragment d’un curs nou, amb nom i abreviatura propis.</span></button>
+        </div>
+        <footer><button id="courseJoinCancel" class="secondary">Cancelar</button></footer>
+      </div>
+    </div>
+
+
+    <div id="vectorTraceChoiceModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="course-join-card vector-trace-choice-card">
+        <header><div><img src="icons/rio.png" alt=""><div><b id="vectorTraceChoiceTitle">Nou traç SHP</b><small>Què vols fer amb aquesta nova geometria?</small></div></div></header>
+        <p>Què vols fer amb aquest nou traç?</p>
+        <div class="course-join-options">
+          <button id="vectorTraceConnect" class="course-join-option"><b>1 · Lligar-lo a l’element actual</b><span>Intenta encaixar els extrems amb la geometria que ja has seleccionat.</span></button>
+          <button id="vectorTraceSame" class="course-join-option"><b>2 · Mateix element, fragment separat</b><span>Conserva el nou traç sense inventar cap connexió intermèdia.</span></button>
+          <button id="vectorTraceNew" class="course-join-option"><b>3 · Crear un element nou</b><span>Crea un altre cauce o conca a partir d’aquesta geometria.</span></button>
+          <button id="vectorTracePick" class="course-join-option"><b>4 · Seleccionar-ne un altre del mapa</b><span>Torna al mapa i toca directament una altra geometria visible del SHP.</span></button>
+        </div>
+        <footer><button id="vectorTraceCancel" class="secondary">Cancel·lar</button></footer>
+      </div>
+    </div>
+
+    <div id="reachEditModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="reach-edit-card">
+        <header><div><img src="icons/etiqueta.png" alt=""><div><b id="reachEditTitle">Editar tram</b><small id="reachEditSubtitle">Mou els límits del tram sobre el curs.</small></div></div><button id="reachEditClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <div class="reach-edit-actions">
+          <button id="reachMoveStart" class="course-join-option"><b>Moure límit inicial</b><span>Toca després amb l’S Pen la nova posició sobre el mateix curs.</span></button>
+          <button id="reachMoveEnd" class="course-join-option"><b>Moure límit final</b><span>Si el límit és compartit amb el tram veí, tots dos s’actualitzen exactament al mateix punt.</span></button>
+        </div>
+        <p class="panel-help">Per redefinir un interval complet, usa l’eina <b>Trams</b> i marca un nou inici i final. El nou tram tindrà prioritat sobre els trams existents i els solapaments es retallaran.</p>
+        <footer><button id="reachEditCancel" class="secondary">Cancelar</button></footer>
+      </div>
+    </div>
+
+    <div id="hydroPickerModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="hydro-picker-card">
+        <header><div><img src="icons/rio.png" alt=""><div><b>Seleccionar curs actiu</b><small>Els nous traços i trams s’associaran a aquest curs.</small></div></div><button id="hydroPickerClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <div id="hydroCourseList" class="hydro-course-list"></div>
+        <footer><button id="hydroNewCourseBtn" class="primary">＋ Nou curs</button></footer>
+      </div>
+    </div>
+
+    <div id="profileSheetModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="profile-sheet-card">
+        <header><div><img src="icons/ficha.png" alt=""><div><b>FITXA I · PERFIL LONGITUDINAL</b><small id="profileSheetSubtitle">Curs d’aigua</small></div></div><button id="profileSheetClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <div class="profile-sheet-toolbar">
+          <span>Fitxa de camp · el mapa de conca només es genera a l’exportar.</span>
+          <div class="profile-toolbar-actions">
+            <label>Ordenat: <select id="profileOrderSelect"><option value="entry">sentit d’entrada</option><option value="draw">sentit del traçat</option><option value="reverse">sentit contrari</option></select></label>
+            <button id="courseLongProfileBtn" class="secondary">Perfil MDE</button>
+            <button id="profileSheetCodesBtn" class="secondary">Codis</button>
+            <button id="profileZoomOut" class="secondary" title="Allunyar">−</button><span id="profileZoomLabel" class="profile-zoom-label">100%</span><button id="profileZoomIn" class="secondary" title="Apropar">＋</button>
+            <button id="profileInkPen" class="secondary active">Llapis</button><button id="profileInkEraser" class="secondary">Goma</button>
+          </div>
+        </div>
+        <div id="profileSheetViewport" class="profile-sheet-viewport">
+          <div id="profileSheetDoc" class="profile-sheet-doc">
+            <div class="profile-sheet-title">FITXA I - PERFIL LONGITUDINAL</div>
+            <div class="profile-course-line"><b>Nom torrent:</b> <span id="profileCourseName"></span></div>
+            <table class="profile-table"><colgroup><col class="profile-col-reach"><col class="profile-col-coord"><col class="profile-col-coord"><col class="profile-col-auto"><col class="profile-col-auto"><col class="profile-col-auto"><col class="profile-col-auto"><col class="profile-col-field-slope"><col class="profile-col-code"><col class="profile-col-observations"></colgroup><thead><tr><th rowspan="2">Tram</th><th colspan="2">Coordenades XY<br><small id="profileCrsLabel">ETRS89 UTM 31N</small></th><th rowspan="2" class="profile-auto-head">Longitud<br><small>(m)</small></th><th rowspan="2" class="profile-auto-head">Cota mín<br><small>(m)</small></th><th rowspan="2" class="profile-auto-head">Cota màx<br><small>(m)</small></th><th rowspan="2" class="profile-auto-head">Pendent<br><small>MDE</small></th><th rowspan="2" class="profile-field-slope-head">Pendent<br>camp</th><th colspan="2">Motiu canvi tram</th></tr><tr><th>inicial</th><th>final</th><th class="profile-code-head">Codi</th><th class="profile-observations-head">Observacions</th></tr></thead><tbody id="profileSheetRows"></tbody></table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <div id="courseLongProfileModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="course-long-profile-card">
+        <header><div><img src="icons/seccion.svg" alt=""><div><b>Perfil longitudinal MDE</b><small id="courseLongProfileSubtitle">Curs d’aigua</small></div></div><button id="courseLongProfileClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <div class="course-long-profile-meta"><span id="courseLongProfileStatus">Calculant…</span><button id="courseLongProfileRecalc" class="secondary">Recalcular</button></div>
+        <div class="course-long-profile-tools">
+          <button type="button" data-long-profile-tool="select" title="Seleccionar un objecte o una correcció"><span class="long-profile-tool-glyph">⌖</span><span>Seleccionar</span></button>
+          <button type="button" data-long-profile-tool="profile" class="active" title="Corregir manualment el perfil"><img src="icons/seccion.svg" alt=""><span>Perfil</span></button>
+          <button type="button" data-long-profile-tool="reach" title="Definir trams tocant inici i final sobre el perfil MDE/LiDAR"><img src="icons/etiqueta.png" alt=""><span>Trams</span></button>
+          <button type="button" data-long-profile-tool="tree" title="Afegir arbre"><span class="long-profile-tool-glyph">♧</span><span>Arbre</span></button>
+          <button type="button" data-long-profile-tool="shrub" title="Afegir arbust"><span class="long-profile-tool-glyph">♨</span><span>Arbust</span></button>
+          <button type="button" data-long-profile-tool="rockSymbol" title="Afegir bloc de roca"><span class="long-profile-tool-glyph">⬡</span><span>Bloc</span></button>
+          <button type="button" data-long-profile-tool="vegetation" title="Marcar vegetació"><span class="long-profile-tool-glyph">≋</span><span>Vegetació</span></button>
+          <button type="button" data-long-profile-tool="measure" title="Mesurar una distància"><span class="long-profile-tool-glyph">↔</span><span>Mesura</span></button>
+          <button type="button" data-long-profile-tool="pen" title="Anotar sobre el perfil"><img src="icons/editar.png" alt=""><span>Llapis</span></button>
+          <button type="button" data-long-profile-tool="eraser" title="Esborrar anotacions"><img src="icons/borrador.png" alt=""><span>Goma</span></button>
+          <label class="long-profile-scale">Escala vertical <select id="courseLongProfileScale"><option value="1" selected>×1 real</option><option value="2">×2</option><option value="5">×5</option></select></label>
+          <div id="courseLongProfileColorChips" class="course-long-profile-colors" aria-label="Colors"></div>
+          <button type="button" id="courseLongProfileDelete" class="long-profile-delete hidden" title="Eliminar l’objecte o correcció seleccionada">Eliminar seleccionat</button>
+          <button type="button" id="courseLongProfileReset" class="secondary" title="Eliminar totes les correccions manuals i tornar al MDE">Restablir MDE</button>
+        </div>
+        <div class="course-long-profile-canvas-wrap"><canvas id="courseLongProfileCanvas"></canvas></div>
+        <p class="course-long-profile-note">Cada tram apareix etiquetat al centre entre els seus límits. Amb <b>Perfil</b> pots corregir la línia del MDE amb l’S Pen; amb <b>Trams</b> toca inici i final directament sobre el perfil per definir-los; amb <b>Llapis</b> pots fer anotacions. Els fragments desconnectats mantenen el buit no cartografiat.</p>
+      </div>
+    </div>
+
+    <div id="reachSheetModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="reach-sheet-card">
+        <header><div><img src="icons/ficha.png" alt=""><div><b>FITXA II · PERFIL LONGITUDINAL TRAM</b><small id="reachSheetSubtitle">Tram del curs</small></div></div><button id="reachSheetClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <div class="reach-sheet-toolbar">
+          <span>Fitxa del tram · seccions i fotografies reservades per als següents passos.</span>
+          <div class="reach-sheet-toolbar-actions">
+            <button id="reachSheetPage1Btn" class="secondary active">Esquema</button>
+            <button id="reachSheetPage2Btn" class="secondary">Taula</button>
+            <button id="reachSheetCodesBtn" class="secondary">Codis</button>
+            <button id="reachSheetZoomOut" class="secondary" title="Allunyar">−</button><span id="reachSheetZoomLabel" class="profile-zoom-label">100%</span><button id="reachSheetZoomIn" class="secondary" title="Apropar">＋</button>
+          </div>
+        </div>
+        <div id="reachSheetViewport" class="reach-sheet-viewport">
+          <div id="reachSheetDoc" class="reach-sheet-doc">
+            <section class="reach-sheet-page" data-reach-sheet-page="1">
+              <div class="reach-sheet-page-title">FITXA II- PERFIL LONGITUDINAL TRAM</div>
+              <table class="reach-sheet-top-table">
+                <tr>
+                  <th>Nom torrent:</th><td id="reachSheetTorrentName"></td>
+                  <th>Observador:</th><td><input id="reachSheetObserver" type="text" maxlength="90"></td>
+                </tr>
+                <tr>
+                  <th>Nom tram:</th><td id="reachSheetReachName"></td>
+                  <th>Data visita:</th><td><input id="reachSheetVisitDate" type="date"></td>
+                </tr>
+                <tr>
+                  <th>Nombre de seccions:</th><td class="muted" id="reachSheetSectionsPlaceholder">S1 (inicial), S2 (final), S3 (addicional)</td>
+                  <th>Fotografia:</th><td class="muted" id="reachSheetPhotoPlaceholder">↑ (riu amunt) ↓ (riu avall)</td>
+                </tr>
+              </table>
+              <div class="reach-sheet-scheme-block reach-sheet-profile-editor">
+                <div class="reach-sheet-scheme-head"><b>Perfil longitudinal del tram</b><span>MDT/LiDAR · editable</span></div>
+                <div class="reach-profile-tools">
+                  <button type="button" data-reach-profile-tool="select" class="secondary" title="Seleccionar un objecte o una correcció"><span class="long-profile-tool-glyph">⌖</span><span>Seleccionar</span></button>
+                  <button type="button" id="reachProfileToolProfile" data-reach-profile-tool="profile" class="secondary active"><img src="icons/seccion.svg" alt=""><span>Perfil</span></button>
+                  <button type="button" data-reach-profile-tool="tree" class="secondary" title="Afegir arbre"><span class="long-profile-tool-glyph">♧</span><span>Arbre</span></button>
+                  <button type="button" data-reach-profile-tool="shrub" class="secondary" title="Afegir arbust"><span class="long-profile-tool-glyph">♨</span><span>Arbust</span></button>
+                  <button type="button" data-reach-profile-tool="rockSymbol" class="secondary" title="Afegir bloc de roca"><span class="long-profile-tool-glyph">⬡</span><span>Bloc</span></button>
+                  <button type="button" data-reach-profile-tool="vegetation" class="secondary" title="Marcar vegetació"><span class="long-profile-tool-glyph">≋</span><span>Vegetació</span></button>
+                  <button type="button" data-reach-profile-tool="measure" class="secondary" title="Mesurar"><span class="long-profile-tool-glyph">↔</span><span>Mesura</span></button>
+                  <button type="button" id="reachProfileToolPen" data-reach-profile-tool="pen" class="secondary"><img src="icons/editar.png" alt=""><span>Llapis</span></button>
+                  <button type="button" id="reachProfileToolEraser" data-reach-profile-tool="eraser" class="secondary"><img src="icons/borrador.png" alt=""><span>Goma</span></button>
+                  <label class="long-profile-scale">Escala vertical <select id="reachProfileScale"><option value="1" selected>×1 real</option><option value="2">×2</option><option value="5">×5</option></select></label>
+                  <div id="reachProfileColorChips" class="course-long-profile-colors"></div>
+                  <button type="button" id="reachProfileDelete" class="long-profile-delete hidden">Eliminar seleccionat</button>
+                  <button type="button" id="reachProfileReset" class="secondary">Restablir MDE</button>
+                </div>
+                <canvas id="reachSheetProfileEditCanvas"></canvas>
+              </div>
+            </section>
+            <section class="reach-sheet-page hidden" data-reach-sheet-page="2">
+              <div class="reach-sheet-page-title">FITXA II- PERFIL LONGITUDINAL TRAM</div>
+              <table class="reach-sheet-summary-table reach-sheet-complete-table">
+                <tr><th>Pendent mitjà MDE (º)</th><td colspan="2" id="reachSheetMdeSlope"></td></tr>
+                <tr><th>Pendent a camp (º)</th><td colspan="2"><input id="reachSheetFieldSlope" type="text" maxlength="30"></td></tr>
+                <tr><th>Litologia/Material</th><td colspan="2"><input id="reachSheetLithology" type="text" maxlength="120"></td></tr>
+                <tr><th>Tipus perfil</th><td colspan="2"><input id="reachSheetProfileType" type="text" maxlength="120"></td></tr>
+                <tr><th rowspan="2">Vegetació</th><th class="sub">Cobertura vegetal</th><td><input id="reachSheetVegetationCover" type="text" maxlength="120"></td></tr>
+                <tr><th class="sub">Tipus dominant</th><td><input id="reachSheetVegetationType" type="text" maxlength="120"></td></tr>
+                <tr><th>Elements antròpics</th><td colspan="2"><textarea id="reachSheetAnthropic" rows="10"></textarea></td></tr>
+              </table>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <div id="codesReferenceModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="codes-reference-card">
+        <header><div><img src="icons/ficha.png" alt=""><div><b>Diccionari de codis</b><small>Referència ràpida de camp</small></div></div><button id="codesReferenceClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <div class="codes-reference-body">
+          <section><h3>FITXA I · General</h3><p><b>Motiu de canvi de tram:</b> P = pendent; L = litologia; C = confinament; M = morfologia/material; V = vegetació sí/no; A = afluent; O = obra; X = altres.</p><p><b>Tipus perfil:</b> homogeni, esglaó i piscina.</p></section>
+          <section><h3>FITXA II</h3><p><b>Coberta vegetal:</b> 0 = sòl nu; 1 = &lt;25 %; 2 = 25–50 %; 3 = 50–75 %; 4 = &gt;75 %.</p><p><b>Tipus vegetació:</b> herbàcia; arbustiva; arbòria; mixta.</p><p><b>Material/substrat:</b> roca; sediment consolidat; sediment no consolidat.</p></section>
+          <section><h3>FITXA III</h3><p><b>Evidència erosió:</b> erosió de fons; erosió lateral; socavació local; incisió; retrocés de marge. Intensitat: no visible; molt poc; poc; molt.</p><p><b>Evidència acumulació en superfície:</b> origen pendent de definir (arrossegament superficial, paret…).</p><p><b>Gruix de sediment:</b> categories pendents de definir.</p><p><b>Forma sediment predominant:</b> canto; bretxa; bloc.</p><p><b>Matriu:</b> absent; escassa; moderada; abundant.</p><p><b>Certesa:</b> A = observació directa / mesura; B = estimació raonable; C = interpretació / estimada / assumit; D = incert; X = no possible.</p></section>
+        </div>
+      </div>
+    </div>
+
+    <div id="downloadContentsModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="download-contents-card">
+        <header><div><img src="icons/guardar.png" alt=""><div><b>Descargar contenidos</b><small>Selecciona fitxes i mapes per exportar.</small></div></div><button id="downloadContentsClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <div id="downloadContentsList" class="download-contents-list"></div>
+        <p class="export-note">Cada FITXA I enquadra automàticament el torrent actiu. El mapa general és un fitxer separat: la seva extensió la defineixen els mapes del projecte i mostra els cursos amb els seus noms, sense divisions de trams.</p>
+        <div id="downloadContentsStatus" class="download-export-status hidden" aria-live="polite"></div>
+        <footer><button id="downloadContentsCancel" class="secondary">Cancelar</button><button id="downloadContentsExport" class="primary">Exportar seleccionades</button></footer>
+      </div>
+    </div>
+
+
+    <div id="historicalPhotoModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="historical-photo-card">
+        <header><div><img src="icons/fotos.png" alt=""><div><b id="historicalPhotoTitle">Punt fotogràfic històric</b><small id="historicalPhotoSubtitle"></small></div></div><button id="historicalPhotoClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <div class="historical-photo-stage">
+          <button id="historicalPhotoPrev" class="historical-photo-nav" type="button">‹</button>
+          <img id="historicalPhotoMain" class="hidden" alt="Fotografia històrica">
+          <div id="historicalPhotoEmpty" class="historical-photo-empty"><img src="icons/fotos.png" alt=""><b>Encara no hi ha fotos</b><span>Fes una foto nova o importa una fotografia històrica del dispositiu.</span></div>
+          <button id="historicalPhotoNext" class="historical-photo-nav" type="button">›</button>
+        </div>
+        <div id="historicalPhotoStrip" class="historical-photo-strip"></div>
+        <div id="historicalPhotoMeta" class="historical-photo-meta"></div>
+        <footer class="historical-photo-actions"><button id="historicalPhotoCamera" class="primary icon-text"><img src="icons/camara.png" alt=""><span>Fer foto</span></button><button id="historicalPhotoImport" class="secondary icon-text"><img src="icons/importar.png" alt=""><span>Importar</span></button><button id="historicalPhotoLinkStop" class="secondary magnet-action" type="button"><span class="magnet-glyph">🧲</span><span>Vincular parada</span></button><button id="historicalPhotoDelete" class="ghost danger-action" type="button"><img src="icons/eliminar.svg" alt=""><span>Eliminar punt</span></button></footer>
+      </div>
+    </div>
+    <input id="historicalPhotoCameraInput" type="file" accept="image/*" capture="environment" hidden>
+    <input id="historicalPhotoImportInput" type="file" accept="image/*" hidden>
+
+    <div id="mapStopModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="map-stop-card">
+        <header><div><img src="icons/gps.png" alt=""><div><b id="mapStopTitle">Punt de parada</b><small id="mapStopSubtitle"></small></div></div><button id="mapStopClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <div class="map-stop-body"><span class="map-stop-pin">P</span><p>La parada queda guardada com a punt del mapa. Els punts fotogràfics vinculats es conserven encara que eliminis la parada.</p></div>
+        <footer><button id="mapStopDelete" class="ghost danger-action" type="button"><img src="icons/eliminar.svg" alt=""><span>Eliminar parada</span></button></footer>
+      </div>
+    </div>
+
+    <div id="photoGalleryModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="photo-gallery-card">
+        <header><div><img src="icons/fotos.png" alt=""><b id="photoGalleryTitle">Fotografías</b></div><button id="photoGalleryClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <div id="photoGalleryGrid" class="photo-gallery-grid"></div>
+        <footer><span id="photoGallerySummary" class="muted"></span><button id="addFeaturePhotoBtn" class="primary icon-text"><img src="icons/camara.png" alt=""><span>Hacer / añadir foto</span></button></footer>
+      </div>
+    </div>
+
+    <div id="photoEditorModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="photo-editor-card">
+        <header class="photo-editor-head">
+          <div><img src="icons/fotos.png" alt=""><div><b id="photoEditorTitle">Fotografia</b><small id="photoEditorMeta"></small></div></div>
+          <button id="photoEditorClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button>
+        </header>
+        <div class="field-notebook-tools photo-editor-tools">
+          <button id="photoEditorPen" class="active icon-text"><img src="icons/editar.png" alt=""> Lápiz</button>
+          <button id="photoEditorEraser" class="icon-text"><img src="icons/borrador.png" alt=""> Goma</button>
+          <button id="photoEditorUndo" class="icon-text"><img src="icons/deshacer.png" alt=""> Deshacer</button>
+          <button id="photoEditorRedo" class="icon-text">↷ Rehacer</button>
+          <div id="photoEditorQuickColors" class="notebook-quick-colors" aria-label="Colores rápidos"></div>
+          <button id="photoEditorFullColorBtn" class="notebook-full-color" title="Elegir cualquier color" aria-label="Elegir cualquier color"><span></span></button>
+          <input id="photoEditorColorPicker" type="color" class="hidden-color-input" value="#1f2b31" aria-label="Selector de color">
+          <span id="photoEditorZoomLabel" class="notebook-zoom-label">100%</span>
+        </div>
+        <div id="photoEditorViewport" class="photo-editor-viewport">
+          <div id="photoEditorStage" class="photo-editor-stage">
+            <img id="photoEditorImage" alt="Fotografia">
+            <canvas id="photoEditorCanvas"></canvas>
+          </div>
+        </div>
+        <footer><span class="muted">Dit: moure/zoom · S Pen: anotar</span><button id="photoEditorSave" class="primary">Guardar anotacions</button></footer>
+      </div>
+    </div>
+
+    <div id="gnssPopover" class="gnss-popover hidden">
+      <header><b>GNSS</b><button id="gnssPopoverClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+      <div id="gnssDetails"></div>
+      <button id="gnssRefreshBtn" class="secondary full icon-text"><img src="icons/mi_posicion.png" alt=""><span>Actualizar posición</span></button>
+    </div>
+
+    <input id="projectImportInput" type="file" accept=".geocauce,application/octet-stream" hidden>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <section id="mobileShell" class="mobile-shell hidden" aria-label="GeoCauce móvil">
+      <header class="m-topbar">
+        <div class="m-brand"><img src="logo-geocauce.png" alt="GeoCauce"><div><strong>Geo<span>Cauce</span></strong><small>TERRITORIO · GEOLOGÍA · MEMORIA</small></div></div>
+        <div class="m-top-actions"><button id="mGpsChip" class="m-gps-chip" type="button"><span class="m-nav-arrow">➤</span><span><b>GPS activo</b><small id="mGpsText">Precisión —</small></span><i></i></button><button id="mSettings" class="m-circle-btn" type="button"><img src="icons/ajustes.svg" alt="Ajustes"></button></div>
+      </header>
+      <div class="m-mountain" aria-hidden="true"></div>
+      <main id="mobileContent" class="m-content"></main>
+      <nav class="m-bottom-nav" aria-label="Navegación principal">
+        <button data-m-route="home" class="active"><img src="icons/proyecto.png" alt=""><span>Inicio</span></button>
+        <button data-m-route="map"><img src="icons/mapa.png" alt=""><span>Mapa</span></button>
+        <button data-m-route="new" class="m-nav-add"><span>＋</span><small>Nueva observación</small></button>
+        <button data-m-route="projects"><img src="icons/proyecto.png" alt=""><span>Proyectos</span></button>
+        <button data-m-route="profile"><img src="icons/cuenta.svg" alt=""><span>Perfil</span></button>
+      </nav>
+    </section>
+
+    <div id="mobileMapBar" class="mobile-map-bar hidden">
+      <button id="mMapHome"><img src="icons/proyecto.png" alt=""><span>Inicio</span></button>
+      <button class="active"><img src="icons/mapa.png" alt=""><span>Mapa</span></button>
+      <button id="mMapAdd" class="m-map-add">＋</button>
+      <button id="mMapProjects"><img src="icons/proyecto.png" alt=""><span>Proyectos</span></button>
+      <button id="mMapProfile"><img src="icons/cuenta.svg" alt=""><span>Perfil</span></button>
+    </div>
+
+  </div>
+  <script src="supabase-config.js"></script>
+  <script src="native-adapter.js"></script>
+  <script src="geotiff-lite.js"></script>
+  <script src="app.js"></script>
+  <script src="mobile-pwa.js"></script>
+</body>
+</html>

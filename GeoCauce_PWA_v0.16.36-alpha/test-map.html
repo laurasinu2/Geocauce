@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#f2efe6" />
+  <title>GeoCauce · V0.4.1</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <section id="splash" class="screen splash-screen">
+      <div class="topo topo-a"></div><div class="topo topo-b"></div>
+      <div class="splash-note note-tr">observar<br>interpretar<br>mapear</div>
+      <div class="splash-note note-bl">rocas<br>cauces<br>territorio<br>historias</div>
+      <div class="brand-wrap">
+        <div class="logo-mark" aria-hidden="true">
+          <svg viewBox="0 0 140 120"><path d="M16 90 Q34 54 55 71 Q79 90 94 55 Q106 31 124 24" fill="none" stroke="#385269" stroke-width="10" stroke-linecap="round"/><path d="M13 100 Q45 94 64 103 Q86 111 125 95" fill="none" stroke="#c9ad7d" stroke-width="9" stroke-linecap="round"/><path d="M24 42 L54 17 L83 45 L107 24 L124 47" fill="none" stroke="#53684a" stroke-width="8" stroke-linejoin="round"/><path d="M100 13 l22 12 -32 54 -14 6 2-15z" fill="#d6b27c" stroke="#27302b" stroke-width="4"/></svg>
+        </div>
+        <h1>GeoCauce</h1>
+        <p class="subtitle">cartografía geológica de campo</p>
+        <div class="gold-stroke"></div>
+        <p class="tagline">Del terreno al mapa</p>
+        <button id="enterBtn" class="primary big">Entrar <span>→</span></button>
+        <button id="openCampaignBtn" class="secondary big">▣ &nbsp; Abrir campaña</button>
+      </div>
+      <div class="landscape-sketch" aria-hidden="true"></div>
+    </section>
+
+    <section id="mapScreen" class="screen map-screen hidden">
+      <canvas id="mapCanvas"></canvas>
+      <canvas id="inkCanvas"></canvas>
+
+      <div id="emptyMapHint" class="empty-map-hint">
+        <b>GeoCauce</b>
+        <span>Importa un mapa propio desde el botón de capas</span>
+      </div>
+
+      <div class="north-block">
+        <div class="north-letter">N</div>
+        <div class="north-arrow">△</div>
+        <div id="scaleBar" class="scale-bar"><span></span><b>—</b></div>
+      </div>
+
+      <div class="map-quick-actions">
+        <button id="fitAllBtn" class="map-mini-btn icon-only" title="Ver toda la cartografía"><img src="icons/centrar.png" alt=""></button>
+        <button id="zoomInBtn" class="map-mini-btn icon-only" title="Acercar"><img src="icons/acercar.png" alt=""></button>
+        <button id="zoomOutBtn" class="map-mini-btn icon-only" title="Alejar"><img src="icons/alejar.png" alt=""></button>
+        <button id="locateQuickBtn" class="map-mini-btn icon-only" title="Centrar en mi posición"><img src="icons/mi_posicion.png" alt=""></button>
+      </div>
+
+      <div class="top-right">
+        <select id="campaignSelect" class="pill compact" aria-label="Campaña">
+          <option>V01</option><option>V02</option><option selected>V03</option><option>V04</option><option>V05</option>
+        </select>
+        <button id="layersBtn" class="square-btn icon-only" title="Capas"><img src="icons/capas.png" alt=""></button>
+      </div>
+      <div id="gnssBadge" class="gnss-badge hidden">⌖ GNSS</div>
+
+      <div id="toolMenu" class="floating-menu tool-menu hidden">
+        <button data-action="undo"><img src="icons/deshacer.png" alt=""><span>Deshacer último</span></button>
+        <button data-tool="pan"><img src="icons/mover.png" alt=""><span>Mover mapa</span></button>
+        <div class="menu-sep"></div>
+        <button data-tool="boundary"><img src="icons/editar.png" alt=""><span>Dibujar límite</span></button>
+        <button data-tool="fill"><img src="icons/rellenar.png" alt=""><span>Rellenar</span></button>
+        <button data-tool="paint"><img src="icons/pintar.png" alt=""><span>Pintar</span></button>
+        <div class="menu-sep"></div>
+        <button data-tool="channel"><img src="icons/rio.png" alt=""><span>Canal</span></button>
+        <button data-tool="section"><img src="icons/seccion.svg" alt=""><span>Sección</span></button>
+        <button data-tool="photo"><img src="icons/camara.png" alt=""><span>Foto</span></button>
+        <button data-tool="gps"><img src="icons/gps.png" alt=""><span>Punto GPS</span></button>
+        <button data-tool="select"><img src="icons/seleccionar.png" alt=""><span>Seleccionar</span></button>
+        <div class="menu-sep"></div>
+        <button data-tool="erase"><img src="icons/borrador.png" alt=""><span>Borrador</span></button>
+        <label class="tool-option"><input id="autoPanToggle" type="checkbox" checked> Volver a <b>Mover</b> tras dibujar</label>
+      </div>
+
+      <div id="eraserMenu" class="eraser-menu hidden">
+        <div class="eraser-title">Borrador</div>
+        <button data-erase-mode="zone" class="active"><img src="icons/borrador.png" alt=""> Borrar zona</button>
+        <button data-erase-mode="feature"><img src="icons/eliminar.svg" alt=""> Borrar elemento</button>
+        <label>Grosor <input id="eraserSize" type="range" min="12" max="90" value="38"></label>
+      </div>
+
+      <aside id="materialPanel" class="side-panel right-panel hidden">
+        <header><strong><img class="header-icon" src="icons/material.png" alt=""> Material</strong><button class="panel-close icon-only" data-close="materialPanel"><img src="icons/cerrar.png" alt=""></button></header>
+        <div id="materialList"></div>
+      </aside>
+
+      <aside id="layersPanel" class="side-panel right-panel hidden">
+        <header><strong><img class="header-icon" src="icons/capas.png" alt=""> Mapas y capas</strong><button class="panel-close icon-only" data-close="layersPanel"><img src="icons/cerrar.png" alt=""></button></header>
+        <button id="fitVisibleBtn" class="secondary full layer-global-btn icon-text"><img src="icons/centrar.png" alt=""> Ver mapas visibles</button>
+        <div id="layersList" class="layers-list"></div>
+        <label class="import-btn icon-text"><img src="icons/importar.png" alt=""> Importar mapa
+          <input id="mapFileInput" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.svg,.tif,.tiff,.pgw,.jgw,.tfw,.wld" hidden>
+        </label>
+        <p class="panel-help"><b>GeoTIFF directo:</b> al importar un mapa GeoCauce se centra automáticamente en su extensión. Usa 🎯 para volver a cualquier mapa. CRS de trabajo: EPSG:25831.</p>
+        <div class="subsection-title"><img src="icons/seccion.svg" alt=""> Secciones</div>
+        <div id="sectionList" class="section-list"></div>
+        <button id="exportGeojsonBtn" class="secondary full icon-text"><img src="icons/guardar.png" alt=""> Exportar GeoJSON</button>
+        <button id="clearProjectBtn" class="ghost full danger icon-text"><img src="icons/eliminar.svg" alt=""> Vaciar datos de campaña</button>
+      </aside>
+
+      <div id="featureCard" class="feature-card hidden">
+        <button id="featureCardClose" class="close-x icon-only"><img src="icons/cerrar.png" alt=""></button>
+        <strong id="featureCardTitle">DEP-001 · Arena gruesa</strong>
+        <div class="feature-meta"><span id="featureArea">—</span><span id="featureCampaign">V03</span></div>
+        <div class="card-actions">
+          <button id="openSheetBtn" class="icon-text"><img id="openPrimaryIcon" src="icons/ficha.png" alt=""><span>Ficha</span></button>
+          <button id="featurePhotoBtn" class="icon-text"><img src="icons/fotos.png" alt=""><span>Fotos</span></button>
+          <button id="changesBtn" class="icon-text"><img src="icons/cambio.png" alt=""><span>Cambios</span></button>
+          <button id="deleteFeatureBtn" class="danger-action icon-text"><img src="icons/eliminar.svg" alt=""><span>Eliminar</span></button>
+        </div>
+      </div>
+
+      <div class="bottom-bar">
+        <button id="toolBtn" class="pill icon-text"><img src="icons/herramienta.png" alt=""><span>Herramienta</span></button>
+        <button id="activeToolBtn" class="pill icon-text"><img id="activeToolIcon" src="icons/mover.png" alt=""><span>Mover</span></button>
+        <button id="materialBtn" class="pill icon-text"><img src="icons/material.png" alt=""><span>Material</span></button>
+      </div>
+
+      <input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
+
+      <div id="importProgress" class="import-progress hidden">
+        <div class="import-progress-card">
+          <b id="importProgressTitle">Importando mapa…</b>
+          <div class="progress-track"><span id="importProgressBar"></span></div>
+          <small id="importProgressText">Preparando…</small>
+        </div>
+      </div>
+    </section>
+
+    <div id="sheetModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="notebook-sheet">
+        <div class="sheet-toolbar">
+          <div><button data-sheet-tool="pen" class="active icon-text"><img src="icons/editar.png" alt=""> Lápiz</button><button data-sheet-tool="eraser" class="icon-text"><img src="icons/borrador.png" alt=""> Goma</button><button id="sheetUndo" class="icon-text"><img src="icons/deshacer.png" alt=""> Deshacer</button></div>
+          <button id="sheetClose" class="icon-text"><img src="icons/cerrar.png" alt=""> Cerrar</button>
+        </div>
+        <div class="sheet-header">
+          <b id="sheetId">DEP-001</b><b id="sheetMaterial">MATERIAL</b><span id="sheetDate"></span><span id="sheetCamp">V03</span><span id="sheetArea">—</span>
+        </div>
+        <div id="sheetWritingArea" class="sheet-writing-area ruled">
+          <div class="sheet-template">
+            <div>Anchura:</div><div>____________________________ m</div>
+            <div>Longitud:</div><div>____________________________ m</div>
+            <div>Prof. media:</div><div>____________________________ m</div>
+            <div>Prof. máxima:</div><div>____________________________ m</div>
+            <div>Tamaño dominante:</div><div>________________________________________</div>
+            <div class="wide-label">Descripción:</div><div class="wide-lines">____________________________________________________________<br>____________________________________________________________<br>____________________________________________________________</div>
+            <div class="wide-label">Observaciones:</div><div class="wide-lines">____________________________________________________________<br>____________________________________________________________</div>
+            <div class="photos-label">Fotos:</div><div id="sheetPhotos" class="sheet-photos"></div>
+            <div class="volume-label">Vol. estimado: __________________ m³</div>
+          </div>
+          <canvas id="sheetCanvas"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div id="sectionModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="section-sheet">
+        <div class="section-head">
+          <b><img class="header-icon" src="icons/seccion.svg" alt=""> <span id="sectionId">SEC-001</span></b>
+          <div><select id="sectionCampaign"><option>V01</option><option>V02</option><option selected>V03</option></select><button id="sectionClose" class="icon-text"><img src="icons/cerrar.png" alt=""> Cerrar</button></div>
+        </div>
+        <div class="section-gridbar">Cuadrícula: <button data-grid="off" class="active">OFF</button><button data-grid="1">1 m</button><button data-grid="05">0,5 m</button></div>
+        <div id="sectionDrawingArea" class="section-drawing-area">
+          <canvas id="sectionCanvas"></canvas>
+        </div>
+        <div class="section-bottom">
+          <div class="section-tools">
+            <button data-section-tool="black" class="active">✎<small>Negro</small></button>
+            <button data-section-tool="sand" class="pattern sand">··<small>Arena</small></button>
+            <button data-section-tool="pebbles" class="pattern pebbles">○○<small>Cantos</small></button>
+            <button data-section-tool="blocks" class="pattern blocks">⬡<small>Bloques</small></button>
+            <button data-section-tool="rock" class="pattern rock">/// <small>Roca</small></button>
+            <button data-section-tool="eraser">◇<small>Goma</small></button>
+          </div>
+          <div class="section-fields"><span>Anchura ________ m</span><span>Prof. máx. ________ m</span><span>Nota ______________________________</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+  <script src="geotiff-lite.js"></script>
+  <script src="app.js"></script>
+<script>setTimeout(()=>document.getElementById("enterBtn").click(),150);</script></body>
+</html>
