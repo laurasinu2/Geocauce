@@ -1,6 +1,6 @@
-# GeoCauce PWA móvil · v0.16.38 alpha
+# GeoCauce PWA móvil · v0.16.39 alpha
 
-Esta integración conserva la lógica y configuración de Supabase de GeoCauce v0.16.38 y añade la interfaz móvil/PWA.
+Esta integración conserva la lógica y configuración de Supabase de GeoCauce v0.16.39 y añade la interfaz móvil/PWA.
 
 ## Prueba rápida
 
@@ -14,4 +14,4 @@ En Configuración > Interfaz móvil: Automático, Simplificada o Completa.
 
 ## Nota
 
-La integración no reemplaza `supabase-config.js` ni la lógica cloud de `app.js` de v0.16.38. Los cambios móviles se superponen sobre esa base.
+La integración no reemplaza `supabase-config.js` ni la lógica cloud de `app.js` de v0.16.39. Los cambios móviles se superponen sobre esa base.
