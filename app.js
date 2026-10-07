@@ -207,7 +207,7 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
   try{
     if(manual)toast('Descargando proyecto de Supabase…',1600);
     const rows=await cloudFetch(`/rest/v1/project_snapshots?project_id=eq.${encodeURIComponent(projectId)}&select=*`);const snap=Array.isArray(rows)?rows[0]:null;if(!snap?.state)throw new Error('No hay una copia cloud de este proyecto');
-    const sv={...snap.state,projectId,appVersion:'0.16.37-android-alpha'};localStorage.setItem(projectStateKey(projectId),JSON.stringify(sv));if(Array.isArray(snap.palette)&&snap.palette.length){sectionPalette=snap.palette;saveSectionPalette();}
+    const sv={...snap.state,projectId,appVersion:'0.16.38-android-alpha'};localStorage.setItem(projectStateKey(projectId),JSON.stringify(sv));if(Array.isArray(snap.palette)&&snap.palette.length){sectionPalette=snap.palette;saveSectionPalette();}
     const assets=sv.assetMetadata||{};await dbClear('photos').catch(()=>{});await dbClear('rasters').catch(()=>{});await dbClear('rasterStyleTiles').catch(()=>{});await dbClear('vectorLayers').catch(()=>{});
     for(const ph of assets.photos||[]){const rec={...ph};delete rec.cloudBlobPath;delete rec.cloudBlobType;delete rec.cloudBlobSize;if(ph.cloudBlobPath){try{rec.blob=await cloudDownloadBlob(ph.cloudBlobPath);await dbPut('photos',rec);nativeSyncPhotoMeta(rec);}catch(e){console.warn('Foto cloud',ph.id,e);}}}
     for(const r of assets.rasters||[]){const rec={...r};for(const k of ['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize'])delete rec[k];try{if(r.cloudPreviewPath)rec.blob=await cloudDownloadBlob(r.cloudPreviewPath);if(r.cloudSourcePath)rec.sourceBlob=await cloudDownloadBlob(r.cloudSourcePath);if(rec.styleCache)rec.styleCache={...rec.styleCache,ready:false,missing:true};if(rec.blob||rec.sourceBlob){await dbPut('rasters',rec);nativeSyncRasterMeta(rec);}}catch(e){console.warn('Raster cloud',r.id,e);}}
@@ -345,7 +345,7 @@ async function syncCurrentProjectToCloud({manual=false}={}){
 }
 function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);if(!loadCloudSession()?.access_token||!cloudConfigured())return;cloudSyncTimer=setTimeout(()=>syncCurrentProjectToCloud(),delay);}
 function persistStateLocalOnly(){
-  if(!state.projectId)return;syncCurrentCampaign();const payload={appVersion:'0.16.37-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));touchProject();nativeSyncProject(payload);return payload;
+  if(!state.projectId)return;syncCurrentCampaign();const payload={appVersion:'0.16.38-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));touchProject();nativeSyncProject(payload);return payload;
 }
 window.addEventListener('online',()=>{refreshAccountUi();cloudRefreshProjectCatalog().catch(()=>{});scheduleCloudSync(800);});window.addEventListener('offline',refreshAccountUi);
 
@@ -826,8 +826,8 @@ function releaseRasterHeavyMemory(r,{keepPreview=true}={}){
 function clipCanvasToDemWorkingArea(ctx,raster){
   if(isDemRaster(raster))return true;const polys=demWorkingPolygons();if(!polys.length)return true;const dpr=mapCanvas._dpr||1;ctx.setTransform(1,0,0,1,0,0);ctx.beginPath();let any=false;for(const poly of polys){if(!poly?.length)continue;const pts=poly.map(worldToScreen);ctx.moveTo(pts[0].x*dpr,pts[0].y*dpr);for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x*dpr,pts[i].y*dpr);ctx.closePath();any=true;}if(any)ctx.clip();return any;
 }
-function drawRaster(r) {
-  if(!r.visible || !r.image) return;
+function drawRaster(r,{excludePolygons=null,ignoreVisibility=false,opacityMultiplier=1}={}) {
+  if((!ignoreVisibility&&!r.visible) || !r.image) return;
   const rb=rasterBounds(r),vb=currentViewportWorldBounds();
   if(!boundsOverlap(rb,vb)){if(r._tileCache?.size||r._bufferPromise)releaseRasterHeavyMemory(r);return;}
   const {w,h}=screenSize();
@@ -837,8 +837,13 @@ function drawRaster(r) {
   const mA=s*(c*a.A+sn*a.D), mC=s*(c*a.B+sn*a.E), mE=w/2+s*(c*(a.C-state.view.cx)+sn*(a.F-state.view.cy));
   const mB=s*(sn*a.A-c*a.D), mD=s*(sn*a.B-c*a.E), mF=h/2+s*(sn*(a.C-state.view.cx)-c*(a.F-state.view.cy));
   mapCtx.save();
+  if(excludePolygons?.length){
+    const dpr=mapCanvas._dpr||1;mapCtx.setTransform(1,0,0,1,0,0);mapCtx.beginPath();mapCtx.rect(0,0,w*dpr,h*dpr);
+    for(const poly of excludePolygons){if(!poly?.length)continue;const pts=poly.map(worldToScreen);mapCtx.moveTo(pts[0].x*dpr,pts[0].y*dpr);for(let i=1;i<pts.length;i++)mapCtx.lineTo(pts[i].x*dpr,pts[i].y*dpr);mapCtx.closePath();}
+    try{mapCtx.clip('evenodd');}catch{mapCtx.clip();}
+  }
   clipCanvasToDemWorkingArea(mapCtx,r);
-  mapCtx.globalAlpha=r.opacity;
+  mapCtx.globalAlpha=(Number.isFinite(+r.opacity)?+r.opacity:1)*(Number.isFinite(+opacityMultiplier)?+opacityMultiplier:1);
   // Keep cartographic linework crisp when the preview itself is being enlarged.
   mapCtx.imageSmoothingEnabled=rasterSmoothingEnabled(r,pxScreen);
   if(mapCtx.imageSmoothingEnabled)mapCtx.imageSmoothingQuality='high';
@@ -850,9 +855,32 @@ function drawRaster(r) {
   // GeoTIFF preview is only the overview. When zooming in, overlay source-resolution
   // tiles decoded lazily from the original GeoTIFF so detail is never destroyed.
   if(r.meta?.sourceType==='geotiff'&&r.meta?.downsample>1.02&&performance.now()>=mapMotionUntil){
+    mapCtx.save();
+    if(excludePolygons?.length){
+      const dpr=mapCanvas._dpr||1;mapCtx.setTransform(1,0,0,1,0,0);mapCtx.beginPath();mapCtx.rect(0,0,w*dpr,h*dpr);
+      for(const poly of excludePolygons){if(!poly?.length)continue;const pts=poly.map(worldToScreen);mapCtx.moveTo(pts[0].x*dpr,pts[0].y*dpr);for(let i=1;i<pts.length;i++)mapCtx.lineTo(pts[i].x*dpr,pts[i].y*dpr);mapCtx.closePath();}
+      try{mapCtx.clip('evenodd');}catch{mapCtx.clip();}
+    }
     if(r.styleCache?.ready)drawStyledRasterDetail(r);
     else if(!(r.rasterStyle?.renderer&&r.rasterStyle.renderer!=='original')&&r.sourceBlob&&!r.lightMode)drawGeoTiffDetail(r);
+    mapCtx.restore();applyDpr(mapCtx,mapCanvas);
   }
+}
+function drawDemCombinedGroup(group){
+  if(!group||group.visible===false)return;const ranked=rankedDemGroupRasters(group);if(!ranked.length)return;
+  // Es dibuixa de més gros a més detallat. Abans de dibuixar cada MDT gros,
+  // se'n retalla l'empremta de tots els MDT amb més prioritat, de manera que
+  // no hi ha doble superfície a la zona de solapament.
+  const order=[...ranked].reverse();
+  for(const r of order){const priorityIndex=ranked.indexOf(r),exclude=ranked.slice(0,priorityIndex).map(rasterCorners);drawRaster(r,{excludePolygons:exclude,ignoreVisibility:true,opacityMultiplier:group.opacity??1});}
+}
+function drawRasterStack(){
+  const group=activeDemGroup(),combine=group&&group.combineMode==='priority'&&group.visible!==false,set=combine?new Set(group.rasterIds||[]):null;let groupDrawn=false;
+  for(const r of state.rasters){
+    if(set?.has(r.id)){if(!groupDrawn){drawDemCombinedGroup(group);groupDrawn=true;}continue;}
+    drawRaster(r);
+  }
+  if(combine&&!groupDrawn)drawDemCombinedGroup(group);
 }
 
 function normalizeNorthUpAffine(a,height){
@@ -1355,7 +1383,7 @@ function syncHistoricalPhotoToggle(){const b=$('#historicalPhotoToggle');if(!b)r
 function drawAll(){
   if(!mapCanvas.width)return;
   clearCtx(mapCtx,mapCanvas);
-  if(!state.rasters.length) drawPlaceholder(); else state.rasters.forEach(drawRaster);
+  if(!state.rasters.length) drawPlaceholder(); else drawRasterStack();
   const viewBounds=currentViewBoundsWorld(mapInMotion()?45:90);
   drawReferenceLayers(viewBounds);
   drawVectorExtraction();
@@ -1601,7 +1629,7 @@ function onMapPointerUp(e){
   if(endVectorEndpointDrag(e.pointerId))return;
   if(!state.currentStroke)return;
   const st=state.currentStroke;state.currentStroke=null;clearCtx(inkCtx,inkCanvas);
-  if(st.points.length<2){if(st.tool==='section'){createAutoSectionAtPoint(screenToWorld(st.points[0]));}return;}
+  if(st.points.length<2){if(st.tool==='section')toast('Arrossega la secció sobre el mapa per definir-ne longitud i angle.');return;}
   const worldPts=st.points.filter((_,i)=>i%2===0||i===st.points.length-1).map(screenToWorld);
   let returnToPan=false;
   if(st.tool==='mapInk'){state.mapInk=state.mapInk||[];state.mapInk.push({id:uid('map-ink'),color:state.mapInkColor||'#d73a49',width:Math.max(1,+state.mapInkWidth||4),points:worldPts,createdAt:Date.now()});toast('Anotació guardada');
@@ -1621,8 +1649,11 @@ function onMapPointerUp(e){
   } else if(st.tool==='channel'){
     pushHistory();const f={id:uid('channel'),type:'channel',points:worldPts,closed:false,material:null,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[]};state.features.push(f);state.selectedId=f.id;showFeatureCard(f);toast('Canal guardado');returnToPan=shouldReturnToPan();
   } else if(st.tool==='section'){
-    const a=worldPts[0],b=worldPts[worldPts.length-1];if(Math.hypot(b.x-a.x,b.y-a.y)<.25){createAutoSectionAtPoint(a);return;}
-    const assoc=sectionAssociationFromLine(a,b),fit=fitSectionLineToBasin(a,b,assoc);pushHistory();createSectionFeature(fit.a,fit.b,assoc);return;
+    const a=worldPts[0],b=worldPts[worldPts.length-1];if(Math.hypot(b.x-a.x,b.y-a.y)<.25){toast('Arrossega la secció per definir-ne longitud i angle.');drawAll();return;}
+    // La secció queda exactament com l'ha dibuixat l'usuari. Només s'associa al
+    // tram/cauce que creua o que queda més a prop; ja no s'allarga fins als límits
+    // de la conca ni se'n recalcula automàticament l'angle.
+    const assoc=sectionAssociationFromLine(a,b);pushHistory();createSectionFeature(a,b,assoc);return;
   } else if(st.tool==='erase'&&state.eraseMode==='zone'){
     const pts=worldPts;let changed=false;pushHistory();for(const f of state.features){const hit=pts.some(p=>nearestFeatureToPoint(f,p,state.eraseSize/state.view.scale));if(hit){f.erasures=f.erasures||[];f.erasures.push({points:cloneAny(pts),widthWorld:state.eraseSize/state.view.scale});changed=true;}}if(!changed)state.history.pop();else toast('Zona borrada');
   }
@@ -2205,26 +2236,31 @@ function lonLatToMapCoords(lon,lat,epsg=workingMapEpsg()){
 function isDemRaster(r){return !!(r&&r.meta?.sourceType==='geotiff'&&r.meta?.kind==='dem'&&r.georef&&r.image);}
 function normalizeDemGroups(){
   const ids=new Set(state.rasters.filter(isDemRaster).map(r=>r.id));
-  state.demGroups=(state.demGroups||[]).map(g=>({...g,rasterIds:(g.rasterIds||[]).filter(id=>ids.has(id))})).filter(g=>g.rasterIds.length);
+  state.demGroups=(state.demGroups||[]).map(g=>({...g,combineMode:g.combineMode||'priority',visible:g.visible!==false,opacity:Number.isFinite(+g.opacity)?+g.opacity:1,rasterIds:(g.rasterIds||[]).filter(id=>ids.has(id))})).filter(g=>g.rasterIds.length);
   if(state.activeDemGroupId&&!state.demGroups.some(g=>g.id===state.activeDemGroupId))state.activeDemGroupId=null;
 }
 function activeDemGroup(){normalizeDemGroups();return state.demGroups.find(g=>g.id===state.activeDemGroupId)||null;}
 function demGroupRasters(group=activeDemGroup(),{visibleOnly=false}={}){
   normalizeDemGroups();
-  if(group){const set=new Set(group.rasterIds||[]);return state.rasters.filter(r=>set.has(r.id)&&isDemRaster(r)&&(!visibleOnly||r.visible));}
+  if(group){if(visibleOnly&&group.visible===false)return[];const set=new Set(group.rasterIds||[]);return state.rasters.filter(r=>set.has(r.id)&&isDemRaster(r));}
   let rs=state.rasters.filter(r=>isDemRaster(r)&&(!visibleOnly||r.visible));
   if(!rs.length&&visibleOnly)rs=state.rasters.filter(isDemRaster);
   return rs;
 }
+function demRasterFootprintArea(r){const b=rasterBounds(r);return Math.max(0,(b.maxX-b.minX)*(b.maxY-b.minY));}
+function rankedDemGroupRasters(group=activeDemGroup()){
+  // Prioritat: resolució més fina; en empat, l'MDT de menor extensió (normalment el local).
+  return demGroupRasters(group).slice().sort((a,b)=>(sourceResolution(a)||Infinity)-(sourceResolution(b)||Infinity)||demRasterFootprintArea(a)-demRasterFootprintArea(b));
+}
 function demWorkingBounds({visibleOnly=false}={}){const rs=demGroupRasters(activeDemGroup(),{visibleOnly});return rs.length?combineBounds(rs.map(rasterBounds)):null;}
 function demWorkingPolygons(){return demGroupRasters().map(r=>rasterCorners(r));}
-function demGroupLabel(){const g=activeDemGroup();return g?g.name||'Mosaic DEM':(demGroupRasters().length>1?'DEMs visibles':'DEM');}
+function demGroupLabel(){const g=activeDemGroup();return g?g.name||'MDT combinat':(demGroupRasters().length>1?'DEMs visibles':'DEM');}
 function demGroupResolution(group=activeDemGroup()){const vals=demGroupRasters(group).map(sourceResolution).filter(Number.isFinite);return vals.length?Math.min(...vals):null;}
 function rasterContainsWorldPoint(r,p){const b=rasterBounds(r);return pointInBounds(p,b);}
-function chooseBestDemForPoint(p){return demGroupRasters().filter(r=>rasterContainsWorldPoint(r,p)).sort((a,b)=>(sourceResolution(a)||Infinity)-(sourceResolution(b)||Infinity))[0]||null;}
+function chooseBestDemForPoint(p){return rankedDemGroupRasters().find(r=>rasterContainsWorldPoint(r,p))||null;}
 async function ensureDemRasterSampler(r){if(!r?.sourceBlob)return false;r._bufferPromise=r._bufferPromise||r.sourceBlob.arrayBuffer();const ab=await r._bufferPromise;r._tiffMeta=r._tiffMeta||GeoCauceGeoTIFF.parse(ab);return true;}
 async function sampleDemMosaic(worldPoints,{onProgress=null}={}){
-  const vals=new Array((worldPoints||[]).length).fill(null),groups=new Map(),rasters=demGroupRasters(),ranked=demGroupRasters().map(r=>({r,b:rasterBounds(r),res:sourceResolution(r)||Infinity})).sort((a,b)=>a.res-b.res);
+  const vals=new Array((worldPoints||[]).length).fill(null),groups=new Map(),rasters=demGroupRasters(),ranked=rankedDemGroupRasters().map(r=>({r,b:rasterBounds(r),res:sourceResolution(r)||Infinity}));
   if(!rasters.length)return{values:vals,sourceName:'',resolution:null,rasterIds:[]};
   for(let i=0;i<worldPoints.length;i++){const p=worldPoints[i],r=ranked.find(x=>pointInBounds(p,x.b))?.r;if(!r)continue;if(!groups.has(r.id))groups.set(r.id,{r,idx:[],pix:[]});const g=groups.get(r.id),aff=r.meta?.sourceAffine||r.affine,q=invertAffinePoint(aff,p);if(!q)continue;g.idx.push(i);g.pix.push(q);}
   let done=0,total=[...groups.values()].reduce((n,g)=>n+g.idx.length,0)||1;
@@ -2600,7 +2636,7 @@ function chainExtractSegments(segments,{close=false}={}){const remain=(segments|
 async function startVectorExtraction(layer){if(!requireEditable('crear geometria des d’una capa'))return;if(!vectorConversionAvailable(layer)){toast('Aquesta capa no està definida com a riu/cauce o conca');return;}if(!layer.visible)await setReferenceLayerVisible(layer,true);const ok=await ensureReferenceLayerFeatures(layer);if(!ok){toast('No s’ha pogut carregar la geometria original del SHP');return;}state.vectorExtract={layerId:layer.id,mode:layer.role,segments:[],anchor:null,dragEndpoint:null,selectionMode:layer.role==='watercourse'?'route':'manual',routePoints:[],mapPick:false,pendingMapTrace:null,releaseAfter:!!layer.lightMode};$('#layersPanel').classList.add('hidden');ensureVectorExtractBar();updateVectorExtractBar();drawAll();toast(layer.role==='basin'?'Selecciona línies del contorn de la conca':'Ruta per punts: toca tants punts com vulguis sobre els trams connectats');}
 function cancelVectorExtraction(){const ex=state.vectorExtract,layer=(state.referenceLayers||[]).find(l=>l.id===ex?.layerId);state.vectorExtract=null;document.querySelector('#vectorExtractBar')?.remove();if(layer&&ex?.releaseAfter)releaseReferenceLayerMemory(layer,{geometry:true,render:false});drawAll();}
 function undoVectorExtract(){const ex=state.vectorExtract;if(!ex)return;if(ex.mode==='watercourse'&&ex.selectionMode==='route'){if(ex.segments.length){ex.segments.pop();ex.routePoints?.pop();}else if(ex.routePoints?.length)ex.routePoints.pop();}else if(ex.anchor)ex.anchor=null;else ex.segments.pop();drawAll();updateVectorExtractBar();}
-function finishVectorExtraction(){const ex=state.vectorExtract;if(!ex||!ex.segments.length){toast('Encara no has seleccionat geometria');return;}const layer=(state.referenceLayers||[]).find(l=>l.id===ex.layerId);if(ex.mode==='watercourse'){const chained=ex.selectionMode==='route'?chainExtractSegments(ex.segments,{close:false}):null,frags=chained?[chained]:ex.segments.map(s=>s.points);state.vectorExtract=null;document.querySelector('#vectorExtractBar')?.remove();state.pendingImportedCourseFragments=cloneAny(frags);openCourseModal(frags[0]);if(layer&&ex.releaseAfter)releaseReferenceLayerMemory(layer,{geometry:true,render:false});toast(`Geometria de ${layer?.name||'la capa'} preparada · ${frags.length===1?'curs connectat':'fragments separats'} · defineix el nou curs`);drawAll();return;}
+function finishVectorExtraction(){const ex=state.vectorExtract;if(!ex||!ex.segments.length){toast('Encara no has seleccionat geometria');return;}const layer=(state.referenceLayers||[]).find(l=>l.id===ex.layerId);if(ex.mode==='watercourse'){const chained=ex.selectionMode==='route'?chainExtractSegments(ex.segments,{close:false}):null,frags=chained?[chained]:ex.segments.map(s=>s.points);state.vectorExtract=null;document.querySelector('#vectorExtractBar')?.remove();if(layer&&ex.releaseAfter)releaseReferenceLayerMemory(layer,{geometry:true,render:false});const active=activeCourse();if(active){state.pendingImportedCourseFragments=null;openCourseJoinModal(active,frags[0],{fromVector:true,sourceLayerName:layer?.name||'',importedRemaining:frags.slice(1)});toast(`Geometria de ${layer?.name||'la capa'} preparada · decideix si s’uneix a ${active.abbr||active.name} o crea un curs nou`);}else{state.pendingImportedCourseFragments=cloneAny(frags);openCourseModal(frags[0]);toast(`Geometria de ${layer?.name||'la capa'} preparada · ${frags.length===1?'1 fragment':'fragments separats'} · defineix el nou curs`);}drawAll();return;}
   const chain=chainExtractSegments(ex.segments,{close:true});if(!chain){toast('La conca encara no forma un contorn tancat. Afegeix les línies que falten perquè els extrems encaixin.');return;}const name=(prompt('Nom de la conca',layer?.name||'Conca')||'').trim();if(!name)return;pushHistory();const f={id:nextHydroId('BAS'),type:'basin',name,points:chain,closed:true,filled:false,material:null,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[],source:{type:'referenceLayer',layerId:layer?.id||null,layerName:layer?.name||''}};state.features.push(f);state.selectedId=f.id;state.vectorExtract=null;document.querySelector('#vectorExtractBar')?.remove();if(layer&&ex.releaseAfter)releaseReferenceLayerMemory(layer,{geometry:true,render:false});persistState();showFeatureCard(f);drawAll();toast(`Conca ${name} creada des de la capa importada`);}
 function ensureVectorExtractBar(){let bar=$('#vectorExtractBar');if(bar)return bar;bar=document.createElement('div');bar.id='vectorExtractBar';bar.className='vector-extract-bar';bar.innerHTML='<div><b class="vector-extract-title">Seleccionar geometria</b><small class="vector-extract-status"></small></div><div class="vector-extract-actions"><button type="button" class="secondary vector-mode">Ruta per punts</button><button type="button" class="secondary vector-map-pick">Seleccionar del mapa</button><button type="button" class="secondary vector-whole">Línia completa</button><button type="button" class="secondary vector-undo">Desfer</button><button type="button" class="primary vector-finish">Crear</button><button type="button" class="ghost vector-cancel">Cancel·lar</button></div>';$('#mapScreen').appendChild(bar);bar.querySelector('.vector-mode').onclick=toggleVectorExtractMode;bar.querySelector('.vector-map-pick').onclick=toggleVectorMapPick;bar.querySelector('.vector-whole').onclick=useWholeVectorLine;bar.querySelector('.vector-undo').onclick=undoVectorExtract;bar.querySelector('.vector-finish').onclick=finishVectorExtraction;bar.querySelector('.vector-cancel').onclick=cancelVectorExtraction;return bar;}
 function toggleVectorExtractMode(){const ex=state.vectorExtract;if(!ex||ex.mode!=='watercourse')return;if(ex.segments.length||ex.anchor||ex.routePoints?.length){if(!confirm('Canviar de mode esborrarà la selecció actual. Continuar?'))return;}ex.selectionMode=ex.selectionMode==='route'?'manual':'route';ex.segments=[];ex.anchor=null;ex.routePoints=[];drawAll();updateVectorExtractBar();}
@@ -2744,23 +2780,30 @@ async function rebuildStoredDemHillshade(rec){
 let editingDemGroupId=null;
 function renderDemGroups(){
   normalizeDemGroups();const root=$('#demGroupsList');if(!root)return;root.innerHTML='';
-  const dems=state.rasters.filter(isDemRaster);if(!dems.length){root.innerHTML='<p class="muted compact-note">Importa DEM GeoTIFF per crear un mosaic.</p>';return;}
-  if(!(state.demGroups||[]).length){const p=document.createElement('p');p.className='muted compact-note';p.textContent=dems.length>1?'Pots agrupar els DEM en un mosaic virtual.':'Hi ha un únic DEM; no cal crear mosaic.';root.appendChild(p);return;}
-  for(const g of state.demGroups){const rs=demGroupRasters(g),b=rs.length?combineBounds(rs.map(rasterBounds)):null,res=demGroupResolution(g),row=document.createElement('div');row.className='dem-group-row'+(g.id===state.activeDemGroupId?' active':'');row.innerHTML=`<div class="dem-group-row-top"><b>${escapeHtml(g.name||'Mosaic DEM')}</b><span class="geo-badge">${rs.length} DEM</span></div><small>${Number.isFinite(res)?formatNum(res,2)+' m/píxel · ':''}${g.id===state.activeDemGroupId?'ACTIU · ':''}${b?`${formatNum(b.maxX-b.minX,0)} × ${formatNum(b.maxY-b.minY,0)} m`:''}</small><div class="dem-group-actions"><button class="dem-group-use ${g.id===state.activeDemGroupId?'secondary':'primary-small'}">${g.id===state.activeDemGroupId?'Actiu':'Fer actiu'}</button><button class="dem-group-fit secondary">Veure</button><button class="dem-group-edit secondary">Editar</button><button class="dem-group-delete danger-action">Eliminar grup</button></div>`;
-    row.querySelector('.dem-group-use').onclick=()=>{state.activeDemGroupId=g.id;persistState();renderDemGroups();drawAll();toast(`Mosaic DEM actiu: ${g.name}`);};row.querySelector('.dem-group-fit').onclick=()=>{if(b)fitBounds(b,.9);drawAll();};row.querySelector('.dem-group-edit').onclick=()=>openDemGroupModal(g.id);row.querySelector('.dem-group-delete').onclick=()=>{if(!confirm(`Eliminar el mosaic ${g.name}? Els DEM originals es conservaran.`))return;state.demGroups=state.demGroups.filter(x=>x.id!==g.id);if(state.activeDemGroupId===g.id)state.activeDemGroupId=null;persistState();renderLayers();drawAll();};root.appendChild(row);
+  const dems=state.rasters.filter(isDemRaster);if(!dems.length){root.innerHTML='<p class="muted compact-note">Importa MDT GeoTIFF per crear una combinació.</p>';return;}
+  if(!(state.demGroups||[]).length){const p=document.createElement('p');p.className='muted compact-note';p.textContent=dems.length>1?'Pots combinar els MDT: el de més resolució substitueix el gran allà on se solapen.':'Hi ha un únic MDT; no cal combinar-lo.';root.appendChild(p);return;}
+  for(const g of state.demGroups){const rs=demGroupRasters(g),b=rs.length?combineBounds(rs.map(rasterBounds)):null,res=demGroupResolution(g),row=document.createElement('div');row.className='dem-group-row'+(g.id===state.activeDemGroupId?' active':'');row.innerHTML=`<div class="dem-group-row-top"><b>${escapeHtml(g.name||'MDT combinat')}</b><span class="geo-badge">COMBINAT · ${rs.length} MDT</span></div><small>${Number.isFinite(res)?formatNum(res,2)+' m/píxel mín. · ':''}${g.id===state.activeDemGroupId?'ACTIU · ':''}${b?`${formatNum(b.maxX-b.minX,0)} × ${formatNum(b.maxY-b.minY,0)} m`:''}</small><div class="dem-group-actions"><button class="dem-group-use ${g.id===state.activeDemGroupId?'secondary':'primary-small'}">${g.id===state.activeDemGroupId?'Actiu':'Fer actiu'}</button><button class="dem-group-fit secondary">Veure</button><button class="dem-group-edit secondary">Editar</button><button class="dem-group-delete danger-action">Eliminar combinació</button></div>`;
+    row.querySelector('.dem-group-use').onclick=()=>{state.activeDemGroupId=g.id;persistState();renderDemGroups();drawAll();toast(`MDT combinat actiu: ${g.name}`);};row.querySelector('.dem-group-fit').onclick=()=>{if(b)fitBounds(b,.9);drawAll();};row.querySelector('.dem-group-edit').onclick=()=>openDemGroupModal(g.id);row.querySelector('.dem-group-delete').onclick=()=>{if(!confirm(`Eliminar la combinació ${g.name}? Els MDT originals es conservaran.`))return;state.demGroups=state.demGroups.filter(x=>x.id!==g.id);if(state.activeDemGroupId===g.id)state.activeDemGroupId=null;persistState();renderLayers();drawAll();};root.appendChild(row);
   }
 }
 function openDemGroupModal(groupId=null){
-  normalizeDemGroups();const dems=state.rasters.filter(isDemRaster);if(!dems.length){toast('Importa almenys un DEM GeoTIFF');return;}editingDemGroupId=groupId;const g=state.demGroups.find(x=>x.id===groupId)||null;$('#demGroupName').value=g?.name||`Mosaic DEM ${state.demGroups.length+1}`;$('#demGroupActive').checked=g?g.id===state.activeDemGroupId:true;const selected=new Set(g?.rasterIds||dems.map(r=>r.id)),root=$('#demGroupMembers');root.innerHTML='';for(const r of dems){const b=rasterBounds(r),res=sourceResolution(r),lab=document.createElement('label');lab.className='dem-group-member';lab.innerHTML=`<input type="checkbox" value="${r.id}" ${selected.has(r.id)?'checked':''}><span><b>${escapeHtml(r.name)}</b><small>${mDemMeta(r)}</small></span><em>${Number.isFinite(res)?formatNum(res,2)+' m':'DEM'}</em>`;root.appendChild(lab);}$('#demGroupModal').classList.remove('hidden');}
+  normalizeDemGroups();const dems=state.rasters.filter(isDemRaster);if(!dems.length){toast('Importa almenys un MDT GeoTIFF');return;}editingDemGroupId=groupId;const g=state.demGroups.find(x=>x.id===groupId)||null;$('#demGroupName').value=g?.name||`MDT combinat ${state.demGroups.length+1}`;$('#demGroupActive').checked=g?g.id===state.activeDemGroupId:true;const selected=new Set(g?.rasterIds||dems.map(r=>r.id)),root=$('#demGroupMembers');root.innerHTML='';for(const r of dems){const b=rasterBounds(r),res=sourceResolution(r),lab=document.createElement('label');lab.className='dem-group-member';lab.innerHTML=`<input type="checkbox" value="${r.id}" ${selected.has(r.id)?'checked':''}><span><b>${escapeHtml(r.name)}</b><small>${mDemMeta(r)}</small></span><em>${Number.isFinite(res)?formatNum(res,2)+' m':'MDT'}</em>`;root.appendChild(lab);}$('#demGroupModal').classList.remove('hidden');}
 function mDemMeta(r){const b=rasterBounds(r);return `EPSG:${r.meta?.epsg||projectCrsEpsg()} · ${formatNum(b.maxX-b.minX,0)} × ${formatNum(b.maxY-b.minY,0)} m`;}
-function saveDemGroup(){const ids=$$('#demGroupMembers input:checked').map(x=>x.value);if(!ids.length){toast('Selecciona almenys un DEM');return;}const name=$('#demGroupName').value.trim()||'Mosaic DEM';let g=state.demGroups.find(x=>x.id===editingDemGroupId);if(g){g.name=name;g.rasterIds=ids;g.updatedAt=Date.now();}else{g={id:'demg_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),name,rasterIds:ids,createdAt:Date.now(),updatedAt:Date.now()};state.demGroups.push(g);}if($('#demGroupActive').checked||!state.activeDemGroupId)state.activeDemGroupId=g.id;persistState();$('#demGroupModal').classList.add('hidden');editingDemGroupId=null;renderLayers();drawAll();toast(`Mosaic DEM guardat · ${ids.length} fitxers`);}
+function saveDemGroup(){
+  const ids=$$('#demGroupMembers input:checked').map(x=>x.value);if(!ids.length){toast('Selecciona almenys un MDT');return;}
+  const rs=state.rasters.filter(r=>ids.includes(r.id)&&isDemRaster(r)),epsgs=[...new Set(rs.map(r=>+(r.meta?.epsg||projectCrsEpsg())).filter(Number.isFinite))];
+  if(epsgs.length>1){toast(`No es poden combinar MDT amb CRS diferents (${epsgs.map(x=>'EPSG:'+x).join(', ')}). Reprojecta'ls abans.`,6000);return;}
+  const name=$('#demGroupName').value.trim()||'MDT combinat';let g=state.demGroups.find(x=>x.id===editingDemGroupId);
+  if(g){g.name=name;g.rasterIds=ids;g.combineMode='priority';g.visible=true;g.opacity=Number.isFinite(+g.opacity)?+g.opacity:1;g.updatedAt=Date.now();}
+  else{g={id:'demg_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),name,rasterIds:ids,combineMode:'priority',visible:true,opacity:1,createdAt:Date.now(),updatedAt:Date.now()};state.demGroups.push(g);}
+  if($('#demGroupActive').checked||!state.activeDemGroupId)state.activeDemGroupId=g.id;persistState();$('#demGroupModal').classList.add('hidden');editingDemGroupId=null;renderLayers();drawAll();toast(`MDT combinat guardat · ${ids.length} fonts · el més detallat té prioritat`);
+}
 
 async function loadRasters(){
   const all=await dbAll('rasters');
   if(!all.length){normalizeDemGroups();renderLayers();drawAll();return;}
   const loaded=new Array(all.length);let cursor=0;
   const worker=async()=>{while(cursor<all.length){const i=cursor++,saved=all[i];try{const rec=await rebuildStoredDemHillshade(saved),image=await createImageBitmap(rec.blob),r={...rec,image};if(r.lightMode==null&&r.meta?.sourceType==='geotiff'&&r.sourceBlob?.size>48*1024*1024)r.lightMode=true;normalizeRasterOrientation(r);loaded[i]=r;if(rec!==saved||r.meta?.displayNorthUpFix||r.lightMode!==saved.lightMode)await dbPut('rasters',stripRaster(r));}catch(e){console.warn('Raster guardado no legible',saved.name,e);}}};
-  // Dos workers reducen bastante la espera con varias capas sin disparar el pico de RAM en iOS.
   await Promise.all([worker(),worker()]);
   state.rasters.push(...loaded.filter(Boolean));normalizeDemGroups();renderLayers();drawAll();
 }
@@ -2988,14 +3031,14 @@ async function exportProjectPackage(){
   const rr=rasters.map(r=>{const x={...r};delete x.blob;delete x.sourceBlob;return{...x,blobAsset:addAsset(r.blob,r.name+'.preview'),sourceAsset:addAsset(r.sourceBlob,r.name)};});
   const pp=photos.map(r=>{const x={...r};delete x.blob;return{...x,blobAsset:addAsset(r.blob,r.name)};});
   const vv=vectorLayers.map(r=>{const x={...r};delete x.features;delete x.renderBlob;const geom=new Blob([JSON.stringify(r.features||[])],{type:'application/json'});return{...x,featuresAsset:addAsset(geom,(r.name||r.id)+'.geometry.json'),renderAsset:addAsset(r.renderBlob,(r.name||r.id)+'.vector.png')};});
-  const header={format:'GeoCaucePackage',containerVersion:1,appVersion:'0.16.37',exportedAt:Date.now(),project:cloneAny(state.project),state:sv,sectionPalette:cloneAny(sectionPalette),rasters:rr,photos:pp,vectorLayers:vv,assets:assets.map(a=>({name:a.name,type:a.type,size:a.size}))};
+  const header={format:'GeoCaucePackage',containerVersion:1,appVersion:'0.16.38',exportedAt:Date.now(),project:cloneAny(state.project),state:sv,sectionPalette:cloneAny(sectionPalette),rasters:rr,photos:pp,vectorLayers:vv,assets:assets.map(a=>({name:a.name,type:a.type,size:a.size}))};
   const enc=new TextEncoder(),magic=enc.encode(PACKAGE_MAGIC),hb=enc.encode(JSON.stringify(header)),len=new ArrayBuffer(4);new DataView(len).setUint32(0,hb.length,true);const parts=[magic,len,hb,...assets.map(a=>a.blob)];
   const blob=new Blob(parts,{type:'application/octet-stream'});downloadBlob(blob,`${safeSlug(state.project?.name)}_${isoToday()}.geocauce`);toast(`Copia creada · ${formatBytes(blob.size)}`,3600);
 }
 function formatBytes(n){if(!Number.isFinite(n))return '—';const u=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++;}return `${n.toFixed(i?1:0)} ${u[i]}`;}
 async function importProjectPackage(file){
   if(!file)return;try{toast('Leyendo proyecto…',1800);const enc=new TextEncoder(),magic=enc.encode(PACKAGE_MAGIC),prefix=new Uint8Array(await file.slice(0,magic.length+4).arrayBuffer());for(let i=0;i<magic.length;i++)if(prefix[i]!==magic[i])throw Error('No es una copia GeoCauce V0.11 válida');const hlen=new DataView(prefix.buffer,prefix.byteOffset+magic.length,4).getUint32(0,true);if(hlen<=0||hlen>20_000_000)throw Error('Cabecera de proyecto inválida');const hstart=magic.length+4,h=JSON.parse(new TextDecoder().decode(await file.slice(hstart,hstart+hlen).arrayBuffer()));if(h.format!=='GeoCaucePackage')throw Error('Formato no reconocido');let offset=hstart+hlen;const assetBlobs=[];for(const a of h.assets||[]){assetBlobs.push(file.slice(offset,offset+a.size,a.type||'application/octet-stream'));offset+=a.size;}
-    if(state.projectId)persistState();const id='P'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),base=h.project||{},name0=base.name||'Proyecto importado',same=projectCatalog.some(p=>p.name===name0),meta={...base,id,name:same?`${name0} (importado)`:name0,createdAt:Date.now(),updatedAt:Date.now(),dbName:`GeoCauceDB_${id}`};projectCatalog.push(meta);saveProjectCatalog();localStorage.setItem(ACTIVE_PROJECT_KEY,id);const sv={...(h.state||{}),appVersion:'0.16.37',projectId:id};localStorage.setItem(projectStateKey(id),JSON.stringify(sv));if(Array.isArray(h.sectionPalette)&&h.sectionPalette.length){sectionPalette=h.sectionPalette;saveSectionPalette();}
+    if(state.projectId)persistState();const id='P'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),base=h.project||{},name0=base.name||'Proyecto importado',same=projectCatalog.some(p=>p.name===name0),meta={...base,id,name:same?`${name0} (importado)`:name0,createdAt:Date.now(),updatedAt:Date.now(),dbName:`GeoCauceDB_${id}`};projectCatalog.push(meta);saveProjectCatalog();localStorage.setItem(ACTIVE_PROJECT_KEY,id);const sv={...(h.state||{}),appVersion:'0.16.38',projectId:id};localStorage.setItem(projectStateKey(id),JSON.stringify(sv));if(Array.isArray(h.sectionPalette)&&h.sectionPalette.length){sectionPalette=h.sectionPalette;saveSectionPalette();}
     if(dbp){try{const d=await dbp;d.close();}catch{}dbp=null;dbpName=null;}state.projectId=id;state.project=meta;
     for(const r of h.rasters||[]){const rec={...r,blob:r.blobAsset!=null?assetBlobs[r.blobAsset]:null,sourceBlob:r.sourceAsset!=null?assetBlobs[r.sourceAsset]:null};delete rec.blobAsset;delete rec.sourceAsset;if(rec.styleCache)rec.styleCache={...rec.styleCache,ready:false,missing:true};if(rec.blob){await dbPut('rasters',rec);nativeSyncRasterMeta(rec);}}
     for(const ph of h.photos||[]){const rec={...ph,blob:ph.blobAsset!=null?assetBlobs[ph.blobAsset]:null};delete rec.blobAsset;if(rec.blob){await dbPut('photos',rec);nativeSyncPhotoMeta(rec);}}
@@ -3036,7 +3079,7 @@ function restoreState(projectId=state.projectId){
 
 function geoJsonGeometry(f){if(f.closed)return{type:'Polygon',coordinates:[[...f.points,f.points[0]].map(p=>[p.x,p.y])]};if(f.type==='watercourse'&&courseFragments(f).length>1)return{type:'MultiLineString',coordinates:courseFragments(f).map(a=>a.map(p=>[p.x,p.y]))};return{type:'LineString',coordinates:(f.points||[]).map(p=>[p.x,p.y])};}
 function exportGeoJSON(){
-  const fc={type:'FeatureCollection',geocauce:{version:'0.16.37',project:state.project?{id:state.project.id,name:state.project.name,zone:state.project.zone,torrent:state.project.torrent,author:state.project.author,institution:state.project.institution,startDate:state.project.startDate,crs:state.project.crs,objective:state.project.objective,methodology:state.project.methodology,notes:state.project.notes}:null,campaign:cloneAny(currentCampaign())},features:state.features.map(f=>({type:'Feature',properties:{id:f.id,type:f.type,material:f.material||null,campaign:state.campaign,created_campaign:f.createdCampaign||null,date:f.date,area_m2:featureArea(f),erased_zones:(f.erasures||[]).length,dem_source:f.sectionProfile?.sourceName||f.longitudinalProfile?.sourceName||null,section_length_m:f.sectionProfile?.length||null,profile_edited:!!f.sectionProfile?.manual?.length},geometry:geoJsonGeometry(f)}))};
+  const fc={type:'FeatureCollection',geocauce:{version:'0.16.38',project:state.project?{id:state.project.id,name:state.project.name,zone:state.project.zone,torrent:state.project.torrent,author:state.project.author,institution:state.project.institution,startDate:state.project.startDate,crs:state.project.crs,objective:state.project.objective,methodology:state.project.methodology,notes:state.project.notes}:null,campaign:cloneAny(currentCampaign())},features:state.features.map(f=>({type:'Feature',properties:{id:f.id,type:f.type,material:f.material||null,campaign:state.campaign,created_campaign:f.createdCampaign||null,date:f.date,area_m2:featureArea(f),erased_zones:(f.erasures||[]).length,dem_source:f.sectionProfile?.sourceName||f.longitudinalProfile?.sourceName||null,section_length_m:f.sectionProfile?.length||null,profile_edited:!!f.sectionProfile?.manual?.length},geometry:geoJsonGeometry(f)}))};
   downloadBlob(new Blob([JSON.stringify(fc,null,2)],{type:'application/geo+json'}),`${safeSlug(state.project?.name)}_${state.campaign}.geojson`);
 }
 async function downloadBlob(blob,name){
@@ -3335,11 +3378,58 @@ function saveNewCourse(){
 }
 function courseEndpointCandidates(course){const out=[];courseFragments(course).forEach((frag,fragmentIndex)=>{if(!frag.length)return;out.push({fragmentIndex,end:'start',point:frag[0]},{fragmentIndex,end:'end',point:frag.at(-1)});});return out;}
 function courseEndpointSnapTolerance(){return Math.min(5,Math.max(.35,34/state.view.scale));}
-function snapStrokeToCourseEndpoints(course,pts){const out=cloneAny(pts),ends=courseEndpointCandidates(course);if(out.length<2||!ends.length)return{points:out,snaps:[]};const maxWorld=courseEndpointSnapTolerance(),used=new Set(),snaps=[];const assign=(idx)=>{const p=out[idx],rank=ends.map((e,i)=>({e,i,d:pointDistance(p,e.point)})).filter(x=>!used.has(x.i)).sort((a,b)=>a.d-b.d);if(!rank.length)return;const q=rank[0];if(q.d>maxWorld)return;out[idx]={...q.e.point};used.add(q.i);snaps.push({...q.e,d:q.d,strokeEnd:idx===0?'start':'end'});};const r0=ends.map((e,i)=>({i,d:pointDistance(out[0],e.point)})).sort((a,b)=>a.d-b.d)[0],r1=ends.map((e,i)=>({i,d:pointDistance(out.at(-1),e.point)})).sort((a,b)=>a.d-b.d)[0];if((r0?.d??Infinity)<=(r1?.d??Infinity)){assign(0);assign(out.length-1);}else{assign(out.length-1);assign(0);}return{points:out,snaps,maxWorld};}
-function addCourseFragment(course,pts,{connect=false}={}){if(!course||!pts?.length)return;const frags=courseFragments(course).map(cloneAny),res=connect?snapStrokeToCourseEndpoints(course,pts):{points:cloneAny(pts),snaps:[]};frags.push(res.points);setCourseFragments(course,frags);if(connect)res.topology=normalizeCourseFragments(course,{remapReaches:true});course.updatedAt=Date.now();return res;}
-function openCourseJoinModal(course,worldPts){state.pendingCourseJoin={courseId:course.id,points:cloneAny(worldPts)};const ends=courseEndpointCandidates(course),a=worldPts[0],b=worldPts.at(-1),d=Math.min(...ends.flatMap(e=>[pointDistance(a,e.point),pointDistance(b,e.point)])),tol=courseEndpointSnapTolerance();$('#courseJoinTitle').textContent=`Nou traç prop de ${course.abbr||course.name}`;$('#courseJoinDistance').textContent=Number.isFinite(d)?`Extrem més proper: ${formatLengthUnit(d,1)}${d>tol?' · fora de la tolerància d’encaix automàtic':''}`:'';$('#courseJoinModal').classList.remove('hidden');}
+function nearestCourseEndpointDistance(course,pts){
+  const ends=courseEndpointCandidates(course);if(!pts?.length||!ends.length)return Infinity;
+  return Math.min(...ends.flatMap(e=>[pointDistance(pts[0],e.point),pointDistance(pts.at(-1),e.point)]));
+}
+function snapStrokeToCourseEndpoints(course,pts,{forceNearest=false,preserveGeometry=false}={}){
+  let out=cloneAny(pts),ends=courseEndpointCandidates(course);if(out.length<2||!ends.length)return{points:out,snaps:[]};
+  const maxWorld=courseEndpointSnapTolerance(),used=new Set(),snaps=[],strokeEnds=[{key:'start',point:out[0]},{key:'end',point:out.at(-1)}];
+  const pairs=[];for(const se of strokeEnds)for(let i=0;i<ends.length;i++)pairs.push({strokeEnd:se.key,e:ends[i],i,d:pointDistance(se.point,ends[i].point)});
+  pairs.sort((a,b)=>a.d-b.d);
+  const chosen=[];if(pairs.length&&(forceNearest||pairs[0].d<=maxWorld))chosen.push(pairs[0]);
+  for(const key of ['start','end']){
+    if(chosen.some(x=>x.strokeEnd===key))continue;
+    const q=pairs.find(x=>x.strokeEnd===key&&!chosen.some(c=>c.i===x.i)&&x.d<=maxWorld);if(q)chosen.push(q);
+  }
+  for(const q of chosen){
+    if(used.has(q.i))continue;used.add(q.i);snaps.push({...q.e,d:q.d,strokeEnd:q.strokeEnd});
+  }
+  const start=snaps.find(x=>x.strokeEnd==='start'),end=snaps.find(x=>x.strokeEnd==='end');
+  // En geometries importades de SHP conservem tots els vèrtexs originals i,
+  // quan cal, afegim un connector recte fins a l'extrem del curs actiu.
+  if(start){if(preserveGeometry&&start.d>1e-9)out=[{...start.point},...out];else out[0]={...start.point};}
+  if(end){if(preserveGeometry&&end.d>1e-9)out=[...out,{...end.point}];else out[out.length-1]={...end.point};}
+  return{points:out,snaps,maxWorld,forced:!!forceNearest};
+}
+function addCourseFragment(course,pts,{connect=false,forceConnect=false,preserveGeometry=false}={}){
+  if(!course||!pts?.length)return;const frags=courseFragments(course).map(cloneAny),res=connect?snapStrokeToCourseEndpoints(course,pts,{forceNearest:forceConnect,preserveGeometry}):{points:cloneAny(pts),snaps:[]};
+  frags.push(res.points);setCourseFragments(course,frags);if(connect)res.topology=normalizeCourseFragments(course,{remapReaches:true});course.updatedAt=Date.now();return res;
+}
+function openCourseJoinModal(course,worldPts,options={}){
+  const d=nearestCourseEndpointDistance(course,worldPts),tol=courseEndpointSnapTolerance();
+  state.pendingCourseJoin={courseId:course.id,points:cloneAny(worldPts),nearestDistance:d,fromVector:!!options.fromVector,sourceLayerName:options.sourceLayerName||'',importedRemaining:cloneAny(options.importedRemaining||[])};
+  $('#courseJoinTitle').textContent=options.fromVector?`Geometria SHP · afegir a ${course.abbr||course.name}`:`Nou traç prop de ${course.abbr||course.name}`;
+  $('#courseJoinDistance').textContent=Number.isFinite(d)?`Extrem més proper: ${formatLengthUnit(d,1)}${d>tol?' · pots forçar la unió amb l’imant':''}`:'';
+  $('#courseJoinModal').classList.remove('hidden');
+}
 function closeCourseJoinModal(){state.pendingCourseJoin=null;$('#courseJoinModal').classList.add('hidden');}
-function applyCourseJoinChoice(mode){const q=state.pendingCourseJoin,c=q&&state.features.find(f=>f.id===q.courseId&&f.type==='watercourse');if(!q||!c){closeCourseJoinModal();return;}const pts=cloneAny(q.points);$('#courseJoinModal').classList.add('hidden');state.pendingCourseJoin=null;if(mode==='new'){openCourseModal(pts);return;}pushHistory();const res=addCourseFragment(c,pts,{connect:mode==='connect'});persistState();state.activeCourseId=c.id;state.selectedId=c.id;showFeatureCard(c);drawAll();updateHydroFab();if(mode==='connect'){if(!res?.snaps?.length)toast(`Cap extrem prou proper: el traç s’ha guardat dins ${c.abbr} però queda separat`,4200);else if(res?.topology?.ambiguous)toast(`Traç connectat, però la topologia de ${c.abbr} necessita revisió`,4200);else toast(res.snaps.length>1?`Traç connectat pels dos extrems a ${c.abbr}`:`Traç connectat a ${c.abbr}`);}else toast(`Fragment guardat dins ${c.abbr} sense connectar`);}
+function applyCourseJoinChoice(mode){
+  const q=state.pendingCourseJoin,c=q&&state.features.find(f=>f.id===q.courseId&&f.type==='watercourse');if(!q||!c){closeCourseJoinModal();return;}
+  const pts=cloneAny(q.points),remaining=cloneAny(q.importedRemaining||[]),tol=courseEndpointSnapTolerance();
+  if(mode==='connect'&&Number.isFinite(q.nearestDistance)&&q.nearestDistance>tol){
+    if(!confirm(`Els extrems estan separats ${formatLengthUnit(q.nearestDistance,1)}. Vols forçar la unió? GeoCauce conservarà la geometria SHP i afegirà el petit connector necessari.`))return;
+  }
+  $('#courseJoinModal').classList.add('hidden');state.pendingCourseJoin=null;
+  if(mode==='new'){
+    if(q.fromVector)state.pendingImportedCourseFragments=[pts,...remaining];else state.pendingImportedCourseFragments=null;
+    openCourseModal(pts);return;
+  }
+  pushHistory();const res=addCourseFragment(c,pts,{connect:mode==='connect',forceConnect:mode==='connect'&&q.nearestDistance>tol,preserveGeometry:!!q.fromVector});
+  persistState();state.activeCourseId=c.id;state.selectedId=c.id;showFeatureCard(c);drawAll();updateHydroFab();
+  if(mode==='connect'){if(!res?.snaps?.length)toast(`No s’ha trobat cap extrem per unir; el traç queda separat dins ${c.abbr}`,4200);else if(res?.topology?.ambiguous)toast(`Traç connectat, però la topologia de ${c.abbr} necessita revisió`,4200);else toast(res.snaps.length>1?`Traç connectat pels dos extrems a ${c.abbr}`:`Traç connectat a ${c.abbr}`);}else toast(`Fragment guardat dins ${c.abbr} sense connectar`);
+  if(remaining.length)setTimeout(()=>openCourseJoinModal(c,remaining[0],{fromVector:true,sourceLayerName:q.sourceLayerName,importedRemaining:remaining.slice(1)}),80);
+}
 function finishWatercourseStroke(worldPts){const c=activeCourse();if(!c){openCourseModal(worldPts);drawAll();return;}openCourseJoinModal(c,worldPts);drawAll();}
 function handleReachTap(sp){
   const c=activeCourse();if(!c){openHydroPicker();return;}

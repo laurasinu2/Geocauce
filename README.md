@@ -1,8 +1,8 @@
-## v0.16.37 · punts fotogràfics històrics i selecció SHP directa
+## v0.16.38 · punts fotogràfics històrics i selecció SHP directa
 
 Punts fotogràfics amb sèrie temporal i control de visibilitat, més selecció successiva de geometries SHP directament sobre el mapa.
 
-# GeoCauce web assets v0.16.32
+# GeoCauce web assets v0.16.38
 ## v0.16.32 · anotacions de mapa i zoom de seccions
 - Capa independent d’anotacions lliures sobre el mapa, amb paleta, color personalitzat, gruix, goma i desfer.
 - Zoom tàctil horitzontal de les seccions amb escala visible dinàmica i botó de vista completa.

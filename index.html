@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="GeoCauce" />
-  <title>GeoCauce · v0.16.37 alpha</title>
+  <title>GeoCauce · Android v0.16.38 alpha</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
@@ -330,7 +330,7 @@ CON | Confluencia"></textarea></div>
         <header><strong><img class="header-icon" src="icons/capas.png" alt=""> Mapas y capas</strong><button class="panel-close icon-only" data-close="layersPanel"><img src="icons/cerrar.png" alt=""></button></header>
         <button id="historicalPhotoToggle" class="secondary full layer-global-btn icon-text active" type="button" aria-pressed="true"><img src="icons/fotos.png" alt=""><span>Punts fotogràfics · visibles</span></button>
         <button id="fitVisibleBtn" class="secondary full layer-global-btn icon-text"><img src="icons/centrar.png" alt=""> Ver mapas visibles</button>
-        <button id="demGroupsBtn" class="secondary full layer-global-btn icon-text"><img src="icons/mapa.png" alt=""> Mosaics DEM</button>
+        <button id="demGroupsBtn" class="secondary full layer-global-btn icon-text"><img src="icons/mapa.png" alt=""> Combinar MDT</button>
         <div id="demGroupsList" class="dem-groups-list"></div>
         <section id="importQueueSection" class="import-queue-section hidden">
           <div class="import-queue-head"><div><b>Carregant / pendents</b><small>Els fitxers es processen en cua i no apareixen al mapa fins que premis Carregar.</small></div><button id="loadReadyImportsBtn" class="primary-small" disabled>Carregar preparats</button></div>
@@ -359,12 +359,12 @@ CON | Confluencia"></textarea></div>
       <div id="demGroupModal" class="modal hidden">
         <div class="modal-backdrop"></div>
         <div class="dem-group-card">
-          <header><div><img src="icons/mapa.png" alt=""><div><b>Mosaic DEM</b><small>Agrupa diversos DEM i tracta'ls com una sola superfície.</small></div></div><button id="demGroupClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
-          <label class="dem-group-name">Nom del mosaic <input id="demGroupName" type="text" placeholder="Ex. DEM vall completa"></label>
+          <header><div><img src="icons/mapa.png" alt=""><div><b>Combinar MDT</b><small>El MDT més detallat substitueix el gran a les zones de solapament.</small></div></div><button id="demGroupClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+          <label class="dem-group-name">Nom de la combinació <input id="demGroupName" type="text" placeholder="Ex. MDT conca + tram detallat"></label>
           <div id="demGroupMembers" class="dem-group-members"></div>
-          <label class="dem-group-active"><input id="demGroupActive" type="checkbox" checked> Fer aquest mosaic actiu</label>
-          <p class="panel-help">El mosaic és virtual: els fitxers originals no es dupliquen. Perfils, seccions, 3D i extensió de treball consulten automàticament el DEM amb més resolució disponible a cada punt.</p>
-          <footer><button id="demGroupCancel" class="secondary">Cancel·lar</button><button id="demGroupSave" class="primary">Guardar mosaic</button></footer>
+          <label class="dem-group-active"><input id="demGroupActive" type="checkbox" checked> Fer aquesta combinació activa</label>
+          <p class="panel-help">La combinació conserva els MDT originals. A cada solapament, el MDT de més resolució té prioritat i el MDT gran queda retallat en aquella zona. Perfils, seccions i 3D consulten la mateixa superfície combinada.</p>
+          <footer><button id="demGroupCancel" class="secondary">Cancel·lar</button><button id="demGroupSave" class="primary">Guardar combinació</button></footer>
         </div>
       </div>
 
@@ -926,7 +926,7 @@ CON | Confluencia"></textarea></div>
         <header><div><img src="icons/rio.png" alt=""><div><b id="courseJoinTitle">Nou traç de curs d’aigua</b><small id="courseJoinDistance"></small></div></div><button id="courseJoinClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
         <p>Què vols fer amb aquest nou traç?</p>
         <div class="course-join-options">
-          <button id="courseJoinConnect" class="course-join-option"><b>1 · Lligar-lo ara al mateix curs</b><span>GeoCauce ajustarà l’extrem més proper. Si el traç omple un buit entre dos fragments, pot lligar els dos extrems.</span></button>
+          <button id="courseJoinConnect" class="course-join-option"><b>1 · Lligar-lo ara al mateix curs</b><span>GeoCauce encaixarà els extrems. En geometries SHP conserva el traç original i, si cal, afegeix un connector fins al curs actiu.</span></button>
           <button id="courseJoinSame" class="course-join-option"><b>2 · Mateix curs, però deixar-lo separat</b><span>Forma part del mateix riu, però encara no has cartografiat la zona intermèdia.</span></button>
           <button id="courseJoinNew" class="course-join-option"><b>3 · Crear un altre curs d’aigua</b><span>El traç serà el primer fragment d’un curs nou, amb nom i abreviatura propis.</span></button>
         </div>
@@ -1188,7 +1188,6 @@ CON | Confluencia"></textarea></div>
     <input id="projectImportInput" type="file" accept=".geocauce,application/octet-stream" hidden>
 
     <div id="toast" class="toast hidden"></div>
-
     <section id="mobileShell" class="mobile-shell hidden" aria-label="GeoCauce móvil">
       <header class="m-topbar">
         <div class="m-brand"><img src="logo-geocauce.png" alt="GeoCauce"><div><strong>Geo<span>Cauce</span></strong><small>TERRITORIO · GEOLOGÍA · MEMORIA</small></div></div>

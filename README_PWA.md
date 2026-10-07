@@ -1,10 +1,17 @@
-# GeoCauce PWA · v0.16.37 alpha
+# GeoCauce PWA móvil · v0.16.38 alpha
 
-Base: GeoCauce Android v0.16.37 alpha.
+Esta integración conserva la lógica y configuración de Supabase de GeoCauce v0.16.38 y añade la interfaz móvil/PWA.
 
-Esta variante conserva la implementación de Supabase de v0.16.37 y añade la interfaz móvil/PWA definida para iPhone/iPad y pantallas pequeñas.
+## Prueba rápida
 
-- Servir por HTTPS (o localhost para desarrollo).
-- Para probar la interfaz móvil en cualquier navegador: `?previewMobile=1`.
-- En iOS/iPadOS, abrir en Safari y usar **Añadir a pantalla de inicio**.
-- Configuración > Interfaz móvil permite `Automático`, `Simplificada` o `Completa`.
+Servir esta carpeta por HTTPS (o localhost). En cualquier navegador puede forzarse la interfaz móvil con `?previewMobile=1`.
+
+En iPhone/iPad: abrir en Safari y usar **Añadir a pantalla de inicio** para ejecutarla como web app independiente.
+
+## Modos de interfaz
+
+En Configuración > Interfaz móvil: Automático, Simplificada o Completa.
+
+## Nota
+
+La integración no reemplaza `supabase-config.js` ni la lógica cloud de `app.js` de v0.16.38. Los cambios móviles se superponen sobre esa base.

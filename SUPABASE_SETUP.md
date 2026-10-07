@@ -1,4 +1,4 @@
-# Configurar Supabase para GeoCauce v0.16.37
+# Configurar Supabase para GeoCauce v0.16.38
 
 La app funciona **sin Supabase**. SQLite y los archivos locales siguen siendo la fuente principal. Supabase solo añade cuenta y copia/sincronización cloud.
 
@@ -49,11 +49,11 @@ Vuelve a ejecutar la app desde Android Studio.
 2. Crea una cuenta o inicia sesión.
 3. Si prefieres, pulsa **Entrar sin conexión**. Esa decisión se recuerda y no se vuelve a pedir al iniciar.
 4. Si empezaste offline, en **Mis proyectos** o en **Proyecto** pulsa la zona de Cuenta para iniciar sesión después.
-5. Abre un proyecto y pulsa **Sincronizar**. La v0.16.37 sube el estado estructural a PostgreSQL y los archivos del proyecto al bucket privado `geocauce-files`.
+5. Abre un proyecto y pulsa **Sincronizar**. La v0.16.38 sube el estado estructural a PostgreSQL y los archivos del proyecto al bucket privado `geocauce-files`.
 
 ## Alcance actual de la sincronización
 
-En v0.16.37 se sincronizan:
+En v0.16.38 se sincronizan:
 
 - metadatos generales y catálogo de proyectos;
 - campañas, geometrías GeoCauce, libreta, secciones, puntos históricos, paradas y tinta;
