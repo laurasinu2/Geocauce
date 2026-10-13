@@ -51,7 +51,7 @@ test('local blobs are reused only when content fingerprint agrees',async()=>{
   assert.equal(await cloudReuseBlob(blob,5,'sha256-chunks-v1:5:text/plain:wrong'),null);
 });
 test('unchanged cloud assets do not hash, upload or make object requests',async()=>{
-  const i=app.indexOf('  const put=async function put('),j=app.indexOf("  if(manual)cloudProgressStart('Preparando archivos para subir'",i);
+  const i=app.indexOf('  const put=async function('),j=app.indexOf("  if(manual)cloudProgressStart('Preparando archivos para subir'",i);
   assert.ok(i>0&&j>i,'Upload put closure must exist');
   const blob=new Blob(['hello'],{type:'text/plain'}),fp='sha256-chunks-v1:5:text/plain:abc';
   const cache={photo:{path:'user/pr/photos/p.bin',hash:fp,sig:'sig'}};
