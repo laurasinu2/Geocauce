@@ -284,8 +284,8 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
   for(const rec of rasters){
     if(!(rec.blob instanceof Blob)&&!(rec.sourceBlob instanceof Blob))throw new Error('El mapa '+(rec.name||rec.id)+' no tiene archivo local. No se ha creado un snapshot incompleto.');
     const x={...rec};delete x.blob;delete x.sourceBlob;delete x.image;
-    const base=cloudObjectPath(uid,projectId,'rasters',rec.id),extra=rec.importedAt||rec.meta?.importedAt||rec.meta?.sourceWidth||'';
-    const previewPath=rec.blob instanceof Blob?await put('raster-preview:'+rec.id,base,rec.blob,sigBlob(rec.blob,extra),rec.name||'mapa','.preview'):null;
+    const base=cloudObjectPath(uid,projectId,'rasters',rec.id),extra=rec.importedAt||rec.meta?.importedAt||rec.meta?.sourceWidth||'',previewRevision=extra+'|'+(rec.styleCache?.generatedAt||'');
+    const previewPath=rec.blob instanceof Blob?await put('raster-preview:'+rec.id,base,rec.blob,sigBlob(rec.blob,previewRevision),rec.name||'mapa','.preview'):null;
     const sourcePath=rec.sourceBlob instanceof Blob?await put('raster-source:'+rec.id,base,rec.sourceBlob,sigBlob(rec.sourceBlob,extra),rec.name||'original','.source'):null;
     result.rasters.push({...x,cloudPreviewPath:previewPath,cloudSourcePath:sourcePath,cloudPreviewType:rec.blob?.type||null,cloudSourceType:rec.sourceBlob?.type||null,cloudPreviewSize:rec.blob?.size||0,cloudSourceSize:rec.sourceBlob?.size||0,cloudPreviewHash:cache['raster-preview:'+rec.id]?.hash||null,cloudSourceHash:cache['raster-source:'+rec.id]?.hash||null});
   }
@@ -326,6 +326,39 @@ async function cloudReuseBlob(blob,size,hash){
 async function cloudReuseFeatures(features,size,hash){
  if(!Array.isArray(features)||!hash)return null;
  return await cloudReuseBlob(new Blob([JSON.stringify(features)],{type:'application/json'}),size,hash)?features:null;
+}
+async function cloudCollectObsoleteAssets(uid,cloudId,before,after){
+  // Delete only unreferenced immutable versions AFTER the new snapshot is committed.
+  // Old cloud backup projects can share these objects, so inspect every accessible snapshot.
+  const paths=m=>{
+    const refs=new Set();
+    for(const p of m?.photos||[])if(p.cloudBlobPath)refs.add(p.cloudBlobPath);
+    for(const r of m?.rasters||[])for(const x of [r.cloudPreviewPath,r.cloudSourcePath])if(x)refs.add(x);
+    for(const v of m?.vectorLayers||[])for(const x of [v.cloudFeaturesPath,v.cloudRenderPath])if(x)refs.add(x);
+    return refs;
+  };
+  const prefix=cloudObjectPath(uid,cloudId)+'/',queueKey='geocauce-cloud-gc-v1:'+uid+':'+cloudId;
+  let pending=[];
+  try{pending=JSON.parse(localStorage.getItem(queueKey)||'[]');}catch{}
+  const oldPaths=paths(before),newPaths=paths(after);
+  for(const path of oldPaths)if(!newPaths.has(path))pending.push(path);
+  pending=[...new Set(pending)].filter(path=>String(path).startsWith(prefix));
+  if(!pending.length)return;
+  localStorage.setItem(queueKey,JSON.stringify(pending)); // retry safely after interruptions
+  const referenced=new Set();
+  for(let offset=0;;offset+=300){
+    const snapshots=await cloudFetch('/rest/v1/project_snapshots?select=assets:state->assetMetadata&limit=300&offset='+offset);
+    if(!Array.isArray(snapshots))throw new Error('No se pudo comprobar referencias de archivos');
+    for(const snapshot of snapshots)for(const path of paths(snapshot.assets))referenced.add(path);
+    if(snapshots.length<300)break;
+  }
+  const disposable=pending.filter(p=>!referenced.has(p));
+  for(let i=0;i<disposable.length;i+=100){
+    const batch=disposable.slice(i,i+100);
+    await cloudFetch('/storage/v1/object/geocauce-files',{method:'DELETE',body:{prefixes:batch}});
+    pending=pending.filter(p=>!batch.includes(p));
+    localStorage.setItem(queueKey,JSON.stringify(pending));
+  }
 }
 // Supabase old: project(id_project UUID), project_snapshots(id_project).
 // Supabase new: projects(id text), project_snapshots(project_id text).
@@ -393,7 +426,7 @@ function cloudSeedDownloadedAssets(uid,cloudId,lists){
   }
   for(const r of lists.rasters||[]){
     const extra=r.importedAt||r.meta?.importedAt||r.meta?.sourceWidth||'';
-    add('raster-preview:'+r.id,r.cloudPreviewPath,r.cloudPreviewHash,sig(r.cloudPreviewSize,r.cloudPreviewType,extra),r.cloudPreviewSize);
+    add('raster-preview:'+r.id,r.cloudPreviewPath,r.cloudPreviewHash,sig(r.cloudPreviewSize,r.cloudPreviewType,extra+'|'+(r.styleCache?.generatedAt||'')),r.cloudPreviewSize);
     add('raster-source:'+r.id,r.cloudSourcePath,r.cloudSourceHash,sig(r.cloudSourceSize,r.cloudSourceType,extra),r.cloudSourceSize);
   }
   for(const v of lists.vectorLayers||[]){
@@ -765,6 +798,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
       if(remoteRow&&Object.entries(row).every(([k,v])=>k==='updated_at'||cloudStableJson(remoteRow[k]??null)===cloudStableJson(v??null))){
         cloudLastSyncAt=Date.now();cloudLastError='';p._cloudSyncedAt=cloudLastSyncAt;p._cloudUpdatedAt=Date.parse(actual||0)||cloudLastSyncAt;saveProjectCatalog();
         if(manual){cloudProgressFinish(true,'Sin cambios pendientes');toast('Todo actualizado ✓ · 0 archivos transferidos',4500);}
+        cloudCollectObsoleteAssets(uid,cloudId,previous?.state?.assetMetadata,assets.metadata).catch(e=>console.warn('Cloud asset cleanup',e));
         refreshAccountUi();return true;
       }
     }
@@ -785,6 +819,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
     if(!Array.isArray(saved)||saved.length!==1)throw new Error('Conflicto al guardar: el proyecto remoto cambió. No se ha sobrescrito su snapshot.');
     cloudLastSyncAt=Date.now();cloudLastError='';p.cloudProjectId=cloudId;p._cloudOnly=false;p._cloudSyncedAt=cloudLastSyncAt;p._cloudUpdatedAt=Date.parse(saved[0].updated_at||now)||cloudLastSyncAt;saveProjectCatalog();
     if(manual){cloudProgressUpdate('Sincronización completada',assets.total,assets.total);cloudProgressFinish(true,'Subida completada');toast(`Proyecto sincronizado ✓ · ${assets.uploaded} archivos subidos, ${assets.reused} reutilizados`,6000);}
+    cloudCollectObsoleteAssets(uid,cloudId,previous?.state?.assetMetadata,assets.metadata).catch(e=>console.warn('Cloud asset cleanup',e));
     refreshAccountUi();return true;
   }catch(e){cloudLastError=`Pendiente: ${e.message||e}`;console.warn('Cloud sync',e);if(manual){cloudProgressFinish(false,'Error al subir');toast(`No se pudo sincronizar: ${e.message||e}`,6500);}refreshAccountUi();return false;}
   finally{cloudSyncRunning=false;refreshAccountUi();}
