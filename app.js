@@ -270,23 +270,140 @@ async function cloudRefreshProjectCatalog({quiet=true}={}){
     saveProjectCatalog();if(state.screen==='projects')renderProjectHome();return true;
   }catch(e){cloudLastError=`No se pudo leer la nube: ${e.message||e}`;refreshAccountUi();if(!quiet)toast(cloudLastError,5000);return false;}
 }
+// Una descarga nunca reemplaza el proyecto antes de verificar todos sus archivos.
+// El cambio de las tablas de IndexedDB es atómico y guarda una versión recuperable.
+async function cloudCommitStaging(projectId,sv){
+  const d=await db(),originalState=localStorage.getItem(projectStateKey(projectId));
+  const originalProject={...projectById(projectId)};
+  const stores=['photos','rasters','vectorLayers'];
+  await new Promise((resolve,reject)=>{
+    const tx=d.transaction([...stores,'rasterStyleTiles','cloudStaging','cloudRecovery'],'readwrite');
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||new Error('Error al guardar la descarga'));
+    tx.onabort=()=>reject(tx.error||new Error('La descarga no pudo guardarse; se conserva el proyecto anterior'));
+    const recovery=tx.objectStore('cloudRecovery');
+    recovery.clear();
+    recovery.put({key:'state',state:originalState,project:originalProject,createdAt:Date.now()});
+    for(const storeName of stores){
+      const target=tx.objectStore(storeName),old=target.openCursor();
+      old.onsuccess=()=>{
+        const cur=old.result;
+        if(cur){recovery.put({key:`${storeName}:${cur.key}`,record:cur.value});cur.continue();return;}
+        target.clear();
+        const prefix=storeName+':';
+        const staged=tx.objectStore('cloudStaging').openCursor(IDBKeyRange.bound(prefix,prefix+'\uffff'));
+        staged.onsuccess=()=>{
+          const item=staged.result;if(!item)return;
+          target.put(item.value.record);item.continue();
+        };
+      };
+    }
+    // Son teselas derivadas y se pueden regenerar; no contienen información original.
+    tx.objectStore('rasterStyleTiles').clear();
+  });
+  // IndexedDB ya tiene una copia de recuperación antes de tocar el JSON local.
+  localStorage.setItem(projectStateKey(projectId),JSON.stringify(sv));
+}
+async function restoreCloudLocalRecovery(){
+  if(!state.projectId||cloudSyncRunning||cloudRestoreRunning){toast('Abre un proyecto y espera a que terminen las transferencias');return false;}
+  const id=state.projectId;
+  try{
+    const old=await dbGet('cloudRecovery','state');
+    if(!old?.state){toast('No hay una versión local anterior para recuperar');return false;}
+    if(!confirm('¿Restaurar la versión local anterior a la última descarga? La copia de la nube permanecerá intacta.'))return false;
+    cloudRestoreRunning=true;cloudProgressStart('Recuperando datos locales',2);
+    const d=await db(),stores=['photos','rasters','vectorLayers'];
+    await new Promise((resolve,reject)=>{
+      const tx=d.transaction([...stores,'rasterStyleTiles','cloudRecovery'],'readwrite');
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||new Error('No se pudo recuperar'));
+      tx.onabort=()=>reject(tx.error||new Error('Recuperación cancelada sin aplicar cambios'));
+      const backup=tx.objectStore('cloudRecovery');
+      for(const name of stores){
+        const target=tx.objectStore(name);target.clear();
+        const prefix=name+':',cursor=backup.openCursor(IDBKeyRange.bound(prefix,prefix+'\uffff'));
+        cursor.onsuccess=()=>{const item=cursor.result;if(item){target.put(item.value.record);item.continue();}};
+      }
+      tx.objectStore('rasterStyleTiles').clear();
+    });
+    cloudProgressUpdate('Recuperando proyecto',1,2);
+    localStorage.setItem(projectStateKey(id),old.state);
+    const p=projectById(id);if(p&&old.project){Object.assign(p,old.project,{id,dbName:p.dbName});state.project=p;saveProjectCatalog();}
+    cloudProgressUpdate('Recuperación completada',2,2);cloudProgressFinish(true,'Datos locales recuperados');
+    cloudRestoreRunning=false;await openProject(id,{skipSave:true});
+    toast('Versión local anterior recuperada ✓',3500);return true;
+  }catch(e){cloudProgressFinish(false,'No se pudo recuperar');toast('Error de recuperación: '+(e.message||e),6000);return false;}
+  finally{cloudRestoreRunning=false;}
+}
 async function restoreProjectFromCloud(projectId,{manual=false}={}){
   if(!cloudConfigured()||!navigator.onLine||!loadCloudSession()?.access_token)return false;
+  if(cloudSyncRunning||cloudRestoreRunning)return false;
+  cloudRestoreRunning=true;let started=false;
   try{
-    if(manual)toast('Descargando proyecto de Supabase…',1600);
-    const p0=projectById(projectId),cloudId=p0?ensureCloudProjectId(p0):(isUuid(projectId)?projectId:null);if(!cloudId)throw new Error('El proyecto no tiene identificador cloud válido');
-    const schema=await cloudSchema();
-    const rows=await cloudFetch(`/rest/v1/project_snapshots?${schema==='legacy'?'id_project':'project_id'}=eq.${encodeURIComponent(cloudId)}&select=*`);const snap=Array.isArray(rows)?rows[0]:null;if(!snap?.state)throw new Error('No hay una copia cloud de este proyecto');
-    const sv={...snap.state,projectId,sectionPalette:snap.state.sectionPalette||snap.palette||[],appVersion:'0.16.39-android-alpha'};localStorage.setItem(projectStateKey(projectId),JSON.stringify(sv));if(Array.isArray(sv.sectionPalette)&&sv.sectionPalette.length){sectionPalette=sv.sectionPalette;saveSectionPalette();}
-    const assets=sv.assetMetadata||{};await dbClear('photos').catch(()=>{});await dbClear('rasters').catch(()=>{});await dbClear('rasterStyleTiles').catch(()=>{});await dbClear('vectorLayers').catch(()=>{});
-    for(const ph of assets.photos||[]){const rec={...ph};delete rec.cloudBlobPath;delete rec.cloudBlobType;delete rec.cloudBlobSize;if(ph.cloudBlobPath){try{rec.blob=await cloudDownloadBlob(ph.cloudBlobPath);await dbPut('photos',rec);nativeSyncPhotoMeta(rec);}catch(e){console.warn('Foto cloud',ph.id,e);}}}
-    for(const r of assets.rasters||[]){const rec={...r};for(const k of ['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize'])delete rec[k];try{if(r.cloudPreviewPath)rec.blob=await cloudDownloadBlob(r.cloudPreviewPath);if(r.cloudSourcePath)rec.sourceBlob=await cloudDownloadBlob(r.cloudSourcePath);if(rec.styleCache)rec.styleCache={...rec.styleCache,ready:false,missing:true};if(rec.blob||rec.sourceBlob){await dbPut('rasters',rec);nativeSyncRasterMeta(rec);}}catch(e){console.warn('Raster cloud',r.id,e);}}
-    for(const vl of assets.vectorLayers||[]){const rec={...vl};for(const k of ['cloudFeaturesPath','cloudRenderPath','cloudFeaturesSize','cloudRenderType','cloudRenderSize'])delete rec[k];try{if(vl.cloudFeaturesPath){const b=await cloudDownloadBlob(vl.cloudFeaturesPath);rec.features=JSON.parse(await b.text());}else rec.features=[];if(vl.cloudRenderPath)rec.renderBlob=await cloudDownloadBlob(vl.cloudRenderPath);await dbPut('vectorLayers',rec);}catch(e){console.warn('Vector cloud',vl.id,e);}}
-    const p=projectById(projectId);if(p){p.cloudProjectId=cloudId;p._cloudOnly=false;p._cloudPulledAt=Date.now();p._cloudUpdatedAt=Date.parse(snap.updated_at||0)||p._cloudUpdatedAt||0;saveProjectCatalog();}
-    cloudLastSyncAt=Date.now();cloudLastError='';refreshAccountUi();if(manual)toast('Proyecto restaurado desde la nube ✓',3000);return true;
-  }catch(e){cloudLastError=`No se pudo restaurar: ${e.message||e}`;refreshAccountUi();if(manual)toast(cloudLastError,5500);return false;}
+    const p0=projectById(projectId),cloudId=p0?.cloudProjectId||(isUuid(projectId)?projectId:null);
+    if(!cloudId)throw new Error('Este proyecto todavía no tiene copia en la nube');
+    const schema=await cloudSchema(),key=schema==='legacy'?'id_project':'project_id';
+    const rows=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=*`);
+    const snap=Array.isArray(rows)?rows[0]:null;
+    if(!snap?.state)throw new Error('No hay una copia cloud de este proyecto');
+    const sv={...snap.state,projectId,sectionPalette:snap.state.sectionPalette||snap.palette||[],appVersion:'0.16.39-android-alpha'};
+    const assets=sv.assetMetadata;
+    if(!assets){
+      const existing=await Promise.all(['photos','rasters','vectorLayers'].map(n=>dbAll(n)));
+      if(existing.some(list=>list.length))throw new Error('La copia cloud no incluye archivos. No se pueden sustituir las capas locales.');
+    }
+    const lists={photos:assets?.photos||[],rasters:assets?.rasters||[],vectorLayers:assets?.vectorLayers||[]};
+    const total=2+lists.photos.filter(x=>x.cloudBlobPath).length+
+      lists.rasters.reduce((n,x)=>n+(x.cloudPreviewPath?1:0)+(x.cloudSourcePath?1:0),0)+
+      lists.vectorLayers.reduce((n,x)=>n+(x.cloudFeaturesPath?1:0)+(x.cloudRenderPath?1:0),0);
+    let done=0;cloudProgressStart('Descargando archivos del proyecto',total);started=true;
+    await dbClear('cloudStaging');
+    const get=async(path,label)=>{
+      if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
+      const blob=await cloudDownloadBlob(path);
+      if(!(blob instanceof Blob))throw new Error('Falta el archivo '+label);
+      done++;cloudProgressUpdate('Descargando · '+label,done,total);return blob;
+    };
+    for(const ph of lists.photos){
+      if(!ph.id||!ph.cloudBlobPath)throw new Error('Falta el archivo de la fotografía '+(ph.name||ph.id||''));
+      const rec={...ph};delete rec.cloudBlobPath;delete rec.cloudBlobType;delete rec.cloudBlobSize;
+      rec.blob=await get(ph.cloudBlobPath,ph.name||'fotografía');
+      await dbPut('cloudStaging',{key:'photos:'+ph.id,record:rec});
+    }
+    for(const r of lists.rasters){
+      if(!r.id||(!r.cloudPreviewPath&&!r.cloudSourcePath))throw new Error('Falta el archivo del mapa '+(r.name||r.id||''));
+      const rec={...r};for(const k of ['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize'])delete rec[k];
+      if(r.cloudPreviewPath)rec.blob=await get(r.cloudPreviewPath,r.name||'mapa');
+      if(r.cloudSourcePath)rec.sourceBlob=await get(r.cloudSourcePath,(r.name||'mapa')+' · original');
+      if(rec.styleCache)rec.styleCache={...rec.styleCache,ready:false,missing:true};
+      await dbPut('cloudStaging',{key:'rasters:'+r.id,record:rec});
+    }
+    for(const vl of lists.vectorLayers){
+      if(!vl.id||(!vl.cloudFeaturesPath&&Number(vl.featureCount)>0))throw new Error('Falta la geometría de '+(vl.name||vl.id||'capa'));
+      const rec={...vl};for(const k of ['cloudFeaturesPath','cloudRenderPath','cloudFeaturesSize','cloudRenderType','cloudRenderSize'])delete rec[k];
+      rec.features=vl.cloudFeaturesPath?JSON.parse(await (await get(vl.cloudFeaturesPath,vl.name||'capa')).text()):[];
+      if(!Array.isArray(rec.features))throw new Error('Geometría de capa inválida: '+(vl.name||vl.id));
+      if(vl.cloudRenderPath)rec.renderBlob=await get(vl.cloudRenderPath,(vl.name||'capa')+' · render');
+      await dbPut('cloudStaging',{key:'vectorLayers:'+vl.id,record:rec});
+    }
+    if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
+    cloudProgressUpdate('Guardando copia de seguridad local',done+1,total);
+    await cloudCommitStaging(projectId,sv);
+    await dbClear('cloudStaging').catch(()=>{});
+    if(Array.isArray(sv.sectionPalette)&&sv.sectionPalette.length){sectionPalette=sv.sectionPalette;saveSectionPalette();}
+    const p=projectById(projectId);
+    if(p){p.cloudProjectId=cloudId;p._cloudOnly=false;p._cloudPulledAt=Date.now();p._cloudUpdatedAt=Date.parse(snap.updated_at||0)||0;saveProjectCatalog();}
+    cloudLastSyncAt=Date.now();cloudLastError='';
+    cloudProgressUpdate('Descarga completada',total,total);cloudProgressFinish(true,'Descarga completada');
+    if(manual)toast('Proyecto restaurado · copia local anterior recuperable ✓',4000);
+    refreshAccountUi();return true;
+  }catch(e){
+    cloudLastError=`No se pudo restaurar: ${e.message||e}`;
+    console.warn('Cloud restore',e);
+    if(state.projectId===projectId)await dbClear('cloudStaging').catch(()=>{});
+    if(started)cloudProgressFinish(false,'Descarga interrumpida');
+    if(manual)toast(cloudLastError,6500);
+    refreshAccountUi();return false;
+  }finally{cloudRestoreRunning=false;}
 }
-
 async function refreshCloudSession(){
   const old=loadCloudSession();if(!old?.refresh_token)throw new Error('No hay sesión para renovar');
   const cfg=cloudConfig();if(!cfg.enabled)throw new Error('Supabase no está configurado');
@@ -675,7 +792,7 @@ async function renderSettings(){
   $('#settingsProfileName').textContent=a.kind==='account'?'Usuario de campo':'Modo local';$('#settingsProfileEmail').textContent=email;$('#settingsProfileInstitution').textContent=state.project?.institution||'Los proyectos se guardan en este dispositivo';
   $('#settingInputMode').value=appSettings.inputMode;$('#settingPersistentTool').checked=!!appSettings.persistentTool;$('#settingLengthUnit').value=appSettings.lengthUnit;$('#settingClastUnit').value=appSettings.clastUnit;$('#settingAreaUnit').value=appSettings.areaUnit;$('#settingVolumeUnit').value=appSettings.volumeUnit;$('#settingCoordMode').value=appSettings.coordMode;$('#settingGpsAccuracy').value=String(appSettings.gpsMinAccuracy);$('#settingPhotoHeading').checked=!!appSettings.photoHeading;$('#settingGpsAltitude').checked=!!appSettings.gpsAltitude;$('#settingShowAccuracy').checked=!!appSettings.showAccuracy;$('#settingNotebookBg').value=appSettings.notebookBg;$('#settingNotebookAutosave').checked=!!appSettings.notebookAutosave;if($('#settingReachPattern'))$('#settingReachPattern').value=appSettings.reachPattern||'{CURS}-{N}';if($('#settingReachCodes'))$('#settingReachCodes').value=appSettings.reachCodes||'';if($('#settingMobileUi'))$('#settingMobileUi').value=appSettings.mobileUi||'auto';
   const st=await storageBreakdown();$('#settingsLocalMaps').textContent=formatBytes(st.maps);$('#settingsLocalPhotos').textContent=formatBytes(st.photos);$('#settingsLocalNotebook').textContent=formatBytes(st.notebook);$('#settingsLocalData').textContent=formatBytes(st.data);$('#settingsLocalTotal').textContent=formatBytes(st.usage??st.totalKnown);$('#settingsLocalBar').style.width=st.quota&&st.usage?`${Math.min(100,st.usage/st.quota*100)}%`:`${Math.min(100,st.totalKnown/(1024*1024*1024)*100)}%`;
-  const cloudBytes=bytesOfJson(currentStatePayloadForCloud?.()||{})+bytesOfJson(state.project||{});$('#settingsCloudState').textContent=a.kind==='account'?(online?(cloudLastError?'Pendiente':'Conectado'):'Sin conexión'):'Sin cuenta';$('#settingsCloudData').textContent=a.kind==='account'?`≈ ${formatBytes(cloudBytes)}`:'—';$('#settingsCloudLastSync').textContent=lastKnownCloudSyncAt()?new Date(lastKnownCloudSyncAt()).toLocaleString('es-ES'):'—';$('#settingsCloudPending').textContent=cloudLastError||(!online&&a.kind==='account'?'Cambios locales pendientes':'0');$('#settingsCloudBar').style.width=a.kind==='account'&&!cloudLastError&&online?'100%':a.kind==='account'?'45%':'0%';$('#settingsCloudSyncBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;$('#settingsCloudDownloadBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;
+  const cloudBytes=bytesOfJson(currentStatePayloadForCloud?.()||{})+bytesOfJson(state.project||{});$('#settingsCloudState').textContent=a.kind==='account'?(online?(cloudLastError?'Pendiente':'Conectado'):'Sin conexión'):'Sin cuenta';$('#settingsCloudData').textContent=a.kind==='account'?`≈ ${formatBytes(cloudBytes)}`:'—';$('#settingsCloudLastSync').textContent=lastKnownCloudSyncAt()?new Date(lastKnownCloudSyncAt()).toLocaleString('es-ES'):'—';$('#settingsCloudPending').textContent=cloudLastError||(!online&&a.kind==='account'?'Cambios locales pendientes':'0');$('#settingsCloudBar').style.width=a.kind==='account'&&!cloudLastError&&online?'100%':a.kind==='account'?'45%':'0%';$('#settingsCloudRecoveryBtn').disabled=!state.projectId||cloudSyncRunning||cloudRestoreRunning;$('#settingsCloudSyncBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;$('#settingsCloudDownloadBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;
 }
 
 function cloneAny(v){return typeof structuredClone==='function'?structuredClone(v):JSON.parse(JSON.stringify(v));}
@@ -3258,7 +3375,7 @@ async function downloadBlob(blob,name){
 async function clearProject(){if(!state.projectId||!confirm(`¿Vaciar todos los mapas, fotos, campañas y dibujos de “${state.project?.name||'este proyecto'}”? La información general del proyecto se conservará.`))return;localStorage.removeItem(projectStateKey(state.projectId));await dbClear('rasters');await dbClear('photos');await dbClear('rasterStyleTiles');await dbClear('vectorLayers');resetStateForProject(state.project);hideFeatureCard();updateCampaignUi();renderLayers();renderSectionList();drawAll();persistState();toast('Datos del proyecto vaciados');}
 
 let dbp=null,dbpName=null;
-function db(){const name=state.project?.dbName||'GeoCauceDB_scratch';if(dbp&&dbpName===name)return dbp;if(dbp){dbp.then(d=>{try{d.close();}catch{}}).catch(()=>{});dbp=null;}dbpName=name;dbp=new Promise((resolve,reject)=>{const req=indexedDB.open(name,3);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains('rasters'))d.createObjectStore('rasters',{keyPath:'id'});if(!d.objectStoreNames.contains('photos'))d.createObjectStore('photos',{keyPath:'id'});if(!d.objectStoreNames.contains('rasterStyleTiles')){const st=d.createObjectStore('rasterStyleTiles',{keyPath:'key'});st.createIndex('rasterId','rasterId',{unique:false});}if(!d.objectStoreNames.contains('vectorLayers'))d.createObjectStore('vectorLayers',{keyPath:'id'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});return dbp;}
+function db(){const name=state.project?.dbName||'GeoCauceDB_scratch';if(dbp&&dbpName===name)return dbp;if(dbp){dbp.then(d=>{try{d.close();}catch{}}).catch(()=>{});dbp=null;}dbpName=name;dbp=new Promise((resolve,reject)=>{const req=indexedDB.open(name,4);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains('rasters'))d.createObjectStore('rasters',{keyPath:'id'});if(!d.objectStoreNames.contains('photos'))d.createObjectStore('photos',{keyPath:'id'});if(!d.objectStoreNames.contains('rasterStyleTiles')){const st=d.createObjectStore('rasterStyleTiles',{keyPath:'key'});st.createIndex('rasterId','rasterId',{unique:false});}if(!d.objectStoreNames.contains('vectorLayers'))d.createObjectStore('vectorLayers',{keyPath:'id'});if(!d.objectStoreNames.contains('cloudStaging'))d.createObjectStore('cloudStaging',{keyPath:'key'});if(!d.objectStoreNames.contains('cloudRecovery'))d.createObjectStore('cloudRecovery',{keyPath:'key'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});return dbp;}
 async function dbPut(store,obj){const d=await db();return new Promise((res,rej)=>{const tx=d.transaction(store,'readwrite');tx.objectStore(store).put(obj);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
 async function dbGet(store,key){const d=await db();return new Promise((res,rej)=>{const r=d.transaction(store).objectStore(store).get(key);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
 async function dbAll(store){const d=await db();return new Promise((res,rej)=>{const r=d.transaction(store).objectStore(store).getAll();r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
@@ -3981,7 +4098,7 @@ function initUi(){
   $('#enterBtn').onclick=$('#openCampaignBtn').onclick=enterApp;
   $('#authCloseBtn').onclick=closeAuthModal;$('#authOfflineBtn').onclick=chooseOfflineEntry;$('#authSwitchMode').onclick=()=>setAuthMode(authUiMode==='signin'?'signup':'signin');$('#authTogglePassword').onclick=()=>{const i=$('#authPassword');i.type=i.type==='password'?'text':'password';};$('#authForm').onsubmit=e=>{e.preventDefault();submitAuth();};
   $('#projectAccountBtn').onclick=openAccountManage;if($('#projectCreateAccountBtn'))$('#projectCreateAccountBtn').onclick=openAccountManage;$('#projectSettingsBtn').onclick=()=>showSettings('projects');$('#settingsFromMapBtn').onclick=()=>{closeFloatingPanels();showSettings('map');};$('#accountManageClose').onclick=closeAccountManage;
-  $('#settingsBackBtn').onclick=closeSettings;$('#settingsAccountChip').onclick=openAccountManage;$('#settingsAccountAction').onclick=openAccountManage;$('#settingsSyncAction').onclick=()=>accountState().kind==='account'?syncNow():openAuthModal('manage','signin');$('#settingsCloudSyncBtn').onclick=uploadCloudChanges;$('#settingsCloudDownloadBtn').onclick=downloadCloudChanges;$('#settingsUpdateAppBtn').onclick=updateGeoCauceApp;$('#settingsExportBackup').onclick=()=>state.projectId?exportProjectPackage():toast('Abre un proyecto para exportar una copia');$('#settingsImportBackup').onclick=()=>$('#projectImportInput').click();
+  $('#settingsBackBtn').onclick=closeSettings;$('#settingsAccountChip').onclick=openAccountManage;$('#settingsAccountAction').onclick=openAccountManage;$('#settingsSyncAction').onclick=()=>accountState().kind==='account'?syncNow():openAuthModal('manage','signin');$('#settingsCloudSyncBtn').onclick=uploadCloudChanges;$('#settingsCloudDownloadBtn').onclick=downloadCloudChanges;$('#settingsCloudRecoveryBtn').onclick=restoreCloudLocalRecovery;$('#settingsUpdateAppBtn').onclick=updateGeoCauceApp;$('#settingsExportBackup').onclick=()=>state.projectId?exportProjectPackage():toast('Abre un proyecto para exportar una copia');$('#settingsImportBackup').onclick=()=>$('#projectImportInput').click();
   const settingBindings={settingInputMode:['inputMode','value'],settingPersistentTool:['persistentTool','checked'],settingLengthUnit:['lengthUnit','value'],settingClastUnit:['clastUnit','value'],settingAreaUnit:['areaUnit','value'],settingVolumeUnit:['volumeUnit','value'],settingCoordMode:['coordMode','value'],settingGpsAccuracy:['gpsMinAccuracy','number'],settingPhotoHeading:['photoHeading','checked'],settingGpsAltitude:['gpsAltitude','checked'],settingShowAccuracy:['showAccuracy','checked'],settingNotebookBg:['notebookBg','value'],settingNotebookAutosave:['notebookAutosave','checked'],settingReachPattern:['reachPattern','value'],settingReachCodes:['reachCodes','value'],settingMobileUi:['mobileUi','value']};
   for(const [id,[key,kind]] of Object.entries(settingBindings)){const el=$('#'+id);if(!el)continue;el.onchange=()=>{appSettings[key]=kind==='checked'?el.checked:kind==='number'?+el.value:el.value;saveAppSettings();if(key==='inputMode'&&appSettings.inputMode==='finger'&&state.tool!=='pan')toast('Modo dedo activo · selecciona Mover para navegar con un dedo');if(['lengthUnit','areaUnit','coordMode','showAccuracy'].includes(key)){updateGnssUi();drawAll();const f=state.features.find(x=>x.id===state.selectedId);if(f)showFeatureCard(f);}};}
 
