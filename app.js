@@ -221,7 +221,13 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false}={}){
   let done=0;
   const put=async(key,base,blob,sig,label,ext)=>{
     const cached=cache[key];
-    if(cached?.sig===sig&&cached?.path){done++;if(manual)cloudProgressUpdate('Verificando · '+label,done,total+2);return cached.path;}
+    if(cached?.sig===sig&&cached?.path){
+      try{
+        const p=cached.path.split('/').map(encodeURIComponent).join('/');
+        await cloudBinaryFetch('/storage/v1/object/authenticated/geocauce-files/'+p,{method:'HEAD',contentType:null});
+        done++;if(manual)cloudProgressUpdate('Verificado · '+label,done,total+2);return cached.path;
+      }catch(e){console.warn('Archivo cloud no verificable; se vuelve a subir',label,e);}
+    }
     const path=`${base}.${cloudUuid()}${ext}`;
     await cloudUploadBlob(path,blob);
     cache[key]={sig,path};done++;if(manual)cloudProgressUpdate('Subiendo · '+label,done,total+2);
@@ -277,8 +283,8 @@ async function cloudRefreshProjectCatalog({quiet=true}={}){
       if(!cloudId)continue;
       // La identidad depende de IDs, nunca del nombre. Priorizar proyectos con datos locales.
       const matches=projectCatalog.filter(p=>p.cloudProjectId===cloudId||p.id===cloudId);
-      let existing=matches.find(p=>!!localStorage.getItem(projectStateKey(p.id)))||matches[0]||null;
-      if(!existing){
+      let existing=matches.find(p=>!!localStorage.getItem(projectStateKey(p.id)))||null;
+      if(!existing&&projectCatalog.some(p=>!p.cloudProjectId&&!!localStorage.getItem(projectStateKey(p.id)))){
         try{
           const key=schema==='legacy'?'id_project':'project_id';
           const snapshots=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=state&limit=1`);
@@ -287,6 +293,7 @@ async function cloudRefreshProjectCatalog({quiet=true}={}){
           if(candidate&&(!candidate.cloudProjectId||candidate.cloudProjectId===cloudId))existing=candidate;
         }catch(e){console.warn('No se pudo resolver la identidad cloud',e);}
       }
+      if(!existing)existing=matches[0]||null;
       const localId=existing?.id||cloudId,hasLocal=!!localStorage.getItem(projectStateKey(localId)),remoteUpdatedAt=Date.parse(row.updated_at||0)||0;
       const meta={id:localId,cloudProjectId:cloudId,name:row.name||'Proyecto',zone:(schema==='legacy'?row.zona:row.zone)||'',torrent:row.torrent||'',author:(schema==='legacy'?row.autor:extra.author)||'',institution:extra.institution||'',startDate:(schema==='legacy'?row.start_date:extra.startDate)||'',crs:row.crs||'EPSG:25831',objective:extra.objective||'',methodology:extra.methodology||'',notes:extra.notes||'',dbName:existing?.dbName||`GeoCauceDB_${localId}`,ownerUserId:(schema==='legacy'?row.owner_user_id:row.owner_id),createdAt:Date.parse(row.created_at||0)||existing?.createdAt||0,updatedAt:remoteUpdatedAt,_cloudCatalogUpdatedAt:remoteUpdatedAt,_cloudOnly:!hasLocal};
       if(!existing)projectCatalog.push(meta);
@@ -398,7 +405,7 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
       await dbPut('cloudStaging',{key:'photos:'+ph.id,record:rec});
     }
     for(const r of lists.rasters){
-      if(!r.id||(!r.cloudPreviewPath&&!r.cloudSourcePath))throw new Error('Falta el archivo del mapa '+(r.name||r.id||''));
+      if(!r.id||!r.cloudPreviewPath)throw new Error('Falta la imagen del mapa '+(r.name||r.id||''));
       const rec={...r};for(const k of ['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize'])delete rec[k];
       if(r.cloudPreviewPath)rec.blob=await get(r.cloudPreviewPath,r.name||'mapa');
       if(r.cloudSourcePath)rec.sourceBlob=await get(r.cloudSourcePath,(r.name||'mapa')+' · original');
