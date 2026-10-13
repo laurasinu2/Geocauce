@@ -197,7 +197,7 @@ async function cloudBinaryFetch(path,{method='GET',body=null,contentType='applic
   const h={'apikey':cfg.key,'Authorization':`Bearer ${session.access_token}`,...headers};
   if(contentType)h['Content-Type']=contentType;
   const r=await fetch(cfg.url+path,{method,headers:h,body});
-  if(!r.ok){let msg=`HTTP ${r.status}`;try{const t=await r.text();if(t){try{const j=JSON.parse(t);msg=j?.message||j?.error||j?.msg||t;}catch{msg=t;}}}catch{}throw new Error(msg);}
+  if(!r.ok){let msg=`HTTP ${r.status}`;try{const t=await r.text();if(t){try{const j=JSON.parse(t);msg=j?.message||j?.error||j?.msg||t;}catch{msg=t;}}}catch{}const err=new Error(msg);err.status=r.status;throw err;}
   return r;
 }
 async function cloudUploadBlob(objectPath,blob){
@@ -210,28 +210,85 @@ async function cloudDownloadBlob(objectPath){
   if(!objectPath)return null;const p=String(objectPath).split('/').map(encodeURIComponent).join('/');
   const r=await cloudBinaryFetch(`/storage/v1/object/authenticated/geocauce-files/${p}`,{method:'GET',contentType:null});return await r.blob();
 }
+async function cloudAssetDigest(blob){
+  if(!(blob instanceof Blob))throw new Error('Archivo local inválido');
+  if(!globalThis.crypto?.subtle)throw new Error('El navegador no permite verificar archivos con SHA-256');
+  // Hash de todos los bytes en fragmentos: evita cargar un GeoTIFF completo en memoria.
+  const chunkSize=4*1024*1024,parts=[];
+  for(let offset=0;offset<blob.size;offset+=chunkSize){
+    const bytes=await blob.slice(offset,Math.min(offset+chunkSize,blob.size)).arrayBuffer();
+    parts.push(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)));
+  }
+  const header=new TextEncoder().encode('GeoCauce:blob:v1:'+blob.size+':'+(blob.type||'')+':'+parts.length+':');
+  const joined=new Uint8Array(header.length+parts.length*32);joined.set(header);
+  parts.forEach((p,i)=>joined.set(p,header.length+i*32));
+  const final=new Uint8Array(await crypto.subtle.digest('SHA-256',joined));
+  return [...final].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
 async function cloudUploadProjectAssets(uid,projectId,{manual=false}={}){
-  // Archivos inmutables por versión: una subida concurrente nunca pisa binarios de otro snapshot.
+  // Las rutas son inmutables por versión. Nunca sobrescribir un archivo compartido por snapshots.
   const photos=await dbAll('photos'),rasters=await dbAll('rasters'),vectorLayers=await dbAll('vectorLayers');
-  const cacheKey=`geocauce-cloud-assets-${projectId}`;
-  let cache={};try{cache=JSON.parse(localStorage.getItem(cacheKey)||'{}')||{};}catch{}
+  const cacheKey=`geocauce-cloud-assets-${projectId}`,globalKey=`geocauce-cloud-asset-index-v1:${uid}`;
+  const readCache=key=>{try{const data=JSON.parse(localStorage.getItem(key)||'{}');return data&&typeof data==='object'&&!Array.isArray(data)?data:{};}catch{return {};}};
+  const cache=readCache(cacheKey),globalCache=readCache(globalKey);
+  const persist=()=>{
+    // Guardar DESPUÉS DE CADA archivo, también durante una subida que termine interrumpida.
+    try{localStorage.setItem(cacheKey,JSON.stringify(cache));}catch(e){console.warn('No se pudo guardar el progreso del proyecto',e);}
+    try{
+      const keys=Object.keys(globalCache);
+      if(keys.length>1500){keys.sort((a,b)=>(globalCache[a]?.savedAt||0)-(globalCache[b]?.savedAt||0));for(const key of keys.slice(0,keys.length-1500))delete globalCache[key];}
+      localStorage.setItem(globalKey,JSON.stringify(globalCache));
+    }catch(e){console.warn('No se pudo guardar el índice de archivos',e);}
+  };
+  const total=photos.length+rasters.reduce((n,r)=>n+(r.blob instanceof Blob?1:0)+(r.sourceBlob instanceof Blob?1:0),0)+vectorLayers.reduce((n,r)=>n+1+(r.renderBlob instanceof Blob?1:0),0);
   const result={photos:[],rasters:[],vectorLayers:[]};
-  const total=photos.reduce((n,r)=>n+(r.blob instanceof Blob?1:0),0)+rasters.reduce((n,r)=>n+(r.blob instanceof Blob?1:0)+(r.sourceBlob instanceof Blob?1:0),0)+vectorLayers.reduce((n,r)=>n+1+(r.renderBlob instanceof Blob?1:0),0);
   const sigBlob=(b,extra='')=>b instanceof Blob?`${b.size}:${b.type||''}:${extra}`:'';
   const tinyHash=str=>{let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return (h>>>0).toString(36);};
-  let done=0;
-  const put=async(key,base,blob,sig,label,ext)=>{
-    const cached=cache[key];
-    if(cached?.sig===sig&&cached?.path){
-      try{
-        const p=cached.path.split('/').map(encodeURIComponent).join('/');
-        await cloudBinaryFetch('/storage/v1/object/authenticated/geocauce-files/'+p,{method:'HEAD',contentType:null});
-        done++;if(manual)cloudProgressUpdate('Verificado · '+label,done,total+2);return cached.path;
-      }catch(e){console.warn('Archivo cloud no verificable; se vuelve a subir',label,e);}
+  let done=0,reused=0,uploaded=0;
+  const exists=async(path,expectedSize)=>{
+    if(!path||!String(path).startsWith(encodeURIComponent(String(uid))+'/'))return false;
+    const p=path.split('/').map(encodeURIComponent).join('/');
+    try{
+      const response=await cloudBinaryFetch('/storage/v1/object/authenticated/geocauce-files/'+p,{method:'HEAD',contentType:null});
+      const size=response.headers.get('content-length');
+      return size===null||Number(size)===expectedSize;
+    }catch(e){
+      // No confundir un fallo de red o permisos con un archivo inexistente.
+      if(e.status===404)return false;
+      throw new Error('No se pudo verificar el archivo cloud '+path+': '+(e.message||e));
     }
-    const path=`${base}.${cloudUuid()}${ext}`;
-    await cloudUploadBlob(path,blob);
-    cache[key]={sig,path};done++;if(manual)cloudProgressUpdate('Subiendo · '+label,done,total+2);
+  };
+  const put=async(key,base,blob,legacySig,label,ext)=>{
+    if(manual)cloudProgressUpdate('Analizando · '+label,done,total+2);
+    const hash=await cloudAssetDigest(blob),fingerprint=`sha256-chunks-v1:${blob.size}:${blob.type||''}:${hash}`;
+    const old=cache[key],global=globalCache[fingerprint];
+    let path=null;
+    // Las entradas antiguas no tenían hash; se migran después de verificar su existencia.
+    if(old?.path&&(old.hash===fingerprint||(old.hash==null&&old.sig===legacySig))){
+      if(await exists(old.path,blob.size))path=old.path;
+    }
+    if(!path&&global?.path&&await exists(global.path,blob.size))path=global.path;
+    if(!path){
+      // Si se cerró la app después de subir el archivo, recuperamos su ruta pendiente.
+      const pending=old?.pending;
+      const candidate=pending?.hash===fingerprint&&pending.path?pending.path:`${base}.${hash}${ext}`;
+      if(await exists(candidate,blob.size)){
+        path=candidate;
+      }else{
+        cache[key]={sig:legacySig,hash:fingerprint,pending:{hash:fingerprint,path:candidate}};
+        persist(); // Antes de empezar: permite reanudar incluso si se cierra la PWA.
+        if(manual)cloudProgressUpdate('Subiendo · '+label,done,total+2);
+        await cloudUploadBlob(candidate,blob);
+        path=candidate;
+        uploaded++;
+      }
+    }
+    if(path!==null&&(!old?.path||old.path!==path||old.hash!==fingerprint))reused++;
+    else if(path!==null&&uploaded===0)reused++; // Primer archivo reutilizado.
+    cache[key]={sig:legacySig,hash:fingerprint,path};
+    globalCache[fingerprint]={path,size:blob.size,savedAt:Date.now()};
+    persist();
+    done++;if(manual)cloudProgressUpdate((path===cache[key]?.pending?.path?'Subido':'Verificado')+' · '+label,done,total+2);
     return path;
   };
   if(manual)cloudProgressStart('Preparando archivos para subir',total+2);
@@ -239,8 +296,8 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false}={}){
     if(!(rec.blob instanceof Blob))throw new Error('La fotografía '+(rec.name||rec.id)+' no tiene archivo local. No se ha creado un snapshot incompleto.');
     const x={...rec};delete x.blob;
     const base=cloudObjectPath(uid,projectId,'photos',rec.id);
-    const path=rec.blob instanceof Blob?await put('photo:'+rec.id,base,rec.blob,sigBlob(rec.blob,rec.date||rec.importedAt||rec.updatedAt||''),rec.name||'foto','.bin'):null;
-    result.photos.push({...x,cloudBlobPath:path,cloudBlobType:rec.blob?.type||null,cloudBlobSize:rec.blob?.size||0});
+    const path=await put('photo:'+rec.id,base,rec.blob,sigBlob(rec.blob,rec.date||rec.importedAt||rec.updatedAt||''),rec.name||'foto','.bin');
+    result.photos.push({...x,cloudBlobPath:path,cloudBlobType:rec.blob.type||null,cloudBlobSize:rec.blob.size,cloudBlobHash:cache['photo:'+rec.id].hash});
   }
   for(const rec of rasters){
     if(!(rec.blob instanceof Blob)&&!(rec.sourceBlob instanceof Blob))throw new Error('El mapa '+(rec.name||rec.id)+' no tiene archivo local. No se ha creado un snapshot incompleto.');
@@ -248,18 +305,16 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false}={}){
     const base=cloudObjectPath(uid,projectId,'rasters',rec.id),extra=rec.importedAt||rec.meta?.importedAt||rec.meta?.sourceWidth||'';
     const previewPath=rec.blob instanceof Blob?await put('raster-preview:'+rec.id,base,rec.blob,sigBlob(rec.blob,extra),rec.name||'mapa','.preview'):null;
     const sourcePath=rec.sourceBlob instanceof Blob?await put('raster-source:'+rec.id,base,rec.sourceBlob,sigBlob(rec.sourceBlob,extra),rec.name||'original','.source'):null;
-    result.rasters.push({...x,cloudPreviewPath:previewPath,cloudSourcePath:sourcePath,cloudPreviewType:rec.blob?.type||null,cloudSourceType:rec.sourceBlob?.type||null,cloudPreviewSize:rec.blob?.size||0,cloudSourceSize:rec.sourceBlob?.size||0});
+    result.rasters.push({...x,cloudPreviewPath:previewPath,cloudSourcePath:sourcePath,cloudPreviewType:rec.blob?.type||null,cloudSourceType:rec.sourceBlob?.type||null,cloudPreviewSize:rec.blob?.size||0,cloudSourceSize:rec.sourceBlob?.size||0,cloudPreviewHash:cache['raster-preview:'+rec.id]?.hash||null,cloudSourceHash:cache['raster-source:'+rec.id]?.hash||null});
   }
   for(const rec of vectorLayers){
     const x={...rec};delete x.features;delete x.renderBlob;
     const base=cloudObjectPath(uid,projectId,'vectors',rec.id),geomText=JSON.stringify(rec.features||[]),geomBlob=new Blob([geomText],{type:'application/json'});
     const geomPath=await put('vector-geometry:'+rec.id,base,geomBlob,`${geomBlob.size}:${tinyHash(geomText)}`,(rec.name||'SHP')+' · geometría','.geometry.json');
     const renderPath=rec.renderBlob instanceof Blob?await put('vector-render:'+rec.id,base,rec.renderBlob,sigBlob(rec.renderBlob,vectorRenderSignature(rec)),(rec.name||'SHP')+' · render','.render'):null;
-    result.vectorLayers.push({...x,cloudFeaturesPath:geomPath,cloudRenderPath:renderPath,cloudFeaturesSize:geomBlob.size,cloudRenderType:rec.renderBlob?.type||null,cloudRenderSize:rec.renderBlob?.size||0});
+    result.vectorLayers.push({...x,cloudFeaturesPath:geomPath,cloudRenderPath:renderPath,cloudFeaturesSize:geomBlob.size,cloudRenderType:rec.renderBlob?.type||null,cloudRenderSize:rec.renderBlob?.size||0,cloudFeaturesHash:cache['vector-geometry:'+rec.id]?.hash||null,cloudRenderHash:cache['vector-render:'+rec.id]?.hash||null});
   }
-  // Cachear solo tras completar todos los archivos.
-  localStorage.setItem(cacheKey,JSON.stringify(cache));
-  return {metadata:result,steps:done,total:total+2};
+  return {metadata:result,steps:done,total:total+2,reused,uploaded};
 }
 // Supabase old: project(id_project UUID), project_snapshots(id_project).
 // Supabase new: projects(id text), project_snapshots(project_id text).
