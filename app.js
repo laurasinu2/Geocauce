@@ -383,6 +383,7 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
     const sv={...snap.state,projectId,sectionPalette:snap.state.sectionPalette||snap.palette||[],appVersion:'0.16.39-android-alpha'};
     const assets=sv.assetMetadata;
     if(!assets){
+      if((sv.referenceLayers||[]).length||(sv.demGroups||[]).length)throw new Error('Esta copia cloud antigua no contiene los archivos de las capas. Se conservan los datos locales.');
       const existing=await Promise.all(['photos','rasters','vectorLayers'].map(n=>dbAll(n)));
       if(existing.some(list=>list.length))throw new Error('La copia cloud no incluye archivos. No se pueden sustituir las capas locales.');
     }
@@ -392,25 +393,26 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
       lists.vectorLayers.reduce((n,x)=>n+(x.cloudFeaturesPath?1:0)+(x.cloudRenderPath?1:0),0);
     let done=0;cloudProgressStart('Descargando archivos del proyecto',total);started=true;
     await dbClear('cloudStaging');
-    const get=async(path,label)=>{
+    const get=async(path,label,expectedSize=null)=>{
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       const blob=await cloudDownloadBlob(path);
       if(!(blob instanceof Blob))throw new Error('Falta el archivo '+label);
+      if(Number(expectedSize)>0&&blob.size!==Number(expectedSize))throw new Error('Archivo incompleto o corrupto: '+label);
       done++;cloudProgressUpdate('Descargando · '+label,done,total);return blob;
     };
     for(const ph of lists.photos){
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       if(!ph.id||!ph.cloudBlobPath)throw new Error('Falta el archivo de la fotografía '+(ph.name||ph.id||''));
       const rec={...ph};delete rec.cloudBlobPath;delete rec.cloudBlobType;delete rec.cloudBlobSize;
-      rec.blob=await get(ph.cloudBlobPath,ph.name||'fotografía');
+      rec.blob=await get(ph.cloudBlobPath,ph.name||'fotografía',ph.cloudBlobSize);
       await dbPut('cloudStaging',{key:'photos:'+ph.id,record:rec});
     }
     for(const r of lists.rasters){
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       if(!r.id||!r.cloudPreviewPath)throw new Error('Falta la imagen del mapa '+(r.name||r.id||''));
       const rec={...r};for(const k of ['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize'])delete rec[k];
-      if(r.cloudPreviewPath)rec.blob=await get(r.cloudPreviewPath,r.name||'mapa');
-      if(r.cloudSourcePath)rec.sourceBlob=await get(r.cloudSourcePath,(r.name||'mapa')+' · original');
+      if(r.cloudPreviewPath)rec.blob=await get(r.cloudPreviewPath,r.name||'mapa',r.cloudPreviewSize);
+      if(r.cloudSourcePath)rec.sourceBlob=await get(r.cloudSourcePath,(r.name||'mapa')+' · original',r.cloudSourceSize);
       if(rec.styleCache)rec.styleCache={...rec.styleCache,ready:false,missing:true};
       await dbPut('cloudStaging',{key:'rasters:'+r.id,record:rec});
     }
@@ -418,9 +420,9 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       if(!vl.id||(!vl.cloudFeaturesPath&&Number(vl.featureCount)>0))throw new Error('Falta la geometría de '+(vl.name||vl.id||'capa'));
       const rec={...vl};for(const k of ['cloudFeaturesPath','cloudRenderPath','cloudFeaturesSize','cloudRenderType','cloudRenderSize'])delete rec[k];
-      rec.features=vl.cloudFeaturesPath?JSON.parse(await (await get(vl.cloudFeaturesPath,vl.name||'capa')).text()):[];
+      rec.features=vl.cloudFeaturesPath?JSON.parse(await (await get(vl.cloudFeaturesPath,vl.name||'capa',vl.cloudFeaturesSize)).text()):[];
       if(!Array.isArray(rec.features))throw new Error('Geometría de capa inválida: '+(vl.name||vl.id));
-      if(vl.cloudRenderPath)rec.renderBlob=await get(vl.cloudRenderPath,(vl.name||'capa')+' · render');
+      if(vl.cloudRenderPath)rec.renderBlob=await get(vl.cloudRenderPath,(vl.name||'capa')+' · render',vl.cloudRenderSize);
       await dbPut('cloudStaging',{key:'vectorLayers:'+vl.id,record:rec});
     }
     if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
@@ -943,7 +945,11 @@ function resetStateForProject(meta=state.project){
   state.tool='pan';state.material='coarse';state.mapInk=[];state.mapInkColor='#d73a49';state.mapInkWidth=4;state.mapInkMode='pen';state.mapPins=[];state.mapContextPoint=null;state.pendingPhotoLocation=null;state.historicalPhotoPoints=[];state.showHistoricalPhotoPoints=true;state.currentHistoricalPointId=null;state.pendingHistoricalPhotoPointId=null;state.pendingHistoricalPhotoMode=null;state.historicalLinkPointId=null;state.currentStopId=null;state.sectionTool='pen';state.sectionMaterial='none';state.sectionColor='#1f2b31';state.sectionFillOpacity=.45;state.sectionMeasureTool='pen';state.sectionStraightSegments=true;state.sectionGeoClass='none';state.sectionZoneClass='channel';state.sectionZoneCustom='';state.campaign='D01';state.editableCampaign='D01';state.comparePrevious=false;state.compareOpacity=.35;state.view={cx:0,cy:0,scale:1,rotation:0};state.view3d={active:false,exaggeration:1};state.rasters=[];state.demGroups=[];state.activeDemGroupId=null;state.referenceLayers=[];state.vectorExtract=null;state.pendingImportedCourseFragments=null;state.features=[];state.selectedId=null;state.currentStroke=null;state.touches=new Map();state.pinch=null;state.panStart=null;state.pointerPan=null;state.gnss=null;state.currentSection=null;state.pendingPhotoFor=null;state.eraseMode='zone';state.eraseSize=38;state.autoPanAfterDraw=false;state.history=[];state.notebook={pages:[],currentPageId:null};state.notebookTool='pen';state.notebookPenColor=appSettings.notebookPenColor||'#1f2b31';state.notebookView={zoom:1,touches:new Map(),pinch:null,pan:null};state.notebookLinkTarget=null;state.activeCourseId=null;state.pendingCourseStroke=null;state.pendingCourseJoin=null;state.pendingReachStart=null;state.pendingReachBoundaryMove=null;state.editReachId=null;state.profileInkTool='pen';state.profileSheetZoom=1;state.profileSheetTouches=new Map();state.profileSheetGesture=null;state.currentProfileCourseId=null;state.currentReachSheetId=null;state.reachSheetZoom=1;state.reachSheetTouches=new Map();state.reachSheetGesture=null;state.reachSheetSchemeTool='pen';state.editCourseId=null;state.editContourFeatureId=null;state.longProfileReachStart=null;
   const root=makeRootCampaign([],{date:displayDate(meta?.startDate)||today(),author:meta?.author||'',event:'initial'});state.campaigns=[root];
 }
+let projectOpenInProgress=false;
 async function openProject(id,opt={}){
+  if(projectOpenInProgress){toast('Espera a que termine de abrirse el proyecto');return;}
+  projectOpenInProgress=true;
+  try{
   if((cloudRestoreRunning||cloudSyncRunning)&&state.projectId&&id!==state.projectId){toast('Espera a que termine la sincronización antes de cambiar de proyecto');return;}
   if(state.view3d?.active)exit3DMode({quiet:true});
   const p=projectById(id);if(!p)return;
@@ -965,6 +971,7 @@ async function openProject(id,opt={}){
   restoreState(id);state.rasters=[];
   hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';
   updateProjectUi();scheduleCloudSync(1200);renderMaterials();updateMaterialButton();updateCampaignUi();$('#eraserSize').value=state.eraseSize;$$('[data-erase-mode]').forEach(b=>b.classList.toggle('active',b.dataset.eraseMode===state.eraseMode));setTool(state.tool,{quiet:true});renderSectionList();updateCompass();updateGnssUi();setTimeout(resize,20);await loadRasters();await hydrateReferenceLayersAfterOpen();touchProject();
+  }finally{projectOpenInProgress=false;}
 }
 function updateProjectUi(){
   refreshAccountUi();
@@ -3149,7 +3156,7 @@ async function loadRasters(){
   const loaded=new Array(all.length);let cursor=0;
   const worker=async()=>{while(cursor<all.length){const i=cursor++,saved=all[i];try{const rec=await rebuildStoredDemHillshade(saved),image=await createImageBitmap(rec.blob),r={...rec,image};if(r.lightMode==null&&r.meta?.sourceType==='geotiff'&&r.sourceBlob?.size>48*1024*1024)r.lightMode=true;normalizeRasterOrientation(r);loaded[i]=r;if(rec!==saved||r.meta?.displayNorthUpFix||r.lightMode!==saved.lightMode)await dbPut('rasters',stripRaster(r));}catch(e){console.warn('Raster guardado no legible',saved.name,e);}}};
   await Promise.all([worker(),worker()]);
-  state.rasters.push(...loaded.filter(Boolean));normalizeDemGroups();renderLayers();drawAll();
+  state.rasters=loaded.filter(Boolean);normalizeDemGroups();renderLayers();drawAll();
 }
 function renderLayers(){
   syncHistoricalPhotoToggle();renderImportQueue();renderDemGroups();
