@@ -161,7 +161,7 @@ async function cloudFetch(path,{method='GET',body=null,auth=true,headers={}}={})
   if(auth&&session?.refresh_token&&sessionExpired(session))session=await refreshCloudSession();
   const h={'apikey':cfg.key,'Content-Type':'application/json',...headers};
   if(auth&&session?.access_token)h.Authorization=`Bearer ${session.access_token}`;
-  const r=await fetch(cfg.url+path,{method,headers:h,body:body==null?undefined:JSON.stringify(body)});
+  const r=await fetch(cfg.url+path,{method,headers:h,body:body==null?undefined:JSON.stringify(body),cache:'no-store'});
   let data=null;const txt=await r.text();if(txt){try{data=JSON.parse(txt);}catch{data=txt;}}
   if(!r.ok){const msg=data?.msg||data?.message||data?.error_description||data?.error||`HTTP ${r.status}`;const e=new Error(msg);e.status=r.status;throw e;}
   return data;
