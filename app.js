@@ -131,6 +131,7 @@ let cloudSyncTimer=null;
 let cloudSyncRunning=false;
 let cloudLastError='';
 let cloudLastSyncAt=0;
+let cloudSchemaMode=null;
 
 function cloudConfig(){
   const c=window.GEOCAUCE_CLOUD_CONFIG||{};
@@ -163,7 +164,7 @@ async function cloudFetch(path,{method='GET',body=null,auth=true,headers={}}={})
   if(auth&&session?.access_token)h.Authorization=`Bearer ${session.access_token}`;
   const r=await fetch(cfg.url+path,{method,headers:h,body:body==null?undefined:JSON.stringify(body),cache:'no-store'});
   let data=null;const txt=await r.text();if(txt){try{data=JSON.parse(txt);}catch{data=txt;}}
-  if(!r.ok){const msg=data?.msg||data?.message||data?.error_description||data?.error||`HTTP ${r.status}`;const e=new Error(msg);e.status=r.status;throw e;}
+  if(!r.ok){const msg=data?.msg||data?.message||data?.error_description||data?.error||`HTTP ${r.status}`;const e=new Error(msg);e.status=r.status;e.code=data?.code||'';throw e;}
   return data;
 }
 
@@ -202,23 +203,37 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false}={}){
   localStorage.setItem(cacheKey,JSON.stringify(cache));if(manual&&uploaded===0&&total)toast('Archivos cloud ya actualizados · guardando cambios…',1200);return result;
 }
 
+// Supabase old: project(id_project UUID), project_snapshots(id_project).
+// Supabase new: projects(id text), project_snapshots(project_id text).
+// Prefer modern only if its table exists; do not mistake permission failures for missing tables.
+async function cloudSchema(){
+  if(cloudSchemaMode)return cloudSchemaMode;
+  try{
+    await cloudFetch('/rest/v1/projects?select=id&limit=0');
+    return cloudSchemaMode='modern';
+  }catch(e){
+    if(e.status!==404&&!/PGRST205|42P01|could not find the table|relation .* does not exist/i.test([e.code,e.message].join(' ')))throw e;
+  }
+  await cloudFetch('/rest/v1/project?select=id_project&limit=0');
+  return cloudSchemaMode='legacy';
+}
 async function cloudRefreshProjectCatalog({quiet=true}={}){
   if(!cloudConfigured()||!navigator.onLine||!loadCloudSession()?.access_token)return false;
   try{
-    // The deployed contract is SUPABASE_SETUP.sql: projects + project_snapshots.
-    const rows=await cloudFetch('/rest/v1/projects?select=*&order=updated_at.desc');
+    const schema=await cloudSchema();
+    const rows=await cloudFetch(schema==='legacy'?'/rest/v1/project?deleted_at=is.null&select=*&order=updated_at.desc':'/rest/v1/projects?select=*&order=updated_at.desc');
     if(!Array.isArray(rows))throw new Error('Respuesta de proyectos no válida');
     for(const row of rows){
-      const cloudId=row.id,extra=row.metadata&&typeof row.metadata==='object'?row.metadata:{};
+      const cloudId=schema==='legacy'?row.id_project:row.id,extra=schema==='legacy'?row:(row.metadata&&typeof row.metadata==='object'?row.metadata:{});
       if(!cloudId)continue;
       const i=projectCatalog.findIndex(p=>p.cloudProjectId===cloudId||p.id===cloudId);
       const existing=i>=0?projectCatalog[i]:null,localId=existing?.id||cloudId;
       const hasLocal=!!localStorage.getItem(projectStateKey(localId));
       const remoteUpdatedAt=Date.parse(row.updated_at||0)||0;
-      const meta={id:localId,cloudProjectId:cloudId,name:row.name||'Proyecto',zone:row.zone||'',torrent:row.torrent||'',author:extra.author||'',institution:extra.institution||'',startDate:extra.startDate||'',crs:row.crs||'EPSG:25831',objective:extra.objective||'',methodology:extra.methodology||'',notes:extra.notes||'',dbName:existing?.dbName||`GeoCauceDB_${localId}`,ownerUserId:row.owner_id,createdAt:Date.parse(row.created_at||0)||existing?.createdAt||0,updatedAt:remoteUpdatedAt,_cloudUpdatedAt:remoteUpdatedAt,_cloudOnly:!hasLocal};
+      const meta={id:localId,cloudProjectId:cloudId,name:row.name||'Proyecto',zone:(schema==='legacy'?row.zona:row.zone)||'',torrent:row.torrent||'',author:(schema==='legacy'?row.autor:extra.author)||'',institution:extra.institution||'',startDate:(schema==='legacy'?row.start_date:extra.startDate)||'',crs:row.crs||'EPSG:25831',objective:extra.objective||'',methodology:extra.methodology||'',notes:extra.notes||'',dbName:existing?.dbName||`GeoCauceDB_${localId}`,ownerUserId:(schema==='legacy'?row.owner_user_id:row.owner_id),createdAt:Date.parse(row.created_at||0)||existing?.createdAt||0,updatedAt:remoteUpdatedAt,_cloudUpdatedAt:remoteUpdatedAt,_cloudOnly:!hasLocal};
       if(i<0)projectCatalog.push(meta);
       else if(hasLocal&&(existing.updatedAt||0)>remoteUpdatedAt)
-        projectCatalog[i]={...existing,cloudProjectId:cloudId,ownerUserId:row.owner_id,_cloudUpdatedAt:remoteUpdatedAt,_cloudOnly:false};
+        projectCatalog[i]={...existing,cloudProjectId:cloudId,ownerUserId:(schema==='legacy'?row.owner_user_id:row.owner_id),_cloudUpdatedAt:remoteUpdatedAt,_cloudOnly:false};
       else projectCatalog[i]={...existing,...meta};
     }
     saveProjectCatalog();if(state.screen==='projects')renderProjectHome();return true;
@@ -229,7 +244,8 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
   try{
     if(manual)toast('Descargando proyecto de Supabase…',1600);
     const p0=projectById(projectId),cloudId=p0?ensureCloudProjectId(p0):(isUuid(projectId)?projectId:null);if(!cloudId)throw new Error('El proyecto no tiene identificador cloud válido');
-    const rows=await cloudFetch(`/rest/v1/project_snapshots?project_id=eq.${encodeURIComponent(cloudId)}&select=*`);const snap=Array.isArray(rows)?rows[0]:null;if(!snap?.state)throw new Error('No hay una copia cloud de este proyecto');
+    const schema=await cloudSchema();
+    const rows=await cloudFetch(`/rest/v1/project_snapshots?${schema==='legacy'?'id_project':'project_id'}=eq.${encodeURIComponent(cloudId)}&select=*`);const snap=Array.isArray(rows)?rows[0]:null;if(!snap?.state)throw new Error('No hay una copia cloud de este proyecto');
     const sv={...snap.state,projectId,sectionPalette:snap.state.sectionPalette||snap.palette||[],appVersion:'0.16.39-android-alpha'};localStorage.setItem(projectStateKey(projectId),JSON.stringify(sv));if(Array.isArray(sv.sectionPalette)&&sv.sectionPalette.length){sectionPalette=sv.sectionPalette;saveSectionPalette();}
     const assets=sv.assetMetadata||{};await dbClear('photos').catch(()=>{});await dbClear('rasters').catch(()=>{});await dbClear('rasterStyleTiles').catch(()=>{});await dbClear('vectorLayers').catch(()=>{});
     for(const ph of assets.photos||[]){const rec={...ph};delete rec.cloudBlobPath;delete rec.cloudBlobType;delete rec.cloudBlobSize;if(ph.cloudBlobPath){try{rec.blob=await cloudDownloadBlob(ph.cloudBlobPath);await dbPut('photos',rec);nativeSyncPhotoMeta(rec);}catch(e){console.warn('Foto cloud',ph.id,e);}}}
@@ -259,7 +275,7 @@ async function signUpCloud(email,password){
 async function signOutCloud(){
   const session=loadCloudSession();
   try{if(session?.access_token&&cloudConfigured())await cloudFetch('/auth/v1/logout?scope=local',{method:'POST',body:{},auth:true});}catch(e){console.warn('logout cloud',e);}
-  saveCloudSession(null);setAuthEntryChoice('offline');cloudLastError='';refreshAccountUi();
+  saveCloudSession(null);setAuthEntryChoice('offline');cloudLastError='';cloudSchemaMode=null;refreshAccountUi();
 }
 function setAuthMessage(msg,type='error'){
   const el=$('#authMessage');if(!el)return;if(!msg){el.classList.add('hidden');el.textContent='';return;}el.textContent=msg;el.classList.remove('hidden','success');if(type==='success')el.classList.add('success');
@@ -369,16 +385,21 @@ async function syncCurrentProjectToCloud({manual=false}={}){
     const session2=sessionExpired(loadCloudSession())?await refreshCloudSession():loadCloudSession();const uid=session2?.user?.id;if(!uid)throw new Error('Sesión sin identificador de usuario');
     if(manual)toast('Sincronizando datos y archivos…',1400);
     const p=state.project,cloudId=ensureCloudProjectId(p);if(!cloudId)throw new Error('No se pudo asignar ID cloud al proyecto');
+    const schema=await cloudSchema();
     if(p._cloudOnly)throw new Error('Proyecto solo en la nube: ábrelo y descárgalo antes de subir cambios');
     const uploadingProjectId=state.projectId;
     const assetMetadata=await cloudUploadProjectAssets(uid,cloudId,{manual});
     if(state.projectId!==uploadingProjectId)throw new Error('El proyecto cambió durante la subida. Vuelve a sincronizarlo');
     const payload=await cloudStructuredSnapshot(assetMetadata);
     const now=new Date().toISOString();if(p.ownerUserId!==uid){p.ownerUserId=uid;p.updatedAt=Date.now();saveProjectCatalog();state.project=p;nativeSyncProject(payload);}
-    const row={id:cloudId,owner_id:uid,name:p.name||'Proyecto',zone:p.zone||null,torrent:p.torrent||null,crs:p.crs||'EPSG:25831',metadata:{author:p.author||'',institution:p.institution||'',startDate:p.startDate||'',objective:p.objective||'',methodology:p.methodology||'',notes:p.notes||''},updated_at:now};
-    await cloudFetch('/rest/v1/projects?on_conflict=id',{method:'POST',body:[row],headers:{Prefer:'resolution=merge-duplicates,return=minimal'}});
-    const snap={project_id:cloudId,owner_id:uid,state:payload,palette:cloneAny(sectionPalette||[]),updated_at:now};
-    await cloudFetch('/rest/v1/project_snapshots?on_conflict=project_id',{method:'POST',body:[snap],headers:{Prefer:'resolution=merge-duplicates,return=minimal'}});
+    const row=schema==='legacy'
+      ? {id_project:cloudId,owner_user_id:uid,name:p.name||'Proyecto',zona:p.zone||null,torrent:p.torrent||null,institution:p.institution||null,autor:p.author||null,start_date:p.startDate||new Date().toISOString().slice(0,10),crs:p.crs||'EPSG:25831',objective:p.objective||null,methodology:p.methodology||null,notes:p.notes||null,updated_at:now,deleted_at:null}
+      : {id:cloudId,owner_id:uid,name:p.name||'Proyecto',zone:p.zone||null,torrent:p.torrent||null,crs:p.crs||'EPSG:25831',metadata:{author:p.author||'',institution:p.institution||'',startDate:p.startDate||'',objective:p.objective||'',methodology:p.methodology||'',notes:p.notes||''},updated_at:now};
+    await cloudFetch(schema==='legacy'?'/rest/v1/project?on_conflict=id_project':'/rest/v1/projects?on_conflict=id',{method:'POST',body:[row],headers:{Prefer:'resolution=merge-duplicates,return=minimal'}});
+    const snap=schema==='legacy'
+      ? {id_project:cloudId,schema_version:4,state:payload,updated_at:now}
+      : {project_id:cloudId,owner_id:uid,state:payload,palette:cloneAny(sectionPalette||[]),updated_at:now};
+    await cloudFetch(schema==='legacy'?'/rest/v1/project_snapshots?on_conflict=id_project':'/rest/v1/project_snapshots?on_conflict=project_id',{method:'POST',body:[snap],headers:{Prefer:'resolution=merge-duplicates,return=minimal'}});
     cloudLastSyncAt=Date.now();cloudLastError='';p.cloudProjectId=cloudId;p._cloudOnly=false;p._cloudSyncedAt=cloudLastSyncAt;p._cloudUpdatedAt=Date.parse(now)||cloudLastSyncAt;saveProjectCatalog();if(manual)toast('Proyecto y archivos sincronizados ✓');refreshAccountUi();return true;
   }catch(e){cloudLastError=`Pendiente: ${e.message||e}`;console.warn('Cloud sync',e);if(manual)toast(`No se pudo sincronizar: ${e.message||e}`,5000);refreshAccountUi();return false;}
   finally{cloudSyncRunning=false;}

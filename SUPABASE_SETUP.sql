@@ -1,3 +1,6 @@
+-- ATENCIÓN: SOLO para una base nueva sin tablas anteriores. NO ejecutar si ya existe
+-- public.project con id_project y public.project_snapshots con id_project.
+-- Para el esquema antiguo usar SUPABASE_LEGACY_DIAGNOSTIC.sql (solo lectura).
 -- GeoCauce v0.16.37-alpha · esquema cloud para cuenta + sincronización completa del proyecto
 -- Ejecutar una sola vez en Supabase > SQL Editor.
 -- IMPORTANTE: usa únicamente la publishable/anon key en la app. Nunca pongas service_role en GeoCauce.
