@@ -293,7 +293,7 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
     const x={...rec};delete x.features;delete x.renderBlob;
     const base=cloudObjectPath(uid,projectId,'vectors',rec.id),geomText=JSON.stringify(rec.features||[]),geomBlob=new Blob([geomText],{type:'application/json'});
     const geomPath=await put('vector-geometry:'+rec.id,base,geomBlob,`${geomBlob.size}:${tinyHash(geomText)}`,(rec.name||'SHP')+' · geometría','.geometry.json');
-    const renderPath=rec.renderBlob instanceof Blob?await put('vector-render:'+rec.id,base,rec.renderBlob,sigBlob(rec.renderBlob,vectorRenderSignature(rec)),(rec.name||'SHP')+' · render','.render'):null;
+    const renderPath=rec.renderBlob instanceof Blob?await put('vector-render:'+rec.id,base,rec.renderBlob,sigBlob(rec.renderBlob,vectorRenderSignature(rec)+'|'+(rec.renderCache?.createdAt||'')),(rec.name||'SHP')+' · render','.render'):null;
     result.vectorLayers.push({...x,cloudFeaturesPath:geomPath,cloudRenderPath:renderPath,cloudFeaturesSize:geomBlob.size,cloudRenderType:rec.renderBlob?.type||null,cloudRenderSize:rec.renderBlob?.size||0,cloudFeaturesHash:cache['vector-geometry:'+rec.id]?.hash||null,cloudRenderHash:cache['vector-render:'+rec.id]?.hash||null});
   }
   return {metadata:result,steps:done,total:total+2,reused,uploaded};
@@ -346,12 +346,15 @@ async function cloudCollectObsoleteAssets(uid,cloudId,before,after){
   if(!pending.length)return;
   localStorage.setItem(queueKey,JSON.stringify(pending)); // retry safely after interruptions
   const referenced=new Set();
+  let inspected=0;
   for(let offset=0;;offset+=300){
     const snapshots=await cloudFetch('/rest/v1/project_snapshots?select=assets:state->assetMetadata&limit=300&offset='+offset);
     if(!Array.isArray(snapshots))throw new Error('No se pudo comprobar referencias de archivos');
+    inspected+=snapshots.length;
     for(const snapshot of snapshots)for(const path of paths(snapshot.assets))referenced.add(path);
     if(snapshots.length<300)break;
   }
+  if(!inspected)throw new Error('No se encontraron snapshots verificables; se conservan los archivos');
   const disposable=pending.filter(p=>!referenced.has(p));
   for(let i=0;i<disposable.length;i+=100){
     const batch=disposable.slice(i,i+100);
@@ -431,7 +434,7 @@ function cloudSeedDownloadedAssets(uid,cloudId,lists){
   }
   for(const v of lists.vectorLayers||[]){
     add('vector-geometry:'+v.id,v.cloudFeaturesPath,v.cloudFeaturesHash,null,v.cloudFeaturesSize);
-    add('vector-render:'+v.id,v.cloudRenderPath,v.cloudRenderHash,null,v.cloudRenderSize);
+    add('vector-render:'+v.id,v.cloudRenderPath,v.cloudRenderHash,sig(v.cloudRenderSize,v.cloudRenderType,vectorRenderSignature(v)+'|'+(v.renderCache?.createdAt||'')),v.cloudRenderSize);
   }
   try{localStorage.setItem(cacheKey,JSON.stringify(cache));localStorage.setItem(globalKey,JSON.stringify(globalCache));}catch(e){console.warn('No se pudo recordar los archivos descargados',e);}
 }
