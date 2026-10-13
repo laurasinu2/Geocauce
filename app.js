@@ -132,6 +132,26 @@ let cloudSyncRunning=false;
 let cloudLastError='';
 let cloudLastSyncAt=0;
 let cloudSchemaMode=null;
+let cloudRestoreRunning=false;
+let cloudProgressTimer=null;
+function cloudProgressStart(label,total=1){
+  clearTimeout(cloudProgressTimer);
+  const panel=document.getElementById('cloudProgressPanel');if(panel)panel.hidden=false;
+  cloudProgressUpdate(label,0,total);
+}
+function cloudProgressUpdate(label,done,total){
+  const panel=document.getElementById('cloudProgressPanel');if(!panel)return;
+  const safeTotal=Math.max(1,total||1),percent=Math.max(0,Math.min(100,Math.round((done||0)/safeTotal*100)));
+  const title=document.getElementById('cloudProgressTitle'),detail=document.getElementById('cloudProgressDetail'),bar=document.getElementById('cloudProgressBar');
+  if(title)title.textContent=label||'Sincronizando…';
+  if(detail)detail.textContent=`${Math.min(done||0,safeTotal)} de ${safeTotal} pasos · ${percent}%`;
+  if(bar){bar.style.width=`${percent}%`;bar.parentElement?.setAttribute('aria-valuenow',String(percent));}
+}
+function cloudProgressFinish(ok,message){
+  cloudProgressUpdate(message||(ok?'Sincronización completada':'Sincronización interrumpida'),1,1);
+  const detail=document.getElementById('cloudProgressDetail');if(detail)detail.textContent=ok?'Completado':'No se han aplicado cambios incompletos';
+  clearTimeout(cloudProgressTimer);cloudProgressTimer=setTimeout(()=>{const p=document.getElementById('cloudProgressPanel');if(p)p.hidden=true;},ok?4000:10000);
+}
 
 function cloudConfig(){
   const c=window.GEOCAUCE_CLOUD_CONFIG||{};
@@ -226,15 +246,26 @@ async function cloudRefreshProjectCatalog({quiet=true}={}){
     for(const row of rows){
       const cloudId=schema==='legacy'?row.id_project:row.id,extra=schema==='legacy'?row:(row.metadata&&typeof row.metadata==='object'?row.metadata:{});
       if(!cloudId)continue;
-      const i=projectCatalog.findIndex(p=>p.cloudProjectId===cloudId||p.id===cloudId);
-      const existing=i>=0?projectCatalog[i]:null,localId=existing?.id||cloudId;
-      const hasLocal=!!localStorage.getItem(projectStateKey(localId));
-      const remoteUpdatedAt=Date.parse(row.updated_at||0)||0;
-      const meta={id:localId,cloudProjectId:cloudId,name:row.name||'Proyecto',zone:(schema==='legacy'?row.zona:row.zone)||'',torrent:row.torrent||'',author:(schema==='legacy'?row.autor:extra.author)||'',institution:extra.institution||'',startDate:(schema==='legacy'?row.start_date:extra.startDate)||'',crs:row.crs||'EPSG:25831',objective:extra.objective||'',methodology:extra.methodology||'',notes:extra.notes||'',dbName:existing?.dbName||`GeoCauceDB_${localId}`,ownerUserId:(schema==='legacy'?row.owner_user_id:row.owner_id),createdAt:Date.parse(row.created_at||0)||existing?.createdAt||0,updatedAt:remoteUpdatedAt,_cloudUpdatedAt:remoteUpdatedAt,_cloudOnly:!hasLocal};
-      if(i<0)projectCatalog.push(meta);
-      else if(hasLocal&&(existing.updatedAt||0)>remoteUpdatedAt)
-        projectCatalog[i]={...existing,cloudProjectId:cloudId,ownerUserId:(schema==='legacy'?row.owner_user_id:row.owner_id),_cloudUpdatedAt:remoteUpdatedAt,_cloudOnly:false};
-      else projectCatalog[i]={...existing,...meta};
+      // La identidad depende de IDs, nunca del nombre. Priorizar proyectos con datos locales.
+      const matches=projectCatalog.filter(p=>p.cloudProjectId===cloudId||p.id===cloudId);
+      let existing=matches.find(p=>!!localStorage.getItem(projectStateKey(p.id)))||matches[0]||null;
+      if(!existing){
+        try{
+          const key=schema==='legacy'?'id_project':'project_id';
+          const snapshots=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=state&limit=1`);
+          const originalId=snapshots?.[0]?.state?.projectId;
+          const candidate=originalId?projectById(originalId):null;
+          if(candidate&&(!candidate.cloudProjectId||candidate.cloudProjectId===cloudId))existing=candidate;
+        }catch(e){console.warn('No se pudo resolver la identidad cloud',e);}
+      }
+      const localId=existing?.id||cloudId,hasLocal=!!localStorage.getItem(projectStateKey(localId)),remoteUpdatedAt=Date.parse(row.updated_at||0)||0;
+      const meta={id:localId,cloudProjectId:cloudId,name:row.name||'Proyecto',zone:(schema==='legacy'?row.zona:row.zone)||'',torrent:row.torrent||'',author:(schema==='legacy'?row.autor:extra.author)||'',institution:extra.institution||'',startDate:(schema==='legacy'?row.start_date:extra.startDate)||'',crs:row.crs||'EPSG:25831',objective:extra.objective||'',methodology:extra.methodology||'',notes:extra.notes||'',dbName:existing?.dbName||`GeoCauceDB_${localId}`,ownerUserId:(schema==='legacy'?row.owner_user_id:row.owner_id),createdAt:Date.parse(row.created_at||0)||existing?.createdAt||0,updatedAt:remoteUpdatedAt,_cloudCatalogUpdatedAt:remoteUpdatedAt,_cloudOnly:!hasLocal};
+      if(!existing)projectCatalog.push(meta);
+      else{
+        const i=projectCatalog.indexOf(existing);
+        projectCatalog[i]=hasLocal?{...existing,cloudProjectId:cloudId,ownerUserId:meta.ownerUserId,_cloudCatalogUpdatedAt:remoteUpdatedAt,_cloudOnly:false}:{...existing,...meta};
+        if(state.projectId===localId)state.project=projectCatalog[i];
+      }
     }
     saveProjectCatalog();if(state.screen==='projects')renderProjectHome();return true;
   }catch(e){cloudLastError=`No se pudo leer la nube: ${e.message||e}`;refreshAccountUi();if(!quiet)toast(cloudLastError,5000);return false;}
@@ -644,7 +675,7 @@ async function renderSettings(){
   $('#settingsProfileName').textContent=a.kind==='account'?'Usuario de campo':'Modo local';$('#settingsProfileEmail').textContent=email;$('#settingsProfileInstitution').textContent=state.project?.institution||'Los proyectos se guardan en este dispositivo';
   $('#settingInputMode').value=appSettings.inputMode;$('#settingPersistentTool').checked=!!appSettings.persistentTool;$('#settingLengthUnit').value=appSettings.lengthUnit;$('#settingClastUnit').value=appSettings.clastUnit;$('#settingAreaUnit').value=appSettings.areaUnit;$('#settingVolumeUnit').value=appSettings.volumeUnit;$('#settingCoordMode').value=appSettings.coordMode;$('#settingGpsAccuracy').value=String(appSettings.gpsMinAccuracy);$('#settingPhotoHeading').checked=!!appSettings.photoHeading;$('#settingGpsAltitude').checked=!!appSettings.gpsAltitude;$('#settingShowAccuracy').checked=!!appSettings.showAccuracy;$('#settingNotebookBg').value=appSettings.notebookBg;$('#settingNotebookAutosave').checked=!!appSettings.notebookAutosave;if($('#settingReachPattern'))$('#settingReachPattern').value=appSettings.reachPattern||'{CURS}-{N}';if($('#settingReachCodes'))$('#settingReachCodes').value=appSettings.reachCodes||'';if($('#settingMobileUi'))$('#settingMobileUi').value=appSettings.mobileUi||'auto';
   const st=await storageBreakdown();$('#settingsLocalMaps').textContent=formatBytes(st.maps);$('#settingsLocalPhotos').textContent=formatBytes(st.photos);$('#settingsLocalNotebook').textContent=formatBytes(st.notebook);$('#settingsLocalData').textContent=formatBytes(st.data);$('#settingsLocalTotal').textContent=formatBytes(st.usage??st.totalKnown);$('#settingsLocalBar').style.width=st.quota&&st.usage?`${Math.min(100,st.usage/st.quota*100)}%`:`${Math.min(100,st.totalKnown/(1024*1024*1024)*100)}%`;
-  const cloudBytes=bytesOfJson(currentStatePayloadForCloud?.()||{})+bytesOfJson(state.project||{});$('#settingsCloudState').textContent=a.kind==='account'?(online?(cloudLastError?'Pendiente':'Conectado'):'Sin conexión'):'Sin cuenta';$('#settingsCloudData').textContent=a.kind==='account'?`≈ ${formatBytes(cloudBytes)}`:'—';$('#settingsCloudLastSync').textContent=lastKnownCloudSyncAt()?new Date(lastKnownCloudSyncAt()).toLocaleString('es-ES'):'—';$('#settingsCloudPending').textContent=cloudLastError||(!online&&a.kind==='account'?'Cambios locales pendientes':'0');$('#settingsCloudBar').style.width=a.kind==='account'&&!cloudLastError&&online?'100%':a.kind==='account'?'45%':'0%';$('#settingsCloudSyncBtn').disabled=a.kind!=='account'||!online;$('#settingsCloudDownloadBtn').disabled=a.kind!=='account'||!online;
+  const cloudBytes=bytesOfJson(currentStatePayloadForCloud?.()||{})+bytesOfJson(state.project||{});$('#settingsCloudState').textContent=a.kind==='account'?(online?(cloudLastError?'Pendiente':'Conectado'):'Sin conexión'):'Sin cuenta';$('#settingsCloudData').textContent=a.kind==='account'?`≈ ${formatBytes(cloudBytes)}`:'—';$('#settingsCloudLastSync').textContent=lastKnownCloudSyncAt()?new Date(lastKnownCloudSyncAt()).toLocaleString('es-ES'):'—';$('#settingsCloudPending').textContent=cloudLastError||(!online&&a.kind==='account'?'Cambios locales pendientes':'0');$('#settingsCloudBar').style.width=a.kind==='account'&&!cloudLastError&&online?'100%':a.kind==='account'?'45%':'0%';$('#settingsCloudSyncBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;$('#settingsCloudDownloadBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;
 }
 
 function cloneAny(v){return typeof structuredClone==='function'?structuredClone(v):JSON.parse(JSON.stringify(v));}
@@ -685,7 +716,7 @@ function renderProjectHome(){
   const root=$('#projectList');if(!root)return;root.innerHTML='';
   if(!projectCatalog.length){root.innerHTML=`<div class="project-empty">${iconImg('icons/proyecto.png')}<b>No hay proyectos todavía</b><span>Crea el primero para empezar a cartografiar.</span></div>`;return;}
   const active=localStorage.getItem(ACTIVE_PROJECT_KEY);
-  [...projectCatalog].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).forEach(p=>{
+  [...projectCatalog].filter(p=>!(p._cloudOnly&&!localStorage.getItem(projectStateKey(p.id))&&projectCatalog.some(other=>other.id!==p.id&&other.cloudProjectId===p.cloudProjectId&&!!localStorage.getItem(projectStateKey(other.id))))).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).forEach(p=>{
     const st=projectStats(p.id),card=document.createElement('article');card.className='project-card'+(p.id===active?' active':'');
     const where=[p.torrent,p.zone].filter(Boolean).join(' · ')||'Zona sin especificar';
     const desc=p.objective||p.notes||'Sin descripción del estudio.',cloudTag=p._cloudOnly?' · ☁ nube':'';
@@ -3172,7 +3203,7 @@ async function exportProjectPackage(){
 function formatBytes(n){if(!Number.isFinite(n))return '—';const u=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++;}return `${n.toFixed(i?1:0)} ${u[i]}`;}
 async function importProjectPackage(file){
   if(!file)return;try{toast('Leyendo proyecto…',1800);const enc=new TextEncoder(),magic=enc.encode(PACKAGE_MAGIC),prefix=new Uint8Array(await file.slice(0,magic.length+4).arrayBuffer());for(let i=0;i<magic.length;i++)if(prefix[i]!==magic[i])throw Error('No es una copia GeoCauce V0.11 válida');const hlen=new DataView(prefix.buffer,prefix.byteOffset+magic.length,4).getUint32(0,true);if(hlen<=0||hlen>20_000_000)throw Error('Cabecera de proyecto inválida');const hstart=magic.length+4,h=JSON.parse(new TextDecoder().decode(await file.slice(hstart,hstart+hlen).arrayBuffer()));if(h.format!=='GeoCaucePackage')throw Error('Formato no reconocido');let offset=hstart+hlen;const assetBlobs=[];for(const a of h.assets||[]){assetBlobs.push(file.slice(offset,offset+a.size,a.type||'application/octet-stream'));offset+=a.size;}
-    if(state.projectId)persistState();const id='P'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),base=h.project||{},name0=base.name||'Proyecto importado',same=projectCatalog.some(p=>p.name===name0),meta={...base,id,name:same?`${name0} (importado)`:name0,createdAt:Date.now(),updatedAt:Date.now(),dbName:`GeoCauceDB_${id}`};projectCatalog.push(meta);saveProjectCatalog();localStorage.setItem(ACTIVE_PROJECT_KEY,id);const sv={...(h.state||{}),appVersion:'0.16.39',projectId:id};localStorage.setItem(projectStateKey(id),JSON.stringify(sv));if(Array.isArray(h.sectionPalette)&&h.sectionPalette.length){sectionPalette=h.sectionPalette;saveSectionPalette();}
+    if(state.projectId)persistState();const id='P'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),base=h.project||{},name0=base.name||'Proyecto importado',same=projectCatalog.some(p=>p.name===name0),meta={...base,id,name:same?`${name0} (importado)`:name0,createdAt:Date.now(),updatedAt:Date.now(),dbName:`GeoCauceDB_${id}`};for(const k of ['cloudProjectId','ownerUserId','_cloudUpdatedAt','_cloudSyncedAt','_cloudPulledAt','_cloudCatalogUpdatedAt','_cloudOnly'])delete meta[k];projectCatalog.push(meta);saveProjectCatalog();localStorage.setItem(ACTIVE_PROJECT_KEY,id);const sv={...(h.state||{}),appVersion:'0.16.39',projectId:id};localStorage.setItem(projectStateKey(id),JSON.stringify(sv));if(Array.isArray(h.sectionPalette)&&h.sectionPalette.length){sectionPalette=h.sectionPalette;saveSectionPalette();}
     if(dbp){try{const d=await dbp;d.close();}catch{}dbp=null;dbpName=null;}state.projectId=id;state.project=meta;
     for(const r of h.rasters||[]){const rec={...r,blob:r.blobAsset!=null?assetBlobs[r.blobAsset]:null,sourceBlob:r.sourceAsset!=null?assetBlobs[r.sourceAsset]:null};delete rec.blobAsset;delete rec.sourceAsset;if(rec.styleCache)rec.styleCache={...rec.styleCache,ready:false,missing:true};if(rec.blob){await dbPut('rasters',rec);nativeSyncRasterMeta(rec);}}
     for(const ph of h.photos||[]){const rec={...ph,blob:ph.blobAsset!=null?assetBlobs[ph.blobAsset]:null};delete rec.blobAsset;if(rec.blob){await dbPut('photos',rec);nativeSyncPhotoMeta(rec);}}
