@@ -871,8 +871,8 @@ function resize() {
   const overlayDpr = Math.min(devicePixelRatio || 1, 2.25);
   for (const c of [mapCanvas, inkCanvas, featureCanvas]) {
     const dpr = c===mapCanvas ? mapDpr : overlayDpr;
-    c.width = Math.round(r.width * dpr);
-    c.height = Math.round(r.height * dpr);
+    const width=Math.round(r.width*dpr),height=Math.round(r.height*dpr);
+    if(c.width!==width||c.height!==height){c.width=width;c.height=height;}
     c._dpr = dpr;
   }
   drawAll();
@@ -1708,7 +1708,7 @@ function startMapAction(e,p){
   if(state.tool==='editContour'){
     const f=state.features.find(x=>x.id===state.editContourFeatureId&&x.closed);if(!f){toast('Selecciona un polígono cerrado');return;}
     const snap=nearestPointOnClosedRing(p,f);if(!snap||snap.d>28){toast('Empieza cerca del borde para activar el imán');return;}
-    state.currentStroke={tool:'editContour',points:[snap.screen],pressure:[e.pressure||.5],snapStart:snap,snapEnd:null};inkCanvas.setPointerCapture?.(e.pointerId);drawCurrentStroke();return;
+    state.currentStroke={tool:'editContour',points:[snap.screen],pressure:[e.pressure||.5],pointerId:e.pointerId,snapStart:snap,snapEnd:null};inkCanvas.setPointerCapture?.(e.pointerId);drawCurrentStroke();return;
   }
   const activeTool=state.tool==='mapInk'?(state.mapInkMode==='eraser'?'mapInkErase':'mapInk'):state.tool;state.currentStroke={tool:activeTool,points:[p],pressure:[e.pressure||.5],pointerId:e.pointerId};
   inkCanvas.setPointerCapture?.(e.pointerId);
@@ -1747,7 +1747,7 @@ function onMapPointerMove(e){
   if(e.pointerType==='touch' && (appSettings.inputMode==='pen'||(appSettings.inputMode==='finger'&&state.tool==='pan'))){moveTouchNavigation(e,p);return;}
   if(state.pointerPan && state.pointerPan.pointerId===e.pointerId){movePan(p);return;}
   if(moveVectorEndpointDrag(p,e.pointerId))return;
-  if(state.currentStroke){
+  if(state.currentStroke&&state.currentStroke.pointerId===e.pointerId){
     if(state.currentStroke.tool==='section'){state.currentStroke.points.length=1;state.currentStroke.points.push(p);}else state.currentStroke.points.push(p);
     if(state.currentStroke.tool==='editContour'){const f=state.features.find(x=>x.id===state.editContourFeatureId);const q=nearestPointOnClosedRing(p,f);state.currentStroke.snapEnd=q&&q.d<=28?q:null;}
     drawCurrentStroke();
@@ -1757,8 +1757,12 @@ function onMapPointerUp(e){
   if(e.pointerType==='touch' && (appSettings.inputMode==='pen'||(appSettings.inputMode==='finger'&&state.tool==='pan'))){endTouchNavigation(e);return;}
   if(state.pointerPan && state.pointerPan.pointerId===e.pointerId){endPan();return;}
   if(endVectorEndpointDrag(e.pointerId))return;
-  if(!state.currentStroke)return;
+  if(!state.currentStroke||state.currentStroke.pointerId!==e.pointerId)return;
   const st=state.currentStroke;state.currentStroke=null;clearCtx(inkCtx,inkCanvas);
+  if(e.type==='pointercancel'){drawAll();return;}
+  const finalPoint=eventPoint(e,inkCanvas);
+  if(st.tool==='section'){st.points=[st.points[0],finalPoint];}
+  else if(!st.points.length||Math.hypot(finalPoint.x-st.points[st.points.length-1].x,finalPoint.y-st.points[st.points.length-1].y)>0.25)st.points.push(finalPoint);
   if(st.points.length<2){if(st.tool==='section')toast('Arrossega la secció sobre el mapa per definir-ne longitud i angle.');return;}
   const worldPts=st.points.filter((_,i)=>i%2===0||i===st.points.length-1).map(screenToWorld);
   let returnToPan=false;
@@ -1814,7 +1818,7 @@ function deleteFeature(id,ask=true){
   else{state.features=state.features.filter(x=>x.id!==id);if(f.type==='reach'&&f.courseId)renumberCourseReaches(f.courseId);if(f.type==='basin')state.features.filter(x=>x.type==='watercourse'&&x.basinId===id).forEach(x=>x.basinId=null);}
   if(state.selectedId===id)state.selectedId=null;hideFeatureCard();persistState();updateHydroFab();drawAll();renderSectionList();toast(`${label} eliminado`);
 }
-function eventPoint(e,el){const r=el.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+function eventPoint(e,el){const r=el.getBoundingClientRect();const size=screenSize();return{x:(e.clientX-r.left)*(size.w/(r.width||size.w||1)),y:(e.clientY-r.top)*(size.h/(r.height||size.h||1))};}
 
 function featureCardPresentation(f){
   const material=f.material?materialById(f.material):null;
