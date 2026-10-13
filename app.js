@@ -148,7 +148,7 @@ function cloudProgressUpdate(label,done,total){
   if(bar){bar.style.width=`${percent}%`;bar.parentElement?.setAttribute('aria-valuenow',String(percent));}
 }
 function cloudProgressFinish(ok,message){
-  cloudProgressUpdate(message||(ok?'Sincronización completada':'Sincronización interrumpida'),1,1);
+  cloudProgressUpdate(message||(ok?'Sincronización completada':'Sincronización interrumpida'),ok?1:0,1);
   const detail=document.getElementById('cloudProgressDetail');if(detail)detail.textContent=ok?'Completado':'Transferencia interrumpida. Revisa el mensaje de error.';
   clearTimeout(cloudProgressTimer);cloudProgressTimer=setTimeout(()=>{const p=document.getElementById('cloudProgressPanel');if(p)p.hidden=true;},ok?4000:10000);
 }
@@ -399,12 +399,14 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
       done++;cloudProgressUpdate('Descargando · '+label,done,total);return blob;
     };
     for(const ph of lists.photos){
+      if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       if(!ph.id||!ph.cloudBlobPath)throw new Error('Falta el archivo de la fotografía '+(ph.name||ph.id||''));
       const rec={...ph};delete rec.cloudBlobPath;delete rec.cloudBlobType;delete rec.cloudBlobSize;
       rec.blob=await get(ph.cloudBlobPath,ph.name||'fotografía');
       await dbPut('cloudStaging',{key:'photos:'+ph.id,record:rec});
     }
     for(const r of lists.rasters){
+      if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       if(!r.id||!r.cloudPreviewPath)throw new Error('Falta la imagen del mapa '+(r.name||r.id||''));
       const rec={...r};for(const k of ['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize'])delete rec[k];
       if(r.cloudPreviewPath)rec.blob=await get(r.cloudPreviewPath,r.name||'mapa');
@@ -413,6 +415,7 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
       await dbPut('cloudStaging',{key:'rasters:'+r.id,record:rec});
     }
     for(const vl of lists.vectorLayers){
+      if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       if(!vl.id||(!vl.cloudFeaturesPath&&Number(vl.featureCount)>0))throw new Error('Falta la geometría de '+(vl.name||vl.id||'capa'));
       const rec={...vl};for(const k of ['cloudFeaturesPath','cloudRenderPath','cloudFeaturesSize','cloudRenderType','cloudRenderSize'])delete rec[k];
       rec.features=vl.cloudFeaturesPath?JSON.parse(await (await get(vl.cloudFeaturesPath,vl.name||'capa')).text()):[];
@@ -424,6 +427,10 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
     cloudProgressUpdate('Guardando copia de seguridad local',done+1,total);
     await cloudCommitStaging(projectId,sv);
     await dbClear('cloudStaging').catch(()=>{});
+    if(ANDROID_NATIVE){
+      for(const ph of await dbAll('photos'))nativeSyncPhotoMeta(ph);
+      for(const r of await dbAll('rasters'))nativeSyncRasterMeta(r);
+    }
     if(Array.isArray(sv.sectionPalette)&&sv.sectionPalette.length){sectionPalette=sv.sectionPalette;saveSectionPalette();}
     const p=projectById(projectId);
     if(p){p.cloudProjectId=cloudId;p._cloudOnly=false;p._cloudPulledAt=Date.now();p._cloudUpdatedAt=Date.parse(snap.updated_at||0)||0;saveProjectCatalog();}
@@ -438,7 +445,7 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
     if(started)cloudProgressFinish(false,'Descarga interrumpida');
     if(manual)toast(cloudLastError,6500);
     refreshAccountUi();return false;
-  }finally{cloudRestoreRunning=false;}
+  }finally{cloudRestoreRunning=false;refreshAccountUi();}
 }
 async function refreshCloudSession(){
   const old=loadCloudSession();if(!old?.refresh_token)throw new Error('No hay sesión para renovar');
@@ -560,6 +567,8 @@ async function downloadCloudChanges(){
     if(cloudTime&&known&&(state.project._cloudSyncedAt||state.project._cloudPulledAt)&&cloudTime<=known+1000){
       toast('La nube no contiene una versión más reciente');return false;
     }
+    const priorRecovery=await dbGet('cloudRecovery','state').catch(()=>null);
+    if(priorRecovery?.state&&!confirm('Ya existe una versión local anterior recuperable. Una nueva descarga reemplazará esa copia. Exporta un archivo .geocauce si quieres conservarla. ¿Continuar?'))return false;
     if(!confirm('Se descargará la versión de la nube. GeoCauce guardará primero una copia recuperable de los datos locales de este proyecto. No se mezclan cambios de ambos dispositivos. ¿Continuar?'))return false;
     const id=state.projectId;
     if(!await restoreProjectFromCloud(id,{manual:true}))return false;
@@ -640,7 +649,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
     if(manual){cloudProgressUpdate('Sincronización completada',assets.total,assets.total);cloudProgressFinish(true,'Subida completada');toast('Proyecto y archivos sincronizados ✓');}
     refreshAccountUi();return true;
   }catch(e){cloudLastError=`Pendiente: ${e.message||e}`;console.warn('Cloud sync',e);if(manual){cloudProgressFinish(false,'Error al subir');toast(`No se pudo sincronizar: ${e.message||e}`,6500);}refreshAccountUi();return false;}
-  finally{cloudSyncRunning=false;}
+  finally{cloudSyncRunning=false;refreshAccountUi();}
 }
 function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);/* Subidas solo manuales: evita pisar cambios de otro dispositivo. */}
 function persistStateLocalOnly(){
@@ -935,6 +944,7 @@ function resetStateForProject(meta=state.project){
   const root=makeRootCampaign([],{date:displayDate(meta?.startDate)||today(),author:meta?.author||'',event:'initial'});state.campaigns=[root];
 }
 async function openProject(id,opt={}){
+  if((cloudRestoreRunning||cloudSyncRunning)&&state.projectId&&id!==state.projectId){toast('Espera a que termine la sincronización antes de cambiar de proyecto');return;}
   if(state.view3d?.active)exit3DMode({quiet:true});
   const p=projectById(id);if(!p)return;
   const needsCloudRestore=!localStorage.getItem(projectStateKey(id))||p._cloudOnly===true;
@@ -3398,7 +3408,7 @@ function restoreState(projectId=state.projectId){
     if(!rawState&&ANDROID_NATIVE){try{const pack=JSON.parse(nativeCall('getProjectSnapshot',projectId)||'{}');if(pack?.state){rawState=JSON.stringify(pack.state);localStorage.setItem(projectStateKey(projectId),rawState);if(Array.isArray(pack.palette)&&pack.palette.length){sectionPalette=pack.palette;saveSectionPalette();}}}catch(e){console.warn('No se pudo restaurar SQLite',e);}}
     const sv=JSON.parse(rawState||'null');
     if(!sv){return;}
-    state.tool=sv.appVersion?sv.tool||state.tool:'pan';state.material=sv.material||state.material;state.mapInk=Array.isArray(sv.mapInk)?sv.mapInk:[];state.mapInkColor=sv.mapInkColor||'#d73a49';state.mapInkWidth=Math.max(1,+sv.mapInkWidth||4);state.mapInkMode=sv.mapInkMode==='eraser'?'eraser':'pen';state.mapPins=Array.isArray(sv.mapPins)?sv.mapPins:[];state.historicalPhotoPoints=Array.isArray(sv.historicalPhotoPoints)?sv.historicalPhotoPoints:[];state.showHistoricalPhotoPoints=sv.showHistoricalPhotoPoints!==false;state.notebook=sv.notebook||state.notebook;state.activeCourseId=sv.activeCourseId||null;state.referenceLayers=Array.isArray(sv.referenceLayers)?sv.referenceLayers:[];state.demGroups=Array.isArray(sv.demGroups)?sv.demGroups:[];state.activeDemGroupId=sv.activeDemGroupId||null;state.view={...(sv.view||state.view),rotation:sv.view?.rotation||0};state.eraseMode=sv.eraseMode||state.eraseMode;state.eraseSize=sv.eraseSize||state.eraseSize;state.autoPanAfterDraw=sv.autoPanAfterDraw!==false;state.comparePrevious=!!sv.comparePrevious;state.compareOpacity=Number.isFinite(+sv.compareOpacity)?+sv.compareOpacity:.35;
+    state.tool=sv.appVersion?sv.tool||state.tool:'pan';state.material=sv.material||state.material;state.mapInk=Array.isArray(sv.mapInk)?sv.mapInk:[];state.mapInkColor=sv.mapInkColor||'#d73a49';state.mapInkWidth=Math.max(1,+sv.mapInkWidth||4);state.mapInkMode=sv.mapInkMode==='eraser'?'eraser':'pen';state.mapPins=Array.isArray(sv.mapPins)?sv.mapPins:[];state.historicalPhotoPoints=Array.isArray(sv.historicalPhotoPoints)?sv.historicalPhotoPoints:[];state.showHistoricalPhotoPoints=sv.showHistoricalPhotoPoints!==false;state.notebook=sv.notebook||state.notebook;state.activeCourseId=sv.activeCourseId||null;state.referenceLayers=Array.isArray(sv.referenceLayers)?sv.referenceLayers.filter((layer,i,all)=>!layer?.id||all.findIndex(x=>x?.id===layer.id)===i):[];state.demGroups=Array.isArray(sv.demGroups)?sv.demGroups:[];state.activeDemGroupId=sv.activeDemGroupId||null;state.view={...(sv.view||state.view),rotation:sv.view?.rotation||0};state.eraseMode=sv.eraseMode||state.eraseMode;state.eraseSize=sv.eraseSize||state.eraseSize;state.autoPanAfterDraw=sv.autoPanAfterDraw!==false;state.comparePrevious=!!sv.comparePrevious;state.compareOpacity=Number.isFinite(+sv.compareOpacity)?+sv.compareOpacity:.35;
     const alreadyIncremental=Array.isArray(sv.campaigns)&&sv.campaigns.length&&sv.campaigns.every(c=>Array.isArray(c.upserts)&&Array.isArray(c.deleted)&&Array.isArray(c.order));
     if(alreadyIncremental){
       state.campaigns=sv.campaigns.map(c=>({...c,parentId:c.parentId||null,author:c.author||'',event:c.event||'none',notes:c.notes||'',upserts:(c.upserts||[]).map(f=>normalizeFeature(f,c.id)),deleted:[...(c.deleted||[])],order:[...(c.order||[])],createdAt:c.createdAt||Date.now()}));
