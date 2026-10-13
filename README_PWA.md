@@ -33,3 +33,9 @@ Todas las ventanas `.modal` se colocan en una capa global fuera de pantallas con
 Si aparece un error RLS que menciona la tabla **singular** `project`, Safari está ejecutando código antiguo: la app actual usa `projects`. Primero entra en Configuración > Almacenamiento en la nube y pulsa **Actualizar aplicación**. El botón actualiza el service worker y recarga la interfaz con una URL nueva para evitar caché antigua, sin borrar almacenamiento local. La versión muestra la etiqueta **Versión nube r6**.
 
 Es imprescindible que hayas ejecutado `SUPABASE_SETUP.sql` en el SQL Editor del proyecto Supabase correcto. Este script crea y protege `public.projects` y `public.project_snapshots` sin borrar las tablas anteriores. **No** elimines `project`, cuentas ni datos antiguos hasta que hayas exportado una copia y confirmado la sincronización correcta.
+
+## Bases clásicas existentes (nube r7)
+
+La r7 detecta el esquema antiguo `public.project` (singular, `id_project`, `owner_user_id`) con `public.project_snapshots(id_project, schema_version, state)` además del moderno `public.projects`. No necesita que borres los proyectos. Cuando existe la tabla moderna, la prioriza por compatibilidad con las actualizaciones recientes.
+
+**No ejecutes `SUPABASE_SETUP.sql` sobre una base antigua** sin revisar su tabla de snapshots: `CREATE TABLE IF NOT EXISTS` no modifica columnas antiguas. La aplicación no arregla por sí sola las políticas RLS de Supabase. Usa `SUPABASE_LEGACY_DIAGNOSTIC.sql` para consultar los permisos actuales y preparar una solución específica, sin desactivar RLS ni borrar datos.
