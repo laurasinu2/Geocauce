@@ -701,7 +701,7 @@ async function uploadCloudChanges(){
   try{
     const remote=await cloudRemoteSnapshotInfo(),remoteTime=Date.parse(remote?.updated_at||0)||0;
     const known=state.project._cloudUpdatedAt||0;
-    if(remote&&(!known||(!state.project._cloudSyncedAt&&!state.project._cloudPulledAt)||Math.abs(remoteTime-known)>1000)){
+    if(remote&&(!known||(!state.project._cloudSyncedAt&&!state.project._cloudPulledAt)||remoteTime!==known)){
       const choice=await cloudConflictChoice();
       if(choice==='cancel')return false;
       if(choice==='download')return await downloadCloudChanges();
@@ -723,7 +723,7 @@ async function downloadCloudChanges(){
     const remote=await cloudRemoteSnapshotInfo();
     if(!remote){toast('Todavía no hay una copia de este proyecto en la nube');return false;}
     const cloudTime=Date.parse(remote.updated_at||0)||0,known=state.project._cloudUpdatedAt||0;
-    if(cloudTime&&known&&(state.project._cloudSyncedAt||state.project._cloudPulledAt)&&cloudTime<=known+1000){
+    if(cloudTime&&known&&(state.project._cloudSyncedAt||state.project._cloudPulledAt)&&cloudTime===known){
       toast('La nube no contiene una versión más reciente');return false;
     }
     const priorRecovery=await dbGet('cloudRecovery','state').catch(()=>null);
