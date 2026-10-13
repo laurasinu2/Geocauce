@@ -146,6 +146,7 @@ function cloudProgressUpdate(label,done,total){
   if(title)title.textContent=label||'Sincronizando…';
   if(detail)detail.textContent=`${Math.min(done||0,safeTotal)} de ${safeTotal} pasos · ${percent}%`;
   if(bar){bar.style.width=`${percent}%`;bar.parentElement?.setAttribute('aria-valuenow',String(percent));}
+  const settingsBar=document.getElementById('settingsCloudBar');if(settingsBar)settingsBar.style.width=`${percent}%`;
 }
 function cloudProgressFinish(ok,message){
   cloudProgressUpdate(message||(ok?'Sincronización completada':'Sincronización interrumpida'),ok?1:0,1);
@@ -235,12 +236,14 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false}={}){
   };
   if(manual)cloudProgressStart('Preparando archivos para subir',total+2);
   for(const rec of photos){
+    if(!(rec.blob instanceof Blob))throw new Error('La fotografía '+(rec.name||rec.id)+' no tiene archivo local. No se ha creado un snapshot incompleto.');
     const x={...rec};delete x.blob;
     const base=cloudObjectPath(uid,projectId,'photos',rec.id);
     const path=rec.blob instanceof Blob?await put('photo:'+rec.id,base,rec.blob,sigBlob(rec.blob,rec.date||rec.importedAt||rec.updatedAt||''),rec.name||'foto','.bin'):null;
     result.photos.push({...x,cloudBlobPath:path,cloudBlobType:rec.blob?.type||null,cloudBlobSize:rec.blob?.size||0});
   }
   for(const rec of rasters){
+    if(!(rec.blob instanceof Blob)&&!(rec.sourceBlob instanceof Blob))throw new Error('El mapa '+(rec.name||rec.id)+' no tiene archivo local. No se ha creado un snapshot incompleto.');
     const x={...rec};delete x.blob;delete x.sourceBlob;delete x.image;
     const base=cloudObjectPath(uid,projectId,'rasters',rec.id),extra=rec.importedAt||rec.meta?.importedAt||rec.meta?.sourceWidth||'';
     const previewPath=rec.blob instanceof Blob?await put('raster-preview:'+rec.id,base,rec.blob,sigBlob(rec.blob,extra),rec.name||'mapa','.preview'):null;
@@ -551,7 +554,7 @@ async function uploadCloudChanges(){
   try{
     const remote=await cloudRemoteSnapshotInfo(),remoteTime=Date.parse(remote?.updated_at||0)||0;
     const known=state.project._cloudUpdatedAt||0;
-    if(remote&&(!known||(!state.project._cloudSyncedAt&&!state.project._cloudPulledAt)||remoteTime>known+1000)){
+    if(remote&&(!known||(!state.project._cloudSyncedAt&&!state.project._cloudPulledAt)||Math.abs(remoteTime-known)>1000)){
       toast('Conflicto: la nube tiene datos no descargados en este dispositivo. No se ha sobrescrito nada.',7500);
       return false;
     }
@@ -857,8 +860,9 @@ async function renderSettings(){
   $('#settingsAccountName').textContent=a.kind==='account'?a.email:'Sin cuenta';$('#settingsAccountStatus').textContent=a.kind==='account'?(online?'Cuenta · nube disponible':'Sin conexión · datos en local'):'Datos guardados en local';
   $('#settingsProfileName').textContent=a.kind==='account'?'Usuario de campo':'Modo local';$('#settingsProfileEmail').textContent=email;$('#settingsProfileInstitution').textContent=state.project?.institution||'Los proyectos se guardan en este dispositivo';
   $('#settingInputMode').value=appSettings.inputMode;$('#settingPersistentTool').checked=!!appSettings.persistentTool;$('#settingLengthUnit').value=appSettings.lengthUnit;$('#settingClastUnit').value=appSettings.clastUnit;$('#settingAreaUnit').value=appSettings.areaUnit;$('#settingVolumeUnit').value=appSettings.volumeUnit;$('#settingCoordMode').value=appSettings.coordMode;$('#settingGpsAccuracy').value=String(appSettings.gpsMinAccuracy);$('#settingPhotoHeading').checked=!!appSettings.photoHeading;$('#settingGpsAltitude').checked=!!appSettings.gpsAltitude;$('#settingShowAccuracy').checked=!!appSettings.showAccuracy;$('#settingNotebookBg').value=appSettings.notebookBg;$('#settingNotebookAutosave').checked=!!appSettings.notebookAutosave;if($('#settingReachPattern'))$('#settingReachPattern').value=appSettings.reachPattern||'{CURS}-{N}';if($('#settingReachCodes'))$('#settingReachCodes').value=appSettings.reachCodes||'';if($('#settingMobileUi'))$('#settingMobileUi').value=appSettings.mobileUi||'auto';
+  const recovery=state.projectId?await dbGet('cloudRecovery','state').catch(()=>null):null;
   const st=await storageBreakdown();$('#settingsLocalMaps').textContent=formatBytes(st.maps);$('#settingsLocalPhotos').textContent=formatBytes(st.photos);$('#settingsLocalNotebook').textContent=formatBytes(st.notebook);$('#settingsLocalData').textContent=formatBytes(st.data);$('#settingsLocalTotal').textContent=formatBytes(st.usage??st.totalKnown);$('#settingsLocalBar').style.width=st.quota&&st.usage?`${Math.min(100,st.usage/st.quota*100)}%`:`${Math.min(100,st.totalKnown/(1024*1024*1024)*100)}%`;
-  const cloudBytes=bytesOfJson(currentStatePayloadForCloud?.()||{})+bytesOfJson(state.project||{});$('#settingsCloudState').textContent=a.kind==='account'?(online?(cloudLastError?'Pendiente':'Conectado'):'Sin conexión'):'Sin cuenta';$('#settingsCloudData').textContent=a.kind==='account'?`≈ ${formatBytes(cloudBytes)}`:'—';$('#settingsCloudLastSync').textContent=lastKnownCloudSyncAt()?new Date(lastKnownCloudSyncAt()).toLocaleString('es-ES'):'—';$('#settingsCloudPending').textContent=cloudLastError||(!online&&a.kind==='account'?'Cambios locales pendientes':'0');$('#settingsCloudBar').style.width=a.kind==='account'&&!cloudLastError&&online?'100%':a.kind==='account'?'45%':'0%';$('#settingsCloudRecoveryBtn').disabled=!state.projectId||cloudSyncRunning||cloudRestoreRunning;$('#settingsCloudSyncBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;$('#settingsCloudDownloadBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;
+  const cloudBytes=bytesOfJson(currentStatePayloadForCloud?.()||{})+bytesOfJson(state.project||{});$('#settingsCloudState').textContent=a.kind==='account'?(online?(cloudLastError?'Pendiente':'Conectado'):'Sin conexión'):'Sin cuenta';$('#settingsCloudData').textContent=a.kind==='account'?`≈ ${formatBytes(cloudBytes)}`:'—';$('#settingsCloudLastSync').textContent=lastKnownCloudSyncAt()?new Date(lastKnownCloudSyncAt()).toLocaleString('es-ES'):'—';$('#settingsCloudPending').textContent=cloudLastError||(!online&&a.kind==='account'?'Sin conexión':'Sin comprobar');$('#settingsCloudBar').style.width='0%';if($('#settingsCloudRecoveryBtn'))$('#settingsCloudRecoveryBtn').disabled=!state.projectId||!recovery?.state||cloudSyncRunning||cloudRestoreRunning;$('#settingsCloudSyncBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;$('#settingsCloudDownloadBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;
 }
 
 function cloneAny(v){return typeof structuredClone==='function'?structuredClone(v):JSON.parse(JSON.stringify(v));}
@@ -902,7 +906,7 @@ function renderProjectHome(){
   [...projectCatalog].filter(p=>!(p._cloudOnly&&!localStorage.getItem(projectStateKey(p.id))&&projectCatalog.some(other=>other.id!==p.id&&other.cloudProjectId===p.cloudProjectId&&!!localStorage.getItem(projectStateKey(other.id))))).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).forEach(p=>{
     const st=projectStats(p.id),card=document.createElement('article');card.className='project-card'+(p.id===active?' active':'');
     const where=[p.torrent,p.zone].filter(Boolean).join(' · ')||'Zona sin especificar';
-    const desc=p.objective||p.notes||'Sin descripción del estudio.',cloudTag=p._cloudOnly?' · ☁ nube':'';
+    const desc=p.objective||p.notes||'Sin descripción del estudio.',possibleDuplicate=!!p.cloudProjectId&&projectCatalog.some(other=>other.id!==p.id&&other.cloudProjectId===p.cloudProjectId&&!!localStorage.getItem(projectStateKey(other.id))),cloudTag=(p._cloudOnly?' · ☁ nube':'')+(possibleDuplicate?' · ⚠ mismo proyecto cloud':'');
     card.innerHTML=`<div class="project-card-head">${iconImg('icons/proyecto.png')}<div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(where)}${cloudTag}</p></div></div>
       <div class="project-card-meta"><span><b>${st.campaigns}</b> campañas</span><span><b>${st.elements}</b> elementos</span><span>Autor: <b>${escapeHtml(p.author||'—')}</b></span><span>CRS: <b>${escapeHtml(p.crs||'EPSG:25831')}</b></span></div>
       <div class="project-card-desc">${escapeHtml(desc)}</div>
@@ -4170,7 +4174,7 @@ function initUi(){
   $('#enterBtn').onclick=$('#openCampaignBtn').onclick=enterApp;
   $('#authCloseBtn').onclick=closeAuthModal;$('#authOfflineBtn').onclick=chooseOfflineEntry;$('#authSwitchMode').onclick=()=>setAuthMode(authUiMode==='signin'?'signup':'signin');$('#authTogglePassword').onclick=()=>{const i=$('#authPassword');i.type=i.type==='password'?'text':'password';};$('#authForm').onsubmit=e=>{e.preventDefault();submitAuth();};
   $('#projectAccountBtn').onclick=openAccountManage;if($('#projectCreateAccountBtn'))$('#projectCreateAccountBtn').onclick=openAccountManage;$('#projectSettingsBtn').onclick=()=>showSettings('projects');$('#settingsFromMapBtn').onclick=()=>{closeFloatingPanels();showSettings('map');};$('#accountManageClose').onclick=closeAccountManage;
-  $('#settingsBackBtn').onclick=closeSettings;$('#settingsAccountChip').onclick=openAccountManage;$('#settingsAccountAction').onclick=openAccountManage;$('#settingsSyncAction').onclick=()=>accountState().kind==='account'?syncNow():openAuthModal('manage','signin');$('#settingsCloudSyncBtn').onclick=uploadCloudChanges;$('#settingsCloudDownloadBtn').onclick=downloadCloudChanges;$('#settingsCloudRecoveryBtn').onclick=restoreCloudLocalRecovery;$('#settingsUpdateAppBtn').onclick=updateGeoCauceApp;$('#settingsExportBackup').onclick=()=>state.projectId?exportProjectPackage():toast('Abre un proyecto para exportar una copia');$('#settingsImportBackup').onclick=()=>$('#projectImportInput').click();
+  $('#settingsBackBtn').onclick=closeSettings;$('#settingsAccountChip').onclick=openAccountManage;$('#settingsAccountAction').onclick=openAccountManage;$('#settingsSyncAction').onclick=()=>accountState().kind==='account'?syncNow():openAuthModal('manage','signin');$('#settingsCloudSyncBtn').onclick=uploadCloudChanges;$('#settingsCloudDownloadBtn').onclick=downloadCloudChanges;if($('#settingsCloudRecoveryBtn'))$('#settingsCloudRecoveryBtn').onclick=restoreCloudLocalRecovery;$('#settingsUpdateAppBtn').onclick=updateGeoCauceApp;$('#settingsExportBackup').onclick=()=>state.projectId?exportProjectPackage():toast('Abre un proyecto para exportar una copia');$('#settingsImportBackup').onclick=()=>$('#projectImportInput').click();
   const settingBindings={settingInputMode:['inputMode','value'],settingPersistentTool:['persistentTool','checked'],settingLengthUnit:['lengthUnit','value'],settingClastUnit:['clastUnit','value'],settingAreaUnit:['areaUnit','value'],settingVolumeUnit:['volumeUnit','value'],settingCoordMode:['coordMode','value'],settingGpsAccuracy:['gpsMinAccuracy','number'],settingPhotoHeading:['photoHeading','checked'],settingGpsAltitude:['gpsAltitude','checked'],settingShowAccuracy:['showAccuracy','checked'],settingNotebookBg:['notebookBg','value'],settingNotebookAutosave:['notebookAutosave','checked'],settingReachPattern:['reachPattern','value'],settingReachCodes:['reachCodes','value'],settingMobileUi:['mobileUi','value']};
   for(const [id,[key,kind]] of Object.entries(settingBindings)){const el=$('#'+id);if(!el)continue;el.onchange=()=>{appSettings[key]=kind==='checked'?el.checked:kind==='number'?+el.value:el.value;saveAppSettings();if(key==='inputMode'&&appSettings.inputMode==='finger'&&state.tool!=='pan')toast('Modo dedo activo · selecciona Mover para navegar con un dedo');if(['lengthUnit','areaUnit','coordMode','showAccuracy'].includes(key)){updateGnssUi();drawAll();const f=state.features.find(x=>x.id===state.selectedId);if(f)showFeatureCard(f);}};}
 
