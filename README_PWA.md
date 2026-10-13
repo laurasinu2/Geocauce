@@ -27,3 +27,9 @@ No borres la PWA ni limpies sus datos antes de hacer una copia `.geocauce` del p
 ## Modales siempre visibles (corrección PWA)
 
 Todas las ventanas `.modal` se colocan en una capa global fuera de pantallas con `z-index` propios. La ventana abierta más recientemente queda encima de las anteriores, también sobre Configuración y la interfaz móvil. Los paneles móviles de observación y carga comparten esa capa. El botón Cuenta de Proyectos y el perfil móvil abren directamente la gestión de cuenta. Cache de recursos PWA: r5.
+
+## Recuperación de Safari con versión antigua (nube r6)
+
+Si aparece un error RLS que menciona la tabla **singular** `project`, Safari está ejecutando código antiguo: la app actual usa `projects`. Primero entra en Configuración > Almacenamiento en la nube y pulsa **Actualizar aplicación**. El botón actualiza el service worker y recarga la interfaz con una URL nueva para evitar caché antigua, sin borrar almacenamiento local. La versión muestra la etiqueta **Versión nube r6**.
+
+Es imprescindible que hayas ejecutado `SUPABASE_SETUP.sql` en el SQL Editor del proyecto Supabase correcto. Este script crea y protege `public.projects` y `public.project_snapshots` sin borrar las tablas anteriores. **No** elimines `project`, cuentas ni datos antiguos hasta que hayas exportado una copia y confirmado la sincronización correcta.
