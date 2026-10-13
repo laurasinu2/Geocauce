@@ -11,8 +11,8 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css" />
-  <link rel="stylesheet" href="mobile-pwa.css" />
+  <link rel="stylesheet" href="styles.css?v=20261013-cloud-r6" />
+  <link rel="stylesheet" href="mobile-pwa.css?v=20261013-cloud-r6" />
 </head>
 <body>
   <div id="app">
@@ -179,6 +179,10 @@ CON | Confluencia"></textarea></div>
             <dl class="storage-breakdown"><dt>Datos estructurados conocidos</dt><dd id="settingsCloudData">—</dd><dt>Última sincronización</dt><dd id="settingsCloudLastSync">—</dd><dt>Pendiente</dt><dd id="settingsCloudPending">—</dd></dl>
             <p class="settings-note">Se sincronizan también los metadatos de fotografías y mapas, pero los archivos binarios de fotos y GeoTIFF permanecen locales; su subida al Storage se añadirá aparte.</p>
             <button id="settingsCloudSyncBtn" class="primary full icon-text"><img src="icons/sincronizar.svg" alt=""><span>Sincronizar ahora</span></button>
+            <div class="settings-inline-actions" style="margin-top:12px">
+              <button id="settingsUpdateAppBtn" type="button" class="secondary icon-text"><img src="icons/cambio.png" alt=""><span>Actualizar aplicación</span></button>
+              <small id="geocauceBuildLabel" style="align-self:center">Versión nube r6</small>
+            </div>
           </section>
         </div>
       </main>
@@ -1213,11 +1217,11 @@ CON | Confluencia"></textarea></div>
     </div>
 
   </div>
-  <script src="supabase-config.js"></script>
-  <script src="native-adapter.js"></script>
-  <script src="geotiff-lite.js"></script>
-  <script src="modal-layer.js"></script>
-  <script src="app.js"></script>
-  <script src="mobile-pwa.js"></script>
+  <script src="supabase-config.js?v=20261013-cloud-r6"></script>
+  <script src="native-adapter.js?v=20261013-cloud-r6"></script>
+  <script src="geotiff-lite.js?v=20261013-cloud-r6"></script>
+  <script src="modal-layer.js?v=20261013-cloud-r6"></script>
+  <script src="app.js?v=20261013-cloud-r6"></script>
+  <script src="mobile-pwa.js?v=20261013-cloud-r6"></script>
 </body>
 </html>
