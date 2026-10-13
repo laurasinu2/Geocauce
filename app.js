@@ -547,6 +547,42 @@ async function cloudRemoteSnapshotInfo(){
   const rows=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=updated_at&limit=1`);
   return Array.isArray(rows)?rows[0]||null:null;
 }
+function cloudConflictChoice(){
+  return new Promise(resolve=>{
+    const modal=document.getElementById('cloudConflictModal');
+    if(!modal){resolve('cancel');return;}
+    modal.classList.remove('hidden');
+    const finish=choice=>{
+      modal.classList.add('hidden');
+      for(const [id] of actions){const b=document.getElementById(id);if(b)b.onclick=null;}
+      resolve(choice);
+    };
+    const actions=[['cloudConflictCancel','cancel'],['cloudConflictCopy','copy'],['cloudConflictReplace','replace']];
+    for(const [id,choice] of actions){const b=document.getElementById(id);if(b)b.onclick=()=>finish(choice);}
+  });
+}
+async function cloudArchiveBeforeReplace(cloudId,expectedUpdatedAt){
+  const schema=await cloudSchema(),key=schema==='legacy'?'id_project':'project_id',projectTable=schema==='legacy'?'project':'projects';
+  const snaps=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=*`);
+  const original=snaps?.[0];
+  if(!original?.state||original.updated_at!==expectedUpdatedAt)throw new Error('La nube cambió mientras se preparaba la copia. No se ha sustituido nada.');
+  const projects=await cloudFetch(`/rest/v1/${projectTable}?${schema==='legacy'?'id_project':'id'}=eq.${encodeURIComponent(cloudId)}&select=*`);
+  const row=projects?.[0];
+  if(!row)throw new Error('No se encontró el proyecto cloud para hacer una copia.');
+  const archiveId=cloudUuid(),now=new Date().toISOString(),backupName=(row.name||state.project?.name||'Proyecto')+' (respaldo nube '+new Date().toLocaleDateString('es-ES')+')';
+  // Los blobs existentes usan rutas inmutables. La copia conserva referencias a esos archivos.
+  const projectCopy=schema==='legacy'
+    ?{id_project:archiveId,owner_user_id:row.owner_user_id,name:backupName,zona:row.zona||null,torrent:row.torrent||null,autor:row.autor||null,start_date:row.start_date||now.slice(0,10),crs:row.crs||'EPSG:25831',updated_at:now,deleted_at:null}
+    :{id:archiveId,owner_id:row.owner_id,name:backupName,zone:row.zone||null,torrent:row.torrent||null,crs:row.crs||'EPSG:25831',metadata:row.metadata||{},updated_at:now};
+  await cloudFetch('/rest/v1/'+projectTable,{method:'POST',body:[projectCopy],headers:{Prefer:'return=minimal'}});
+  const snapshotCopy=schema==='legacy'
+    ?{id_project:archiveId,schema_version:original.schema_version||4,state:original.state,updated_at:now}
+    :{project_id:archiveId,owner_id:row.owner_id,state:original.state,palette:original.palette||[],updated_at:now};
+  await cloudFetch('/rest/v1/project_snapshots',{method:'POST',body:[snapshotCopy],headers:{Prefer:'return=minimal'}});
+  const check=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(archiveId)}&select=updated_at&limit=1`);
+  if(!check?.length)throw new Error('No se pudo verificar la copia de seguridad. La nube original sigue intacta.');
+  return archiveId;
+}
 async function uploadCloudChanges(){
   if(!state.projectId||!state.project){toast('Abre un proyecto para subir cambios');return false;}
   if(!navigator.onLine){toast('Sin conexión. Los datos siguen guardados en el dispositivo.');return false;}
@@ -555,7 +591,24 @@ async function uploadCloudChanges(){
     const remote=await cloudRemoteSnapshotInfo(),remoteTime=Date.parse(remote?.updated_at||0)||0;
     const known=state.project._cloudUpdatedAt||0;
     if(remote&&(!known||(!state.project._cloudSyncedAt&&!state.project._cloudPulledAt)||Math.abs(remoteTime-known)>1000)){
-      toast('Conflicto: la nube tiene datos no descargados en este dispositivo. No se ha sobrescrito nada.',7500);
+      const choice=await cloudConflictChoice();
+      if(choice==='cancel')return false;
+      if(choice==='copy'){
+        // Se crea otro proyecto CLOUD, no se duplica ni altera la base de datos local.
+        const p=state.project,oldId=p.cloudProjectId,oldUpdated=p._cloudUpdatedAt,oldSynced=p._cloudSyncedAt,oldPulled=p._cloudPulledAt;
+        p.cloudProjectId=cloudUuid();p._cloudUpdatedAt=0;p._cloudSyncedAt=0;p._cloudPulledAt=0;
+        const success=await syncCurrentProjectToCloud({manual:true,expectedUpdatedAt:null});
+        if(!success){p.cloudProjectId=oldId;p._cloudUpdatedAt=oldUpdated;p._cloudSyncedAt=oldSynced;p._cloudPulledAt=oldPulled;saveProjectCatalog();return false;}
+        saveProjectCatalog();toast('Copia independiente subida. La versión anterior sigue en la nube ✓',6000);
+        return true;
+      }
+      if(choice==='replace'){
+        if(!confirm('Se guardará primero una copia independiente de la versión actual de la nube. Solo después se intentará sustituirla con los datos de esta tablet. ¿Confirmas?'))return false;
+        const oldId=state.project.cloudProjectId;
+        await cloudArchiveBeforeReplace(oldId,remote.updated_at);
+        toast('Respaldo cloud creado. Subiendo versión de la tablet…',3500);
+        return await syncCurrentProjectToCloud({manual:true,expectedUpdatedAt:remote.updated_at});
+      }
       return false;
     }
     return await syncCurrentProjectToCloud({manual:true,expectedUpdatedAt:remote?.updated_at||null});
