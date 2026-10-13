@@ -658,13 +658,21 @@ function resetStateForProject(meta=state.project){
 }
 async function openProject(id,opt={}){
   if(state.view3d?.active)exit3DMode({quiet:true});
-  const p=projectById(id);if(!p)return;if(state.projectId&&!opt.skipSave)persistState();
+  const p=projectById(id);if(!p)return;
+  const needsCloudRestore=!localStorage.getItem(projectStateKey(id))||p._cloudOnly===true;
+  if(needsCloudRestore&&(!loadCloudSession()?.access_token||!navigator.onLine)){
+    toast('Proyecto en la nube: inicia sesión y conecta Internet para descargarlo.',6000);return;
+  }
+  const previousId=state.projectId,previousProject=state.project,previousActive=localStorage.getItem(ACTIVE_PROJECT_KEY);
+  if(state.projectId&&!opt.skipSave)persistState();
   if(dbp){try{const old=await dbp;old.close();}catch{}dbp=null;dbpName=null;}
   state.projectId=id;state.project=p;localStorage.setItem(ACTIVE_PROJECT_KEY,id);
-  const needsCloudRestore=!localStorage.getItem(projectStateKey(id))||p._cloudOnly===true;
-  if(needsCloudRestore){
-    if(!loadCloudSession()?.access_token||!navigator.onLine){toast('Proyecto en la nube: inicia sesión y conecta Internet para descargarlo.',6000);return;}
-    if(!await restoreProjectFromCloud(id,{manual:true}))return; // Avoid overwriting cloud data with an empty restore.
+  if(needsCloudRestore&&!await restoreProjectFromCloud(id,{manual:true})){
+    // Restore the prior context if cloud download failed. Never let a blank project sync.
+    state.projectId=previousId;state.project=previousProject;
+    if(previousActive)localStorage.setItem(ACTIVE_PROJECT_KEY,previousActive);
+    else localStorage.removeItem(ACTIVE_PROJECT_KEY);
+    return;
   }
   restoreState(id);state.rasters=[];
   hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';
