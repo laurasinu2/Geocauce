@@ -149,7 +149,7 @@ function cloudProgressUpdate(label,done,total){
 }
 function cloudProgressFinish(ok,message){
   cloudProgressUpdate(message||(ok?'Sincronización completada':'Sincronización interrumpida'),1,1);
-  const detail=document.getElementById('cloudProgressDetail');if(detail)detail.textContent=ok?'Completado':'No se han aplicado cambios incompletos';
+  const detail=document.getElementById('cloudProgressDetail');if(detail)detail.textContent=ok?'Completado':'Transferencia interrumpida. Revisa el mensaje de error.';
   clearTimeout(cloudProgressTimer);cloudProgressTimer=setTimeout(()=>{const p=document.getElementById('cloudProgressPanel');if(p)p.hidden=true;},ok?4000:10000);
 }
 
@@ -210,19 +210,48 @@ async function cloudDownloadBlob(objectPath){
   const r=await cloudBinaryFetch(`/storage/v1/object/authenticated/geocauce-files/${p}`,{method:'GET',contentType:null});return await r.blob();
 }
 async function cloudUploadProjectAssets(uid,projectId,{manual=false}={}){
-  const photos=await dbAll('photos').catch(()=>[]),rasters=await dbAll('rasters').catch(()=>[]),vectorLayers=await dbAll('vectorLayers').catch(()=>[]),cacheKey=`geocauce-cloud-assets-${projectId}`;
-  let cache={};try{cache=JSON.parse(localStorage.getItem(cacheKey)||'{}')||{};}catch{cache={};}
-  const result={photos:[],rasters:[],vectorLayers:[]};let done=0,uploaded=0;
+  // Archivos inmutables por versión: una subida concurrente nunca pisa binarios de otro snapshot.
+  const photos=await dbAll('photos'),rasters=await dbAll('rasters'),vectorLayers=await dbAll('vectorLayers');
+  const cacheKey=`geocauce-cloud-assets-${projectId}`;
+  let cache={};try{cache=JSON.parse(localStorage.getItem(cacheKey)||'{}')||{};}catch{}
+  const result={photos:[],rasters:[],vectorLayers:[]};
   const total=photos.reduce((n,r)=>n+(r.blob instanceof Blob?1:0),0)+rasters.reduce((n,r)=>n+(r.blob instanceof Blob?1:0)+(r.sourceBlob instanceof Blob?1:0),0)+vectorLayers.reduce((n,r)=>n+1+(r.renderBlob instanceof Blob?1:0),0);
   const sigBlob=(b,extra='')=>b instanceof Blob?`${b.size}:${b.type||''}:${extra}`:'';
   const tinyHash=str=>{let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return (h>>>0).toString(36);};
-  const put=async(path,blob,sig,label)=>{done++;if(cache[path]===sig)return path;if(manual&&total>2)toast(`Nube · ${done}/${total} · ${label}`,900);await cloudUploadBlob(path,blob);cache[path]=sig;uploaded++;return path;};
-  for(const rec of photos){const x={...rec};delete x.blob;const path=rec.blob instanceof Blob?`${cloudObjectPath(uid,projectId,'photos',rec.id)}.bin`:null;if(path)await put(path,rec.blob,sigBlob(rec.blob,rec.date||rec.importedAt||''),rec.name||'foto');result.photos.push({...x,cloudBlobPath:path,cloudBlobType:rec.blob?.type||null,cloudBlobSize:rec.blob?.size||0});}
-  for(const rec of rasters){const x={...rec};delete x.blob;delete x.sourceBlob;delete x.image;const base=cloudObjectPath(uid,projectId,'rasters',rec.id),previewPath=rec.blob instanceof Blob?`${base}.preview`:null,sourcePath=rec.sourceBlob instanceof Blob?`${base}.source`:null,extra=rec.importedAt||rec.meta?.importedAt||rec.meta?.sourceWidth||'';if(previewPath)await put(previewPath,rec.blob,sigBlob(rec.blob,extra),rec.name||'mapa');if(sourcePath)await put(sourcePath,rec.sourceBlob,sigBlob(rec.sourceBlob,extra),(rec.name||'mapa')+' · original');result.rasters.push({...x,cloudPreviewPath:previewPath,cloudSourcePath:sourcePath,cloudPreviewType:rec.blob?.type||null,cloudSourceType:rec.sourceBlob?.type||null,cloudPreviewSize:rec.blob?.size||0,cloudSourceSize:rec.sourceBlob?.size||0});}
-  for(const rec of vectorLayers){const x={...rec};delete x.features;delete x.renderBlob;const base=cloudObjectPath(uid,projectId,'vectors',rec.id),geomPath=`${base}.geometry.json`,renderPath=rec.renderBlob instanceof Blob?`${base}.render`:null,geomText=JSON.stringify(rec.features||[]),geomBlob=new Blob([geomText],{type:'application/json'}),geomSig=`${geomBlob.size}:application/json:${tinyHash(geomText)}`;await put(geomPath,geomBlob,geomSig,(rec.name||'SHP')+' · geometria');if(renderPath)await put(renderPath,rec.renderBlob,sigBlob(rec.renderBlob,vectorRenderSignature(rec)),(rec.name||'SHP')+' · mapa lleuger');result.vectorLayers.push({...x,cloudFeaturesPath:geomPath,cloudRenderPath:renderPath,cloudFeaturesSize:geomBlob.size,cloudRenderType:rec.renderBlob?.type||null,cloudRenderSize:rec.renderBlob?.size||0});}
-  localStorage.setItem(cacheKey,JSON.stringify(cache));if(manual&&uploaded===0&&total)toast('Archivos cloud ya actualizados · guardando cambios…',1200);return result;
+  let done=0;
+  const put=async(key,base,blob,sig,label,ext)=>{
+    const cached=cache[key];
+    if(cached?.sig===sig&&cached?.path){done++;if(manual)cloudProgressUpdate('Verificando · '+label,done,total+2);return cached.path;}
+    const path=`${base}.${cloudUuid()}${ext}`;
+    await cloudUploadBlob(path,blob);
+    cache[key]={sig,path};done++;if(manual)cloudProgressUpdate('Subiendo · '+label,done,total+2);
+    return path;
+  };
+  if(manual)cloudProgressStart('Preparando archivos para subir',total+2);
+  for(const rec of photos){
+    const x={...rec};delete x.blob;
+    const base=cloudObjectPath(uid,projectId,'photos',rec.id);
+    const path=rec.blob instanceof Blob?await put('photo:'+rec.id,base,rec.blob,sigBlob(rec.blob,rec.date||rec.importedAt||rec.updatedAt||''),rec.name||'foto','.bin'):null;
+    result.photos.push({...x,cloudBlobPath:path,cloudBlobType:rec.blob?.type||null,cloudBlobSize:rec.blob?.size||0});
+  }
+  for(const rec of rasters){
+    const x={...rec};delete x.blob;delete x.sourceBlob;delete x.image;
+    const base=cloudObjectPath(uid,projectId,'rasters',rec.id),extra=rec.importedAt||rec.meta?.importedAt||rec.meta?.sourceWidth||'';
+    const previewPath=rec.blob instanceof Blob?await put('raster-preview:'+rec.id,base,rec.blob,sigBlob(rec.blob,extra),rec.name||'mapa','.preview'):null;
+    const sourcePath=rec.sourceBlob instanceof Blob?await put('raster-source:'+rec.id,base,rec.sourceBlob,sigBlob(rec.sourceBlob,extra),rec.name||'original','.source'):null;
+    result.rasters.push({...x,cloudPreviewPath:previewPath,cloudSourcePath:sourcePath,cloudPreviewType:rec.blob?.type||null,cloudSourceType:rec.sourceBlob?.type||null,cloudPreviewSize:rec.blob?.size||0,cloudSourceSize:rec.sourceBlob?.size||0});
+  }
+  for(const rec of vectorLayers){
+    const x={...rec};delete x.features;delete x.renderBlob;
+    const base=cloudObjectPath(uid,projectId,'vectors',rec.id),geomText=JSON.stringify(rec.features||[]),geomBlob=new Blob([geomText],{type:'application/json'});
+    const geomPath=await put('vector-geometry:'+rec.id,base,geomBlob,`${geomBlob.size}:${tinyHash(geomText)}`,(rec.name||'SHP')+' · geometría','.geometry.json');
+    const renderPath=rec.renderBlob instanceof Blob?await put('vector-render:'+rec.id,base,rec.renderBlob,sigBlob(rec.renderBlob,vectorRenderSignature(rec)),(rec.name||'SHP')+' · render','.render'):null;
+    result.vectorLayers.push({...x,cloudFeaturesPath:geomPath,cloudRenderPath:renderPath,cloudFeaturesSize:geomBlob.size,cloudRenderType:rec.renderBlob?.type||null,cloudRenderSize:rec.renderBlob?.size||0});
+  }
+  // Cachear solo tras completar todos los archivos.
+  localStorage.setItem(cacheKey,JSON.stringify(cache));
+  return {metadata:result,steps:done,total:total+2};
 }
-
 // Supabase old: project(id_project UUID), project_snapshots(id_project).
 // Supabase new: projects(id text), project_snapshots(project_id text).
 // Prefer modern only if its table exists; do not mistake permission failures for missing tables.
@@ -495,35 +524,36 @@ async function syncNow(){
 async function cloudRemoteSnapshotInfo(){
   const cloudId=state.project?.cloudProjectId;
   if(!cloudId)return null;
-  const schema=await cloudSchema();
-  const key=schema==='legacy'?'id_project':'project_id';
+  const schema=await cloudSchema(),key=schema==='legacy'?'id_project':'project_id';
   const rows=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=updated_at&limit=1`);
   return Array.isArray(rows)?rows[0]||null:null;
 }
 async function uploadCloudChanges(){
   if(!state.projectId||!state.project){toast('Abre un proyecto para subir cambios');return false;}
   if(!navigator.onLine){toast('Sin conexión. Los datos siguen guardados en el dispositivo.');return false;}
+  if(cloudSyncRunning||cloudRestoreRunning){toast('Ya hay una transferencia en curso');return false;}
   try{
-    const remote=await cloudRemoteSnapshotInfo();
-    const remoteTime=Date.parse(remote?.updated_at||0)||0;
-    const lastKnown=state.project._cloudUpdatedAt||0;
-    if(remoteTime&&remoteTime>lastKnown+1000){
-      if(!confirm('La nube contiene cambios más recientes que los conocidos por este dispositivo. Subir ahora podría sustituirlos. ¿Quieres continuar de todos modos?'))return false;
+    const remote=await cloudRemoteSnapshotInfo(),remoteTime=Date.parse(remote?.updated_at||0)||0;
+    const known=state.project._cloudUpdatedAt||0;
+    if(remote&&(!known||(!state.project._cloudSyncedAt&&!state.project._cloudPulledAt)||remoteTime>known+1000)){
+      toast('Conflicto: la nube tiene datos no descargados en este dispositivo. No se ha sobrescrito nada.',7500);
+      return false;
     }
-    return syncCurrentProjectToCloud({manual:true});
+    return await syncCurrentProjectToCloud({manual:true,expectedUpdatedAt:remote?.updated_at||null});
   }catch(e){toast('No se pudo comprobar la versión de la nube: '+(e.message||e),5500);return false;}
 }
 async function downloadCloudChanges(){
   if(!state.projectId||!state.project){toast('Abre el proyecto que quieres descargar');return false;}
   if(!navigator.onLine){toast('Necesitas conexión para descargar cambios');return false;}
-  if(cloudSyncRunning){toast('Espera a que termine la subida');return false;}
+  if(cloudSyncRunning||cloudRestoreRunning){toast('Ya hay una transferencia en curso');return false;}
   try{
     const remote=await cloudRemoteSnapshotInfo();
     if(!remote){toast('Todavía no hay una copia de este proyecto en la nube');return false;}
-    const cloudTime=Date.parse(remote.updated_at||0)||0;
-    const known=state.project._cloudUpdatedAt||0;
-    if(cloudTime&&cloudTime<=known+1000){toast('La nube no contiene una versión más reciente');return false;}
-    if(!confirm('Descargar sustituirá los datos locales de este proyecto. Antes de continuar, guarda una copia completa si has hecho cambios en este dispositivo. ¿Descargar la versión de la nube?'))return false;
+    const cloudTime=Date.parse(remote.updated_at||0)||0,known=state.project._cloudUpdatedAt||0;
+    if(cloudTime&&known&&(state.project._cloudSyncedAt||state.project._cloudPulledAt)&&cloudTime<=known+1000){
+      toast('La nube no contiene una versión más reciente');return false;
+    }
+    if(!confirm('Se descargará la versión de la nube. GeoCauce guardará primero una copia recuperable de los datos locales de este proyecto. No se mezclan cambios de ambos dispositivos. ¿Continuar?'))return false;
     const id=state.projectId;
     if(!await restoreProjectFromCloud(id,{manual:true}))return false;
     await openProject(id,{skipSave:true});
@@ -561,33 +591,48 @@ async function cloudStructuredSnapshot(assetMetadata=null){
   }
   return {...base,cloudSchema:4,appVersion:'0.16.39-android-alpha',sectionPalette:cloneAny(sectionPalette||[]),appSettings:cloneAny(appSettings),assetMetadata};
 }
-async function syncCurrentProjectToCloud({manual=false}={}){
-  if(cloudSyncRunning||!state.projectId||!state.project)return false;
+async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={}){
+  if(cloudSyncRunning||cloudRestoreRunning||!state.projectId||!state.project)return false;
   const session=loadCloudSession();if(!session?.access_token){if(manual)toast('Inicia sesión para sincronizar');return false;}
   if(!cloudConfigured()){if(manual)toast('Supabase todavía no está configurado');return false;}
-  if(!navigator.onLine){cloudLastError='Sin conexión · pendiente de sincronizar';refreshAccountUi();if(manual)toast('Sin conexión · los cambios quedan guardados en SQLite');return false;}
+  if(!navigator.onLine){cloudLastError='Sin conexión · pendiente de sincronizar';refreshAccountUi();if(manual)toast('Sin conexión · datos guardados localmente');return false;}
   cloudSyncRunning=true;cloudLastError='';refreshAccountUi();
   try{
-    const session2=sessionExpired(loadCloudSession())?await refreshCloudSession():loadCloudSession();const uid=session2?.user?.id;if(!uid)throw new Error('Sesión sin identificador de usuario');
-    if(manual)toast('Sincronizando datos y archivos…',1400);
+    const session2=sessionExpired(loadCloudSession())?await refreshCloudSession():loadCloudSession(),uid=session2?.user?.id;
+    if(!uid)throw new Error('Sesión sin identificador de usuario');
     const p=state.project,cloudId=ensureCloudProjectId(p);if(!cloudId)throw new Error('No se pudo asignar ID cloud al proyecto');
-    const schema=await cloudSchema();
-    if(p._cloudOnly)throw new Error('Proyecto solo en la nube: ábrelo y descárgalo antes de subir cambios');
+    const schema=await cloudSchema();if(p._cloudOnly)throw new Error('Descarga primero el proyecto cloud');
     const uploadingProjectId=state.projectId;
-    const assetMetadata=await cloudUploadProjectAssets(uid,cloudId,{manual});
-    if(state.projectId!==uploadingProjectId)throw new Error('El proyecto cambió durante la subida. Vuelve a sincronizarlo');
-    const payload=await cloudStructuredSnapshot(assetMetadata);
-    const now=new Date().toISOString();if(p.ownerUserId!==uid){p.ownerUserId=uid;p.updatedAt=Date.now();saveProjectCatalog();state.project=p;nativeSyncProject(payload);}
+    const assets=await cloudUploadProjectAssets(uid,cloudId,{manual});
+    if(state.projectId!==uploadingProjectId)throw new Error('El proyecto cambió durante la subida');
+    const key=schema==='legacy'?'id_project':'project_id';
+    const current=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=updated_at&limit=1`);
+    const actual=current?.[0]?.updated_at||null;
+    if(actual!==expectedUpdatedAt)throw new Error('Otro dispositivo ha actualizado la nube. No se ha sobrescrito su proyecto.');
+    const payload=await cloudStructuredSnapshot(assets.metadata),now=new Date().toISOString();
+    if(p.ownerUserId!==uid){p.ownerUserId=uid;p.updatedAt=Date.now();saveProjectCatalog();state.project=p;nativeSyncProject(payload);}
     const row=schema==='legacy'
       ? {id_project:cloudId,owner_user_id:uid,name:p.name||'Proyecto',zona:p.zone||null,torrent:p.torrent||null,institution:p.institution||null,autor:p.author||null,start_date:p.startDate||new Date().toISOString().slice(0,10),crs:p.crs||'EPSG:25831',objective:p.objective||null,methodology:p.methodology||null,notes:p.notes||null,updated_at:now,deleted_at:null}
       : {id:cloudId,owner_id:uid,name:p.name||'Proyecto',zone:p.zone||null,torrent:p.torrent||null,crs:p.crs||'EPSG:25831',metadata:{author:p.author||'',institution:p.institution||'',startDate:p.startDate||'',objective:p.objective||'',methodology:p.methodology||'',notes:p.notes||''},updated_at:now};
     await cloudFetch(schema==='legacy'?'/rest/v1/project?on_conflict=id_project':'/rest/v1/projects?on_conflict=id',{method:'POST',body:[row],headers:{Prefer:'resolution=merge-duplicates,return=minimal'}});
-    const snap=schema==='legacy'
-      ? {id_project:cloudId,schema_version:4,state:payload,updated_at:now}
-      : {project_id:cloudId,owner_id:uid,state:payload,palette:cloneAny(sectionPalette||[]),updated_at:now};
-    await cloudFetch(schema==='legacy'?'/rest/v1/project_snapshots?on_conflict=id_project':'/rest/v1/project_snapshots?on_conflict=project_id',{method:'POST',body:[snap],headers:{Prefer:'resolution=merge-duplicates,return=minimal'}});
-    cloudLastSyncAt=Date.now();cloudLastError='';p.cloudProjectId=cloudId;p._cloudOnly=false;p._cloudSyncedAt=cloudLastSyncAt;p._cloudUpdatedAt=Date.parse(now)||cloudLastSyncAt;saveProjectCatalog();if(manual)toast('Proyecto y archivos sincronizados ✓');refreshAccountUi();return true;
-  }catch(e){cloudLastError=`Pendiente: ${e.message||e}`;console.warn('Cloud sync',e);if(manual)toast(`No se pudo sincronizar: ${e.message||e}`,5000);refreshAccountUi();return false;}
+    if(manual)cloudProgressUpdate('Guardando el proyecto',assets.steps+1,assets.total);
+    let saved;
+    if(actual){
+      saved=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&updated_at=eq.${encodeURIComponent(actual)}&select=updated_at`,{
+        method:'PATCH',body:schema==='legacy'?{schema_version:4,state:payload,updated_at:now}:{state:payload,palette:cloneAny(sectionPalette||[]),updated_at:now},
+        headers:{Prefer:'return=representation'}
+      });
+    }else{
+      saved=await cloudFetch(schema==='legacy'?'/rest/v1/project_snapshots?on_conflict=id_project&select=updated_at':'/rest/v1/project_snapshots?on_conflict=project_id&select=updated_at',{
+        method:'POST',body:[schema==='legacy'?{id_project:cloudId,schema_version:4,state:payload,updated_at:now}:{project_id:cloudId,owner_id:uid,state:payload,palette:cloneAny(sectionPalette||[]),updated_at:now}],
+        headers:{Prefer:'resolution=ignore-duplicates,return=representation'}
+      });
+    }
+    if(!Array.isArray(saved)||saved.length!==1)throw new Error('Conflicto al guardar: el proyecto remoto cambió. No se ha sobrescrito su snapshot.');
+    cloudLastSyncAt=Date.now();cloudLastError='';p.cloudProjectId=cloudId;p._cloudOnly=false;p._cloudSyncedAt=cloudLastSyncAt;p._cloudUpdatedAt=Date.parse(saved[0].updated_at||now)||cloudLastSyncAt;saveProjectCatalog();
+    if(manual){cloudProgressUpdate('Sincronización completada',assets.total,assets.total);cloudProgressFinish(true,'Subida completada');toast('Proyecto y archivos sincronizados ✓');}
+    refreshAccountUi();return true;
+  }catch(e){cloudLastError=`Pendiente: ${e.message||e}`;console.warn('Cloud sync',e);if(manual){cloudProgressFinish(false,'Error al subir');toast(`No se pudo sincronizar: ${e.message||e}`,6500);}refreshAccountUi();return false;}
   finally{cloudSyncRunning=false;}
 }
 function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);/* Subidas solo manuales: evita pisar cambios de otro dispositivo. */}
