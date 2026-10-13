@@ -254,7 +254,7 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false}={}){
       return size===null||Number(size)===expectedSize;
     }catch(e){
       // No confundir un fallo de red o permisos con un archivo inexistente.
-      if(e.status===404)return false;
+      if(e.status===404||(e.status===400&&/not found|does not exist|not exist/i.test(e.message||'')))return false;
       throw new Error('No se pudo verificar el archivo cloud '+path+': '+(e.message||e));
     }
   };
@@ -262,7 +262,7 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false}={}){
     if(manual)cloudProgressUpdate('Analizando · '+label,done,total+2);
     const hash=await cloudAssetDigest(blob),fingerprint=`sha256-chunks-v1:${blob.size}:${blob.type||''}:${hash}`;
     const old=cache[key],global=globalCache[fingerprint];
-    let path=null;
+    let path=null,didUpload=false;
     // Las entradas antiguas no tenían hash; se migran después de verificar su existencia.
     if(old?.path&&(old.hash===fingerprint||(old.hash==null&&old.sig===legacySig))){
       if(await exists(old.path,blob.size))path=old.path;
@@ -280,15 +280,14 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false}={}){
         if(manual)cloudProgressUpdate('Subiendo · '+label,done,total+2);
         await cloudUploadBlob(candidate,blob);
         path=candidate;
-        uploaded++;
+        didUpload=true;uploaded++;
       }
     }
-    if(path!==null&&(!old?.path||old.path!==path||old.hash!==fingerprint))reused++;
-    else if(path!==null&&uploaded===0)reused++; // Primer archivo reutilizado.
+    if(!didUpload)reused++;
     cache[key]={sig:legacySig,hash:fingerprint,path};
     globalCache[fingerprint]={path,size:blob.size,savedAt:Date.now()};
     persist();
-    done++;if(manual)cloudProgressUpdate((path===cache[key]?.pending?.path?'Subido':'Verificado')+' · '+label,done,total+2);
+    done++;if(manual)cloudProgressUpdate((didUpload?'Subido':'Reutilizado')+' · '+label,done,total+2);
     return path;
   };
   if(manual)cloudProgressStart('Preparando archivos para subir',total+2);
@@ -366,6 +365,31 @@ async function cloudRefreshProjectCatalog({quiet=true}={}){
 }
 // Una descarga nunca reemplaza el proyecto antes de verificar todos sus archivos.
 // El cambio de las tablas de IndexedDB es atómico y guarda una versión recuperable.
+function cloudSeedDownloadedAssets(uid,cloudId,lists){
+  // Solo se invoca tras descargar y confirmar los archivos en IndexedDB.
+  const cacheKey=`geocauce-cloud-assets-${cloudId}`,globalKey=`geocauce-cloud-asset-index-v1:${uid}`;
+  const read=key=>{try{return JSON.parse(localStorage.getItem(key)||'{}')||{};}catch{return {};}};
+  const cache=read(cacheKey),globalCache=read(globalKey);
+  const add=(key,path,hash,legacySig,size)=>{
+    if(!path||!String(path).startsWith(encodeURIComponent(String(uid))+'/'))return;
+    cache[key]={path,sig:legacySig,hash:hash||undefined};
+    if(hash)globalCache[hash]={path,size,savedAt:Date.now()};
+  };
+  const sig=(size,type,extra='')=>`${size||0}:${type||''}:${extra}`;
+  for(const p of lists.photos||[]){
+    add('photo:'+p.id,p.cloudBlobPath,p.cloudBlobHash,sig(p.cloudBlobSize,p.cloudBlobType,p.date||p.importedAt||p.updatedAt||''),p.cloudBlobSize);
+  }
+  for(const r of lists.rasters||[]){
+    const extra=r.importedAt||r.meta?.importedAt||r.meta?.sourceWidth||'';
+    add('raster-preview:'+r.id,r.cloudPreviewPath,r.cloudPreviewHash,sig(r.cloudPreviewSize,r.cloudPreviewType,extra),r.cloudPreviewSize);
+    add('raster-source:'+r.id,r.cloudSourcePath,r.cloudSourceHash,sig(r.cloudSourceSize,r.cloudSourceType,extra),r.cloudSourceSize);
+  }
+  for(const v of lists.vectorLayers||[]){
+    add('vector-geometry:'+v.id,v.cloudFeaturesPath,v.cloudFeaturesHash,null,v.cloudFeaturesSize);
+    add('vector-render:'+v.id,v.cloudRenderPath,v.cloudRenderHash,null,v.cloudRenderSize);
+  }
+  try{localStorage.setItem(cacheKey,JSON.stringify(cache));localStorage.setItem(globalKey,JSON.stringify(globalCache));}catch(e){console.warn('No se pudo recordar los archivos descargados',e);}
+}
 async function cloudCommitStaging(projectId,sv){
   const d=await db(),originalState=localStorage.getItem(projectStateKey(projectId));
   const originalProject={...projectById(projectId)};
@@ -486,6 +510,7 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
     if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
     cloudProgressUpdate('Guardando copia de seguridad local',done+1,total);
     await cloudCommitStaging(projectId,sv);
+    try{cloudSeedDownloadedAssets(loadCloudSession()?.user?.id||'',cloudId,lists);}catch(e){console.warn('No se pudo registrar el índice cloud',e);}
     await dbClear('cloudStaging').catch(()=>{});
     if(ANDROID_NATIVE){
       for(const ph of await dbAll('photos'))nativeSyncPhotoMeta(ph);
@@ -762,7 +787,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
     }
     if(!Array.isArray(saved)||saved.length!==1)throw new Error('Conflicto al guardar: el proyecto remoto cambió. No se ha sobrescrito su snapshot.');
     cloudLastSyncAt=Date.now();cloudLastError='';p.cloudProjectId=cloudId;p._cloudOnly=false;p._cloudSyncedAt=cloudLastSyncAt;p._cloudUpdatedAt=Date.parse(saved[0].updated_at||now)||cloudLastSyncAt;saveProjectCatalog();
-    if(manual){cloudProgressUpdate('Sincronización completada',assets.total,assets.total);cloudProgressFinish(true,'Subida completada');toast('Proyecto y archivos sincronizados ✓');}
+    if(manual){cloudProgressUpdate('Sincronización completada',assets.total,assets.total);cloudProgressFinish(true,'Subida completada');toast(`Proyecto sincronizado ✓ · ${assets.uploaded} archivos subidos, ${assets.reused} reutilizados`,6000);}
     refreshAccountUi();return true;
   }catch(e){cloudLastError=`Pendiente: ${e.message||e}`;console.warn('Cloud sync',e);if(manual){cloudProgressFinish(false,'Error al subir');toast(`No se pudo sincronizar: ${e.message||e}`,6500);}refreshAccountUi();return false;}
   finally{cloudSyncRunning=false;refreshAccountUi();}
