@@ -11,7 +11,7 @@ self.addEventListener('fetch',e=>{
     e.respondWith(fetch(e.request).then(r=>{
       if(r.ok){const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy));}
       return r;
-    }).catch(()=>caches.match(e.request).then(hit=>hit||caches.match('./')||caches.match('index.html'))));
+    }).catch(()=>caches.match(e.request).then(hit=>hit||caches.match('./')).then(hit=>hit||caches.match('index.html'))));
     return;
   }
   e.respondWith(caches.match(e.request).then(hit=>hit||fetch(e.request).then(r=>{
