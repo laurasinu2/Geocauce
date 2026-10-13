@@ -3867,7 +3867,7 @@ async function exportSelectedContents(){
 function initUi(){
   $('#enterBtn').onclick=$('#openCampaignBtn').onclick=enterApp;
   $('#authCloseBtn').onclick=closeAuthModal;$('#authOfflineBtn').onclick=chooseOfflineEntry;$('#authSwitchMode').onclick=()=>setAuthMode(authUiMode==='signin'?'signup':'signin');$('#authTogglePassword').onclick=()=>{const i=$('#authPassword');i.type=i.type==='password'?'text':'password';};$('#authForm').onsubmit=e=>{e.preventDefault();submitAuth();};
-  $('#projectAccountBtn').onclick=()=>showSettings('projects');if($('#projectCreateAccountBtn'))$('#projectCreateAccountBtn').onclick=openAccountManage;$('#projectSettingsBtn').onclick=()=>showSettings('projects');$('#settingsFromMapBtn').onclick=()=>{closeFloatingPanels();showSettings('map');};$('#accountManageClose').onclick=closeAccountManage;
+  $('#projectAccountBtn').onclick=openAccountManage;if($('#projectCreateAccountBtn'))$('#projectCreateAccountBtn').onclick=openAccountManage;$('#projectSettingsBtn').onclick=()=>showSettings('projects');$('#settingsFromMapBtn').onclick=()=>{closeFloatingPanels();showSettings('map');};$('#accountManageClose').onclick=closeAccountManage;
   $('#settingsBackBtn').onclick=closeSettings;$('#settingsAccountChip').onclick=openAccountManage;$('#settingsAccountAction').onclick=openAccountManage;$('#settingsSyncAction').onclick=()=>accountState().kind==='account'?syncNow():openAuthModal('manage','signin');$('#settingsCloudSyncBtn').onclick=syncNow;$('#settingsExportBackup').onclick=()=>state.projectId?exportProjectPackage():toast('Abre un proyecto para exportar una copia');$('#settingsImportBackup').onclick=()=>$('#projectImportInput').click();
   const settingBindings={settingInputMode:['inputMode','value'],settingPersistentTool:['persistentTool','checked'],settingLengthUnit:['lengthUnit','value'],settingClastUnit:['clastUnit','value'],settingAreaUnit:['areaUnit','value'],settingVolumeUnit:['volumeUnit','value'],settingCoordMode:['coordMode','value'],settingGpsAccuracy:['gpsMinAccuracy','number'],settingPhotoHeading:['photoHeading','checked'],settingGpsAltitude:['gpsAltitude','checked'],settingShowAccuracy:['showAccuracy','checked'],settingNotebookBg:['notebookBg','value'],settingNotebookAutosave:['notebookAutosave','checked'],settingReachPattern:['reachPattern','value'],settingReachCodes:['reachCodes','value'],settingMobileUi:['mobileUi','value']};
   for(const [id,[key,kind]] of Object.entries(settingBindings)){const el=$('#'+id);if(!el)continue;el.onchange=()=>{appSettings[key]=kind==='checked'?el.checked:kind==='number'?+el.value:el.value;saveAppSettings();if(key==='inputMode'&&appSettings.inputMode==='finger'&&state.tool!=='pan')toast('Modo dedo activo · selecciona Mover para navegar con un dedo');if(['lengthUnit','areaUnit','coordMode','showAccuracy'].includes(key)){updateGnssUi();drawAll();const f=state.features.find(x=>x.id===state.selectedId);if(f)showFeatureCard(f);}};}
@@ -4117,6 +4117,7 @@ window.GeoCauceMobileApi={
   setTool,
   closeFloatingPanels,
   openHistoricalPhotoPoint,
+  openAccountManage,
   renderSettings,
   saveSettings:(patch)=>{Object.assign(appSettings,patch||{});saveAppSettings();},
   persist:()=>{if(state.projectId)persistState();}

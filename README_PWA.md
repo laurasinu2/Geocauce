@@ -23,3 +23,7 @@ La PWA se conecta a `public.projects` y `public.project_snapshots`, según `SUPA
 Al iniciar sesión se obtiene el catálogo. Los datos completos se suben cuando se abre el proyecto y se guardan sus cambios, o al pulsar **Sincronizar ahora**. Si no hay uno abierto, ese botón abre el último proyecto seleccionado. Si aparece **Pendiente: ...**, revisa el error en **Cuenta** y las políticas RLS y el bucket privado `geocauce-files`.
 
 No borres la PWA ni limpies sus datos antes de hacer una copia `.geocauce` del proyecto.
+
+## Modales siempre visibles (corrección PWA)
+
+Todas las ventanas `.modal` se colocan en una capa global fuera de pantallas con `z-index` propios. La ventana abierta más recientemente queda encima de las anteriores, también sobre Configuración y la interfaz móvil. Los paneles móviles de observación y carga comparten esa capa. El botón Cuenta de Proyectos y el perfil móvil abren directamente la gestión de cuenta. Cache de recursos PWA: r5.
