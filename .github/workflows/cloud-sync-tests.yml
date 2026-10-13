@@ -1,0 +1,19 @@
+name: Cloud sync regression tests
+on:
+  push:
+    branches: [fix/incremental-cloud-sync-r13]
+  pull_request:
+    paths:
+      - 'app.js'
+      - 'tests/**'
+      - 'package.json'
+      - '.github/workflows/cloud-sync-tests.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm test

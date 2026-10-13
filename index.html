@@ -11,8 +11,8 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=20261013-cloud-r12" />
-  <link rel="stylesheet" href="mobile-pwa.css?v=20261013-cloud-r12" />
+  <link rel="stylesheet" href="styles.css?v=20261014-cloud-r13" />
+  <link rel="stylesheet" href="mobile-pwa.css?v=20261014-cloud-r13" />
 </head>
 <body>
   <div id="app">
@@ -177,7 +177,7 @@ CON | Confluencia"></textarea></div>
             <div class="storage-total"><span>Estado</span><b id="settingsCloudState">Sin cuenta</b></div>
             <div class="storage-bar cloud"><span id="settingsCloudBar"></span></div>
             <dl class="storage-breakdown"><dt>Datos estructurados conocidos</dt><dd id="settingsCloudData">—</dd><dt>Última sincronización</dt><dd id="settingsCloudLastSync">—</dd><dt>Pendiente</dt><dd id="settingsCloudPending">—</dd></dl>
-            <p class="settings-note">Los datos y archivos se transfieren a Supabase al pulsar Subir o Descargar. Si otra versión ha cambiado, la subida se bloquea para protegerla.</p>
+            <p class="settings-note">Solo se transfieren archivos nuevos o modificados. Los elementos eliminados se quitan del proyecto sincronizado. Si otro dispositivo ha cambiado el proyecto, deberás elegir qué versión conservar.</p>
             <div class="settings-inline-actions"><button id="settingsCloudSyncBtn" class="primary icon-text" type="button"><img src="icons/nube.svg" alt=""><span>Subir cambios</span></button><button id="settingsCloudDownloadBtn" class="secondary icon-text" type="button"><img src="icons/sincronizar.svg" alt=""><span>Descargar cambios</span></button></div><p class="settings-help">La descarga verifica todos los archivos antes de reemplazar datos y guarda una versión local recuperable. No se combinan automáticamente cambios de dos dispositivos.</p><div class="settings-inline-actions"><button id="settingsCloudRecoveryBtn" class="secondary icon-text" type="button"><img src="icons/deshacer.png" alt=""><span>Recuperar versión local anterior</span></button></div>
             <div class="settings-inline-actions" style="margin-top:12px">
               <button id="settingsUpdateAppBtn" type="button" class="secondary icon-text"><img src="icons/cambio.png" alt=""><span>Actualizar aplicación</span></button>
@@ -1220,9 +1220,9 @@ CON | Confluencia"></textarea></div>
   <div id="cloudConflictModal" class="cloud-conflict-modal hidden" role="dialog" aria-modal="true" aria-labelledby="cloudConflictTitle">
     <div class="cloud-conflict-dialog">
       <h2 id="cloudConflictTitle">Hay otra versión en la nube</h2>
-      <p>Los datos de esta tablet no coinciden con la versión guardada en la nube. Elige cómo continuar. No se borrará nada sin confirmación.</p>
-      <button id="cloudConflictCopy" type="button" class="cloud-conflict-primary">Guardar copia independiente en la nube (recomendado)</button>
-      <button id="cloudConflictReplace" type="button">Sustituir versión cloud, guardando antes un respaldo</button>
+      <p>Otro dispositivo ha sincronizado una versión diferente. No se crearán proyectos duplicados ni se mezclarán cambios incompatibles sin tu permiso.</p>
+      <button id="cloudConflictCopy" type="button" class="cloud-conflict-primary">Descargar los cambios de la nube (recomendado)</button>
+      <button id="cloudConflictReplace" type="button">Sustituir la versión de la nube (perderá sus últimos cambios)</button>
       <button id="cloudConflictCancel" type="button">Cancelar y conservar todo</button>
     </div>
   </div>
@@ -1231,11 +1231,11 @@ CON | Confluencia"></textarea></div>
     <div class="cloud-progress-track" role="progressbar" aria-label="Progreso de sincronización" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="cloudProgressBar"></span></div>
     <small id="cloudProgressDetail">Preparando transferencia…</small>
   </aside>
-  <script src="supabase-config.js?v=20261013-cloud-r12"></script>
-  <script src="native-adapter.js?v=20261013-cloud-r12"></script>
-  <script src="geotiff-lite.js?v=20261013-cloud-r12"></script>
-  <script src="modal-layer.js?v=20261013-cloud-r12"></script>
-  <script src="app.js?v=20261013-cloud-r12"></script>
-  <script src="mobile-pwa.js?v=20261013-cloud-r12"></script>
+  <script src="supabase-config.js?v=20261014-cloud-r13"></script>
+  <script src="native-adapter.js?v=20261014-cloud-r13"></script>
+  <script src="geotiff-lite.js?v=20261014-cloud-r13"></script>
+  <script src="modal-layer.js?v=20261014-cloud-r13"></script>
+  <script src="app.js?v=20261014-cloud-r13"></script>
+  <script src="mobile-pwa.js?v=20261014-cloud-r13"></script>
 </body>
 </html>
