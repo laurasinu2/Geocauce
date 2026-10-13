@@ -342,7 +342,45 @@ async function syncNow(){
     await openProject(id);
     if(state.projectId!==id)return false;
   }
-  return syncCurrentProjectToCloud({manual:true});
+  return uploadCloudChanges();
+}
+async function cloudRemoteSnapshotInfo(){
+  const cloudId=state.project?.cloudProjectId;
+  if(!cloudId)return null;
+  const schema=await cloudSchema();
+  const key=schema==='legacy'?'id_project':'project_id';
+  const rows=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=updated_at&limit=1`);
+  return Array.isArray(rows)?rows[0]||null:null;
+}
+async function uploadCloudChanges(){
+  if(!state.projectId||!state.project){toast('Abre un proyecto para subir cambios');return false;}
+  if(!navigator.onLine){toast('Sin conexión. Los datos siguen guardados en el dispositivo.');return false;}
+  try{
+    const remote=await cloudRemoteSnapshotInfo();
+    const remoteTime=Date.parse(remote?.updated_at||0)||0;
+    const lastKnown=state.project._cloudUpdatedAt||0;
+    if(remoteTime&&remoteTime>lastKnown+1000){
+      if(!confirm('La nube contiene cambios más recientes que los conocidos por este dispositivo. Subir ahora podría sustituirlos. ¿Quieres continuar de todos modos?'))return false;
+    }
+    return syncCurrentProjectToCloud({manual:true});
+  }catch(e){toast('No se pudo comprobar la versión de la nube: '+(e.message||e),5500);return false;}
+}
+async function downloadCloudChanges(){
+  if(!state.projectId||!state.project){toast('Abre el proyecto que quieres descargar');return false;}
+  if(!navigator.onLine){toast('Necesitas conexión para descargar cambios');return false;}
+  if(cloudSyncRunning){toast('Espera a que termine la subida');return false;}
+  try{
+    const remote=await cloudRemoteSnapshotInfo();
+    if(!remote){toast('Todavía no hay una copia de este proyecto en la nube');return false;}
+    const cloudTime=Date.parse(remote.updated_at||0)||0;
+    const known=state.project._cloudUpdatedAt||0;
+    if(cloudTime&&cloudTime<=known+1000){toast('La nube no contiene una versión más reciente');return false;}
+    if(!confirm('Descargar sustituirá los datos locales de este proyecto. Antes de continuar, guarda una copia completa si has hecho cambios en este dispositivo. ¿Descargar la versión de la nube?'))return false;
+    const id=state.projectId;
+    if(!await restoreProjectFromCloud(id,{manual:true}))return false;
+    await openProject(id,{skipSave:true});
+    return true;
+  }catch(e){toast('No se pudieron descargar los cambios: '+(e.message||e),5500);return false;}
 }
 function openAccountManage(){$('#accountModal').classList.remove('hidden');renderAccountManageBody();}
 function closeAccountManage(){$('#accountModal').classList.add('hidden');}
@@ -357,7 +395,7 @@ function renderAccountManageBody(){
   }
   root.innerHTML=html;
   const p=$('#accountManagePrimary'),q=$('#accountManageSecondary');if(!p||!q)return;
-  if(a.kind==='account'){p.textContent='Sincronizar ahora';p.onclick=syncNow;q.textContent='Cerrar sesión y seguir local';q.onclick=async()=>{await signOutCloud();closeAccountManage();toast('Sesión cerrada · tus datos locales siguen disponibles');};}
+  if(a.kind==='account'){p.textContent='Subir cambios';p.onclick=syncNow;q.textContent='Cerrar sesión y seguir local';q.onclick=async()=>{await signOutCloud();closeAccountManage();toast('Sesión cerrada · tus datos locales siguen disponibles');};}
   else{p.textContent='Iniciar sesión';p.onclick=()=>{closeAccountManage();openAuthModal('manage','signin');};q.textContent='Crear cuenta';q.onclick=()=>{closeAccountManage();openAuthModal('manage','signup');};}
 }
 function currentStatePayloadForCloud(){
@@ -404,7 +442,7 @@ async function syncCurrentProjectToCloud({manual=false}={}){
   }catch(e){cloudLastError=`Pendiente: ${e.message||e}`;console.warn('Cloud sync',e);if(manual)toast(`No se pudo sincronizar: ${e.message||e}`,5000);refreshAccountUi();return false;}
   finally{cloudSyncRunning=false;}
 }
-function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);if(!loadCloudSession()?.access_token||!cloudConfigured())return;cloudSyncTimer=setTimeout(()=>syncCurrentProjectToCloud(),delay);}
+function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);/* Subidas solo manuales: evita pisar cambios de otro dispositivo. */}
 function persistStateLocalOnly(){
   if(!state.projectId)return;syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));touchProject();nativeSyncProject(payload);return payload;
 }
@@ -606,7 +644,7 @@ async function renderSettings(){
   $('#settingsProfileName').textContent=a.kind==='account'?'Usuario de campo':'Modo local';$('#settingsProfileEmail').textContent=email;$('#settingsProfileInstitution').textContent=state.project?.institution||'Los proyectos se guardan en este dispositivo';
   $('#settingInputMode').value=appSettings.inputMode;$('#settingPersistentTool').checked=!!appSettings.persistentTool;$('#settingLengthUnit').value=appSettings.lengthUnit;$('#settingClastUnit').value=appSettings.clastUnit;$('#settingAreaUnit').value=appSettings.areaUnit;$('#settingVolumeUnit').value=appSettings.volumeUnit;$('#settingCoordMode').value=appSettings.coordMode;$('#settingGpsAccuracy').value=String(appSettings.gpsMinAccuracy);$('#settingPhotoHeading').checked=!!appSettings.photoHeading;$('#settingGpsAltitude').checked=!!appSettings.gpsAltitude;$('#settingShowAccuracy').checked=!!appSettings.showAccuracy;$('#settingNotebookBg').value=appSettings.notebookBg;$('#settingNotebookAutosave').checked=!!appSettings.notebookAutosave;if($('#settingReachPattern'))$('#settingReachPattern').value=appSettings.reachPattern||'{CURS}-{N}';if($('#settingReachCodes'))$('#settingReachCodes').value=appSettings.reachCodes||'';if($('#settingMobileUi'))$('#settingMobileUi').value=appSettings.mobileUi||'auto';
   const st=await storageBreakdown();$('#settingsLocalMaps').textContent=formatBytes(st.maps);$('#settingsLocalPhotos').textContent=formatBytes(st.photos);$('#settingsLocalNotebook').textContent=formatBytes(st.notebook);$('#settingsLocalData').textContent=formatBytes(st.data);$('#settingsLocalTotal').textContent=formatBytes(st.usage??st.totalKnown);$('#settingsLocalBar').style.width=st.quota&&st.usage?`${Math.min(100,st.usage/st.quota*100)}%`:`${Math.min(100,st.totalKnown/(1024*1024*1024)*100)}%`;
-  const cloudBytes=bytesOfJson(currentStatePayloadForCloud?.()||{})+bytesOfJson(state.project||{});$('#settingsCloudState').textContent=a.kind==='account'?(online?(cloudLastError?'Pendiente':'Conectado'):'Sin conexión'):'Sin cuenta';$('#settingsCloudData').textContent=a.kind==='account'?`≈ ${formatBytes(cloudBytes)}`:'—';$('#settingsCloudLastSync').textContent=lastKnownCloudSyncAt()?new Date(lastKnownCloudSyncAt()).toLocaleString('es-ES'):'—';$('#settingsCloudPending').textContent=cloudLastError||(!online&&a.kind==='account'?'Cambios locales pendientes':'0');$('#settingsCloudBar').style.width=a.kind==='account'&&!cloudLastError&&online?'100%':a.kind==='account'?'45%':'0%';$('#settingsCloudSyncBtn').disabled=a.kind!=='account'||!online;
+  const cloudBytes=bytesOfJson(currentStatePayloadForCloud?.()||{})+bytesOfJson(state.project||{});$('#settingsCloudState').textContent=a.kind==='account'?(online?(cloudLastError?'Pendiente':'Conectado'):'Sin conexión'):'Sin cuenta';$('#settingsCloudData').textContent=a.kind==='account'?`≈ ${formatBytes(cloudBytes)}`:'—';$('#settingsCloudLastSync').textContent=lastKnownCloudSyncAt()?new Date(lastKnownCloudSyncAt()).toLocaleString('es-ES'):'—';$('#settingsCloudPending').textContent=cloudLastError||(!online&&a.kind==='account'?'Cambios locales pendientes':'0');$('#settingsCloudBar').style.width=a.kind==='account'&&!cloudLastError&&online?'100%':a.kind==='account'?'45%':'0%';$('#settingsCloudSyncBtn').disabled=a.kind!=='account'||!online;$('#settingsCloudDownloadBtn').disabled=a.kind!=='account'||!online;
 }
 
 function cloneAny(v){return typeof structuredClone==='function'?structuredClone(v):JSON.parse(JSON.stringify(v));}
@@ -3908,7 +3946,7 @@ function initUi(){
   $('#enterBtn').onclick=$('#openCampaignBtn').onclick=enterApp;
   $('#authCloseBtn').onclick=closeAuthModal;$('#authOfflineBtn').onclick=chooseOfflineEntry;$('#authSwitchMode').onclick=()=>setAuthMode(authUiMode==='signin'?'signup':'signin');$('#authTogglePassword').onclick=()=>{const i=$('#authPassword');i.type=i.type==='password'?'text':'password';};$('#authForm').onsubmit=e=>{e.preventDefault();submitAuth();};
   $('#projectAccountBtn').onclick=openAccountManage;if($('#projectCreateAccountBtn'))$('#projectCreateAccountBtn').onclick=openAccountManage;$('#projectSettingsBtn').onclick=()=>showSettings('projects');$('#settingsFromMapBtn').onclick=()=>{closeFloatingPanels();showSettings('map');};$('#accountManageClose').onclick=closeAccountManage;
-  $('#settingsBackBtn').onclick=closeSettings;$('#settingsAccountChip').onclick=openAccountManage;$('#settingsAccountAction').onclick=openAccountManage;$('#settingsSyncAction').onclick=()=>accountState().kind==='account'?syncNow():openAuthModal('manage','signin');$('#settingsCloudSyncBtn').onclick=syncNow;$('#settingsUpdateAppBtn').onclick=updateGeoCauceApp;$('#settingsExportBackup').onclick=()=>state.projectId?exportProjectPackage():toast('Abre un proyecto para exportar una copia');$('#settingsImportBackup').onclick=()=>$('#projectImportInput').click();
+  $('#settingsBackBtn').onclick=closeSettings;$('#settingsAccountChip').onclick=openAccountManage;$('#settingsAccountAction').onclick=openAccountManage;$('#settingsSyncAction').onclick=()=>accountState().kind==='account'?syncNow():openAuthModal('manage','signin');$('#settingsCloudSyncBtn').onclick=uploadCloudChanges;$('#settingsCloudDownloadBtn').onclick=downloadCloudChanges;$('#settingsUpdateAppBtn').onclick=updateGeoCauceApp;$('#settingsExportBackup').onclick=()=>state.projectId?exportProjectPackage():toast('Abre un proyecto para exportar una copia');$('#settingsImportBackup').onclick=()=>$('#projectImportInput').click();
   const settingBindings={settingInputMode:['inputMode','value'],settingPersistentTool:['persistentTool','checked'],settingLengthUnit:['lengthUnit','value'],settingClastUnit:['clastUnit','value'],settingAreaUnit:['areaUnit','value'],settingVolumeUnit:['volumeUnit','value'],settingCoordMode:['coordMode','value'],settingGpsAccuracy:['gpsMinAccuracy','number'],settingPhotoHeading:['photoHeading','checked'],settingGpsAltitude:['gpsAltitude','checked'],settingShowAccuracy:['showAccuracy','checked'],settingNotebookBg:['notebookBg','value'],settingNotebookAutosave:['notebookAutosave','checked'],settingReachPattern:['reachPattern','value'],settingReachCodes:['reachCodes','value'],settingMobileUi:['mobileUi','value']};
   for(const [id,[key,kind]] of Object.entries(settingBindings)){const el=$('#'+id);if(!el)continue;el.onchange=()=>{appSettings[key]=kind==='checked'?el.checked:kind==='number'?+el.value:el.value;saveAppSettings();if(key==='inputMode'&&appSettings.inputMode==='finger'&&state.tool!=='pan')toast('Modo dedo activo · selecciona Mover para navegar con un dedo');if(['lengthUnit','areaUnit','coordMode','showAccuracy'].includes(key)){updateGnssUi();drawAll();const f=state.features.find(x=>x.id===state.selectedId);if(f)showFeatureCard(f);}};}
 
