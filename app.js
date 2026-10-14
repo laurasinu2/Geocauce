@@ -245,22 +245,23 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
   const sigBlob=(b,extra='')=>b instanceof Blob?`${b.size}:${b.type||''}:${extra}`:'';
   const tinyHash=str=>{let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return (h>>>0).toString(36);};
   let done=0,reused=0,uploaded=0;
-  const exists=(path,size)=>cloudStorageObjectExists(path,size,uid);
   const put=async function(key,base,blob,legacySig,label,ext){
  if(manual)cloudProgressUpdate('Analizando · '+label,done,total+2);
  const old=cache[key],remote=remoteFiles.get(key);
  // Reuse an immutable object acknowledged in the last committed cloud manifest.
  const committed=!!(old?.hash&&old.path&&old.sig===legacySig&&remote?.path===old.path&&remote.hash===old.hash&&Number(remote.size)===blob.size);
  const fingerprint=committed?old.hash:`sha256-chunks-v1:${blob.size}:${blob.type||''}:${await cloudAssetDigest(blob)}`;
- const hash=fingerprint.split(':').pop(),global=globalCache[fingerprint];
+ const hash=fingerprint.split(':').pop();
  let path=committed?old.path:null,didUpload=false;
  if(!path&&remote?.path&&remote.hash===fingerprint&&Number(remote.size)===blob.size)path=remote.path;
- if(!path&&old?.path&&(old.hash===fingerprint||(old.hash==null&&old.sig===legacySig))&&await exists(old.path,blob.size))path=old.path;
- if(!path&&global?.path&&await exists(global.path,blob.size))path=global.path;
+ // Uncommitted cache entries are only hints. They may point to missing objects
+ // after interrupted uploads, so never probe or trust them as cloud truth.
+ // An identical blob can be uploaded safely to its content-addressed path.
  if(!path){
   const pending=old?.pending,candidate=pending?.hash===fingerprint&&pending.path?pending.path:`${base}.${hash}${ext}`;
-  // Upload directly: missing objects return HTTP 400 to HEAD on some Supabase deployments.
-  // Immutable content-addressed paths and upsert make interrupted transfers retryable.
+  // No HEAD/INFO lookup for new or interrupted objects: a nonexistent object
+  // can produce an opaque HTTP 400. Uploading the deterministic path is safe,
+  // and the current snapshot is updated only after the entire upload succeeds.
   cache[key]={sig:legacySig,hash:fingerprint,pending:{hash:fingerprint,path:candidate}};persist();
   if(manual)cloudProgressUpdate('Subiendo · '+label,done,total+2);
   await cloudUploadBlob(candidate,blob);
