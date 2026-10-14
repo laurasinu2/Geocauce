@@ -2175,7 +2175,16 @@ function deleteFeature(id,ask=true){
   else{state.features=state.features.filter(x=>x.id!==id);if(f.type==='reach'&&f.courseId)renumberCourseReaches(f.courseId);if(f.type==='basin')state.features.filter(x=>x.type==='watercourse'&&x.basinId===id).forEach(x=>x.basinId=null);}
   if(state.selectedId===id)state.selectedId=null;hideFeatureCard();persistState();updateHydroFab();drawAll();renderSectionList();toast(`${label} eliminado`);
 }
-function eventPoint(e,el){const r=el.getBoundingClientRect();const size=screenSize();return{x:(e.clientX-r.left)*(size.w/(r.width||size.w||1)),y:(e.clientY-r.top)*(size.h/(r.height||size.h||1))};}
+function eventPoint(e,el){
+  const r=el.getBoundingClientRect();
+  const local={x:e.clientX-r.left,y:e.clientY-r.top};
+  // Only the map canvas uses screenSize(). All drawing sheets use their own
+  // CSS-pixel coordinates (sections, field notebook, FITXA sheets and profiles).
+  // Mixing map dimensions into these canvases offsets pen input and snapped points.
+  if(el!==inkCanvas)return local;
+  const size=screenSize();
+  return{x:local.x*(size.w/(r.width||size.w||1)),y:local.y*(size.h/(r.height||size.h||1))};
+}
 
 function featureCardPresentation(f){
   const material=f.material?materialById(f.material):null;
