@@ -11,8 +11,8 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=20261014-mobile-r16" />
-  <link rel="stylesheet" href="mobile-pwa.css?v=20261014-mobile-r16" />
+  <link rel="stylesheet" href="styles.css?v=20261014-symbol-r17" />
+  <link rel="stylesheet" href="mobile-pwa.css?v=20261014-symbol-r17" />
 </head>
 <body>
   <div id="app">
@@ -1217,6 +1217,31 @@ CON | Confluencia"></textarea></div>
     </div>
 
   </div>
+
+    <div id="materialStyleModal" class="material-style-modal hidden" role="dialog" aria-modal="true" aria-labelledby="materialStyleTitle">
+      <section class="material-style-dialog">
+        <header><div><small>GEOC AUCE · SIMBOLOGÍA</small><h2 id="materialStyleTitle">Editor de materiales</h2></div><button id="materialStyleClose" type="button" class="material-style-close" aria-label="Cerrar">×</button></header>
+        <div class="material-style-scroll">
+          <div class="material-style-preview-wrap"><canvas id="materialStylePreview" width="480" height="112" aria-label="Vista previa de la simbología"></canvas><small>Vista previa. Los cambios se aplicarán a todas las zonas de este material al guardar.</small></div>
+          <div class="material-style-fields">
+            <label>Trama<select id="materialStylePattern"><option value="legacy">Trama original</option><option value="solid">Color sólido</option><option value="diagonal">Rayas diagonales</option><option value="cross">Rayas cruzadas</option><option value="dots">Puntos</option><option value="horizontal">Rayas horizontales</option></select></label>
+            <label>Color de relleno<input id="materialStyleColor" type="color" value="#eee0bc"></label>
+            <label>Color de trama<input id="materialStyleInk" type="color" value="#30332f"></label>
+            <label class="material-style-range">Opacidad del relleno <output id="materialStyleOpacityValue">56%</output><input id="materialStyleOpacity" type="range" min="0" max="1" step=".02" value=".56"></label>
+            <label class="material-style-range">Separación de la trama <output id="materialStyleSpacingValue">12 px</output><input id="materialStyleSpacing" type="range" min="5" max="32" step="1" value="12"></label>
+            <label class="material-style-range">Grosor del pincel <output id="materialStyleBrushValue">18 px</output><input id="materialStyleBrushWidth" type="range" min="4" max="60" step="1" value="18"></label>
+          </div>
+          <label class="material-style-border-toggle"><input id="materialStyleOutline" type="checkbox" checked> Mostrar contorno del polígono</label>
+          <div class="material-style-fields" id="materialStyleBorderControls">
+            <label>Color del contorno<input id="materialStyleOutlineColor" type="color" value="#252a26"></label>
+            <label>Tipo de línea<select id="materialStyleOutlineDash"><option value="solid">Continua</option><option value="dash">Discontinua</option><option value="dot">Punteada</option></select></label>
+            <label class="material-style-range">Grosor del contorno <output id="materialStyleOutlineValue">2 px</output><input id="materialStyleOutlineWidth" type="range" min=".5" max="12" step=".5" value="2"></label>
+          </div>
+          <p class="material-style-help">Utiliza Pintar o Dibujar límite como hasta ahora. La simbología se comparte entre todas las zonas del mismo material y se guarda con este proyecto.</p>
+        </div>
+        <footer><button id="materialStyleReset" type="button" class="material-style-reset">Restaurar original</button><div><button id="materialStyleCancel" type="button">Cancelar</button><button id="materialStyleSave" type="button" class="primary">Guardar simbología</button></div></footer>
+      </section>
+    </div>
   <div id="cloudConflictModal" class="cloud-conflict-modal hidden" role="dialog" aria-modal="true" aria-labelledby="cloudConflictTitle">
     <div class="cloud-conflict-dialog">
       <h2 id="cloudConflictTitle">Hay otra versión en la nube</h2>
@@ -1231,11 +1256,11 @@ CON | Confluencia"></textarea></div>
     <div class="cloud-progress-track" role="progressbar" aria-label="Progreso de sincronización" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="cloudProgressBar"></span></div>
     <small id="cloudProgressDetail">Preparando transferencia…</small>
   </aside>
-  <script src="supabase-config.js?v=20261014-mobile-r16"></script>
-  <script src="native-adapter.js?v=20261014-mobile-r16"></script>
-  <script src="geotiff-lite.js?v=20261014-mobile-r16"></script>
-  <script src="modal-layer.js?v=20261014-mobile-r16"></script>
-  <script src="app.js?v=20261014-mobile-r16"></script>
-  <script src="mobile-pwa.js?v=20261014-mobile-r16"></script>
+  <script src="supabase-config.js?v=20261014-symbol-r17"></script>
+  <script src="native-adapter.js?v=20261014-symbol-r17"></script>
+  <script src="geotiff-lite.js?v=20261014-symbol-r17"></script>
+  <script src="modal-layer.js?v=20261014-symbol-r17"></script>
+  <script src="app.js?v=20261014-symbol-r17"></script>
+  <script src="mobile-pwa.js?v=20261014-symbol-r17"></script>
 </body>
 </html>
