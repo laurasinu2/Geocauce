@@ -2362,7 +2362,7 @@ function featureCardPresentation(f){
   const material=f.material?materialById(f.material):null;
   const course=f.type==='reach'?state.features.find(x=>x.id===f.courseId&&x.type==='watercourse'):null;
   const map={
-    deposit:{type:'Dipòsit',icon:'icons/ficha.png'},
+    deposit:{type:material?.kind==='fluvial'?'Dinámica fluvial':'Dipòsit',icon:'icons/ficha.png'},
     basin:{type:'Conca',icon:'icons/mapa.png'},
     watercourse:{type:f.kind==='tributary'?'Afluent':f.kind==='secondary'?'Canal secundari':f.kind==='preferential'?'Flux preferent':'Curs d’aigua',icon:'icons/rio.png'},
     reach:{type:'Tram',icon:'icons/etiqueta.png'},
