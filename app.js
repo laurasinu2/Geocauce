@@ -1837,10 +1837,11 @@ function drawFeatureBase(ctx,f,{ghost=false}={}) {
       if(style){
         if(style.outline){ctx.strokeStyle=style.outlineColor;ctx.lineWidth=style.outlineWidth;ctx.setLineDash(materialOutlineDash(style));ctx.stroke();ctx.setLineDash([]);}
         // A custom material outline replaces the old generic dark polygon border.
-        if(f.type==='deposit'){ctx.restore();return;}
       }
     }
-    if(f.type==='basin'){
+    if(f.type==='deposit' && f.closed && f.filled && materialStyleConfig(f.material)){
+      // The chosen material outline was drawn above.
+    } else if(f.type==='basin'){
       const st=featureLineStyle(f,{color:'#416d55',width:2.2,dash:'dash'});ctx.lineWidth=st.width;ctx.strokeStyle=st.color;ctx.setLineDash(st.dash);ctx.stroke();ctx.setLineDash([]);
     } else if(f.type==='watercourse'){
       const st=featureLineStyle(f,{color:f.id===state.activeCourseId?'#155c96':'#2e78ad',width:f.id===state.activeCourseId?5:3.2,dash:'solid'});ctx.lineWidth=st.width;ctx.strokeStyle=st.color;ctx.setLineDash(st.dash);
