@@ -106,3 +106,28 @@ test('first upload skips remote file-existence probes entirely',async()=>{
   assert.equal(uploads,1);
   assert.equal(env.cache['photo:1'].path,path);
 });
+
+test('stale cached cloud object is reuploaded without failing HTTP 400 existence probe',async()=>{
+  const start=app.indexOf('  const put=async function(');
+  const end=app.indexOf("  if(manual)cloudProgressStart('Preparando archivos para subir'",start);
+  assert.ok(start>=0&&end>start);
+  let probed=0,uploaded=0,persisted=0;
+  const file=new Blob(['hello'],{type:'text/plain'});
+  const fingerprint='sha256-chunks-v1:5:text/plain:abc';
+  const oldPath='user/project/photos/old-missing.bin';
+  const env={manual:false,done:0,total:3,
+    cache:{'photo:1':{path:oldPath,hash:fingerprint,sig:'existing-local'}},
+    remoteFiles:new Map(),
+    globalCache:{[fingerprint]:{path:oldPath,size:5}},
+    cloudAssetDigest:async()=>'abc',
+    exists:async()=>{probed++;throw Object.assign(Error('HTTP 400'),{status:400})},
+    cloudUploadBlob:async()=>{uploaded++},persist:()=>{persisted++},
+    cloudProgressUpdate:()=>{},reused:0,uploaded:0};
+  const put=new Function('env','with(env){'+app.slice(start,end)+';return put;}')(env);
+  const path=await put('photo:1','user/project/photos/1',file,'existing-local','photo','.bin');
+  assert.equal(path,'user/project/photos/1.abc.bin');
+  assert.equal(probed,0);
+  assert.equal(uploaded,1);
+  assert.ok(persisted>0);
+  assert.equal(env.cache['photo:1'].path,path);
+});
