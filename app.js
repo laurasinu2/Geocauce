@@ -17,6 +17,7 @@ const state = {
   project: null,
   tool: 'pan',
   material: 'coarse',
+  materialStyles: {},
   mapInk: [],
   mapInkColor: '#d73a49',
   mapInkWidth: 4,
@@ -109,8 +110,42 @@ const materials = [
   { group:'ROCA', id:'breccia', name:'Brechificado', kind:'rock' },
   { group:'ROCA', id:'clast', name:'Clasto soportado', kind:'rock' },
   { group:'ROCA', id:'matrix', name:'Matriz soportada', kind:'rock' },
+  { group:'DINÁMICA FLUVIAL', id:'erosion', name:'Zona de erosión', kind:'fluvial' },
+  { group:'DINÁMICA FLUVIAL', id:'deposition', name:'Zona de deposición', kind:'fluvial' },
 ];
 const materialById = id => materials.find(m => m.id === id) || materials[1];
+
+const MATERIAL_CUSTOM_PATTERNS=new Set(['legacy','solid','diagonal','cross','dots','horizontal']);
+const MATERIAL_STYLES_DEFAULT={
+  erosion:{pattern:'diagonal',color:'#cc735c',ink:'#a24334',opacity:.48,spacing:12,brushWidth:18,outline:true,outlineColor:'#a24334',outlineWidth:2,outlineDash:'solid'},
+  deposition:{pattern:'dots',color:'#6caeab',ink:'#276f79',opacity:.50,spacing:12,brushWidth:18,outline:true,outlineColor:'#276f79',outlineWidth:2,outlineDash:'solid'}
+};
+function defaultMaterialStyle(id){
+  return {...(MATERIAL_STYLES_DEFAULT[id]||{pattern:'legacy',color:'#eee0bc',ink:'#30332f',opacity:.56,spacing:12,brushWidth:18,outline:true,outlineColor:'#252a26',outlineWidth:2,outlineDash:'solid'})};
+}
+function normalizeMaterialStyle(id,source){
+  const fallback=defaultMaterialStyle(id),s=(source&&typeof source==='object'&&!Array.isArray(source))?source:{};
+  const hex=(x,def)=>/^#[0-9a-fA-F]{6}$/.test(String(x||''))?String(x).toLowerCase():def;
+  const between=(x,min,max,def)=>Number.isFinite(Number(x))?Math.min(max,Math.max(min,Number(x))):def;
+  return {
+    pattern:MATERIAL_CUSTOM_PATTERNS.has(s.pattern)?s.pattern:fallback.pattern,
+    color:hex(s.color,fallback.color),
+    ink:hex(s.ink,fallback.ink),
+    opacity:between(s.opacity,0,1,fallback.opacity),
+    spacing:between(s.spacing,5,32,fallback.spacing),
+    brushWidth:between(s.brushWidth,4,60,fallback.brushWidth),
+    outline:s.outline===undefined?fallback.outline:s.outline===true,
+    outlineColor:hex(s.outlineColor,fallback.outlineColor),
+    outlineWidth:between(s.outlineWidth,.5,12,fallback.outlineWidth),
+    outlineDash:['solid','dash','dot'].includes(s.outlineDash)?s.outlineDash:fallback.outlineDash
+  };
+}
+function materialStyleConfig(id){
+  if(Object.prototype.hasOwnProperty.call(state.materialStyles||{},id))return normalizeMaterialStyle(id,state.materialStyles[id]);
+  return MATERIAL_STYLES_DEFAULT[id]?defaultMaterialStyle(id):null;
+}
+function materialOutlineDash(style){return style?.outlineDash==='dash'?[8,5]:style?.outlineDash==='dot'?[2,4]:[];}
+
 const ICONS={historicalPhoto:'icons/fotos.png',mapInk:'icons/editar.png',pan:'icons/mover.png',boundary:'icons/editar.png',editContour:'icons/editar_propiedad.png',fill:'icons/rellenar.png',paint:'icons/pintar.png',basin:'icons/mapa.png',watercourse:'icons/rio.png',reach:'icons/etiqueta.png',channel:'icons/canal.png',section:'icons/seccion.svg',photo:'icons/camara.png',gps:'icons/gps.png',select:'icons/seleccionar.png',erase:'icons/borrador.png'};
 function iconImg(src,cls=''){return `<img class="${cls}" src="${src}" alt="">`;}
 
@@ -829,7 +864,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
 }
 function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);/* Subidas solo manuales: evita pisar cambios de otro dispositivo. */}
 function persistStateLocalOnly(){
-  if(!state.projectId)return;syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));touchProject();nativeSyncProject(payload);return payload;
+  if(!state.projectId)return;syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));touchProject();nativeSyncProject(payload);return payload;
 }
 window.addEventListener('online',()=>{refreshAccountUi();cloudRefreshProjectCatalog().catch(()=>{});scheduleCloudSync(800);});window.addEventListener('offline',refreshAccountUi);
 
@@ -1117,7 +1152,7 @@ async function saveProjectForm(){
   state.projectId=id;state.project=meta;resetStateForProject(meta);persistState();await openProject(id,{skipSave:true});toast(`Proyecto “${meta.name}” creado`);
 }
 function resetStateForProject(meta=state.project){
-  state.tool='pan';state.material='coarse';state.mapInk=[];state.mapInkColor='#d73a49';state.mapInkWidth=4;state.mapInkMode='pen';state.mapPins=[];state.mapContextPoint=null;state.pendingPhotoLocation=null;state.historicalPhotoPoints=[];state.showHistoricalPhotoPoints=true;state.currentHistoricalPointId=null;state.pendingHistoricalPhotoPointId=null;state.pendingHistoricalPhotoMode=null;state.historicalLinkPointId=null;state.currentStopId=null;state.sectionTool='pen';state.sectionMaterial='none';state.sectionColor='#1f2b31';state.sectionFillOpacity=.45;state.sectionMeasureTool='pen';state.sectionStraightSegments=true;state.sectionGeoClass='none';state.sectionZoneClass='channel';state.sectionZoneCustom='';state.campaign='D01';state.editableCampaign='D01';state.comparePrevious=false;state.compareOpacity=.35;state.view={cx:0,cy:0,scale:1,rotation:0};state.view3d={active:false,exaggeration:1};state.rasters=[];state.demGroups=[];state.activeDemGroupId=null;state.referenceLayers=[];state.vectorExtract=null;state.pendingImportedCourseFragments=null;state.features=[];state.selectedId=null;state.currentStroke=null;state.touches=new Map();state.pinch=null;state.panStart=null;state.pointerPan=null;state.gnss=null;state.currentSection=null;state.pendingPhotoFor=null;state.eraseMode='zone';state.eraseSize=38;state.autoPanAfterDraw=false;state.history=[];state.notebook={pages:[],currentPageId:null};state.notebookTool='pen';state.notebookPenColor=appSettings.notebookPenColor||'#1f2b31';state.notebookView={zoom:1,touches:new Map(),pinch:null,pan:null};state.notebookLinkTarget=null;state.activeCourseId=null;state.pendingCourseStroke=null;state.pendingCourseJoin=null;state.pendingReachStart=null;state.pendingReachBoundaryMove=null;state.editReachId=null;state.profileInkTool='pen';state.profileSheetZoom=1;state.profileSheetTouches=new Map();state.profileSheetGesture=null;state.currentProfileCourseId=null;state.currentReachSheetId=null;state.reachSheetZoom=1;state.reachSheetTouches=new Map();state.reachSheetGesture=null;state.reachSheetSchemeTool='pen';state.editCourseId=null;state.editContourFeatureId=null;state.longProfileReachStart=null;
+  state.tool='pan';state.material='coarse';state.materialStyles={};state.mapInk=[];state.mapInkColor='#d73a49';state.mapInkWidth=4;state.mapInkMode='pen';state.mapPins=[];state.mapContextPoint=null;state.pendingPhotoLocation=null;state.historicalPhotoPoints=[];state.showHistoricalPhotoPoints=true;state.currentHistoricalPointId=null;state.pendingHistoricalPhotoPointId=null;state.pendingHistoricalPhotoMode=null;state.historicalLinkPointId=null;state.currentStopId=null;state.sectionTool='pen';state.sectionMaterial='none';state.sectionColor='#1f2b31';state.sectionFillOpacity=.45;state.sectionMeasureTool='pen';state.sectionStraightSegments=true;state.sectionGeoClass='none';state.sectionZoneClass='channel';state.sectionZoneCustom='';state.campaign='D01';state.editableCampaign='D01';state.comparePrevious=false;state.compareOpacity=.35;state.view={cx:0,cy:0,scale:1,rotation:0};state.view3d={active:false,exaggeration:1};state.rasters=[];state.demGroups=[];state.activeDemGroupId=null;state.referenceLayers=[];state.vectorExtract=null;state.pendingImportedCourseFragments=null;state.features=[];state.selectedId=null;state.currentStroke=null;state.touches=new Map();state.pinch=null;state.panStart=null;state.pointerPan=null;state.gnss=null;state.currentSection=null;state.pendingPhotoFor=null;state.eraseMode='zone';state.eraseSize=38;state.autoPanAfterDraw=false;state.history=[];state.notebook={pages:[],currentPageId:null};state.notebookTool='pen';state.notebookPenColor=appSettings.notebookPenColor||'#1f2b31';state.notebookView={zoom:1,touches:new Map(),pinch:null,pan:null};state.notebookLinkTarget=null;state.activeCourseId=null;state.pendingCourseStroke=null;state.pendingCourseJoin=null;state.pendingReachStart=null;state.pendingReachBoundaryMove=null;state.editReachId=null;state.profileInkTool='pen';state.profileSheetZoom=1;state.profileSheetTouches=new Map();state.profileSheetGesture=null;state.currentProfileCourseId=null;state.currentReachSheetId=null;state.reachSheetZoom=1;state.reachSheetTouches=new Map();state.reachSheetGesture=null;state.reachSheetSchemeTool='pen';state.editCourseId=null;state.editContourFeatureId=null;state.longProfileReachStart=null;
   const root=makeRootCampaign([],{date:displayDate(meta?.startDate)||today(),author:meta?.author||'',event:'initial'});state.campaigns=[root];
 }
 let projectOpenInProgress=false;
@@ -1709,30 +1744,44 @@ function installTerrain3DInteractions(){
 // ---------- fin vista 3D ----------
 
 function makePattern(id,ctx,anchor={x:0,y:0}) {
-  // V0.8: patrón en unidades de pantalla. No crece ni encoge al hacer zoom.
-  // La fase se ancla al propio elemento para que el patrón no "nade" dentro
-  // del polígono cuando se desplaza o cambia de escala.
-  const tile=28;
-  const c=document.createElement('canvas'); c.width=c.height=tile;
+  // Annotations are screen-space tiles, anchored to the element, independent of map zoom.
+  // Existing materials retain their exact legacy drawing until their style is edited.
+  const style=materialStyleConfig(id),legacy=!style||style.pattern==='legacy';
+  const tile=legacy?28:Math.max(8,Math.round(style.spacing));
+  const c=document.createElement('canvas');c.width=c.height=tile;
   const g=c.getContext('2d');
-  g.fillStyle='rgba(238,224,188,.46)'; g.fillRect(0,0,tile,tile);
-  g.strokeStyle='rgba(47,51,47,.82)'; g.fillStyle='rgba(47,51,47,.82)'; g.lineWidth=1.05;
-  if(id==='fine'||id==='coarse'){
+  if(style){
+    g.globalAlpha=style.opacity;
+    g.fillStyle=style.color;g.fillRect(0,0,tile,tile);
+    g.strokeStyle=style.ink;g.fillStyle=style.ink;g.lineWidth=1.4;
+  }else{
+    g.fillStyle='rgba(238,224,188,.46)';g.fillRect(0,0,tile,tile);
+    g.strokeStyle='rgba(47,51,47,.82)';g.fillStyle='rgba(47,51,47,.82)';g.lineWidth=1.05;
+  }
+  if(!legacy){
+    if(style.pattern==='diagonal'||style.pattern==='cross'){
+      g.beginPath();g.moveTo(-tile/2,tile/2);g.lineTo(tile/2,-tile/2);
+      g.moveTo(0,tile);g.lineTo(tile,0);g.moveTo(tile/2,tile*1.5);g.lineTo(tile*1.5,tile/2);
+      if(style.pattern==='cross'){g.moveTo(0,0);g.lineTo(tile,tile);g.moveTo(-tile/2,tile/2);g.lineTo(tile/2,tile*1.5);g.moveTo(tile/2,-tile/2);g.lineTo(tile*1.5,tile/2);}
+      g.stroke();
+    }else if(style.pattern==='dots'){g.beginPath();g.arc(tile/2,tile/2,Math.max(1,Math.min(3,tile*.13)),0,Math.PI*2);g.fill();}
+    else if(style.pattern==='horizontal'){g.beginPath();g.moveTo(0,tile/2);g.lineTo(tile,tile/2);g.stroke();}
+  }else if(id==='fine'||id==='coarse'){
     const step=id==='fine'?7:9,rad=id==='fine'?.75:1.25;
-    for(let y=3;y<tile;y+=step) for(let x=3;x<tile;x+=step){g.beginPath();g.arc(x+(y%2?2:0),y,rad,0,Math.PI*2);g.fill();}
-  } else if(['gravel','pebbles','conglomerate','weak','clast','mixed','blocks'].includes(id)){
+    for(let y=3;y<tile;y+=step)for(let x=3;x<tile;x+=step){g.beginPath();g.arc(x+(y%2?2:0),y,rad,0,Math.PI*2);g.fill();}
+  }else if(['gravel','pebbles','conglomerate','weak','clast','mixed','blocks'].includes(id)){
     const rad=id==='blocks'?6:id==='pebbles'||id==='clast'?4.5:2.8;
-    for(let y=7;y<tile;y+=14) for(let x=7;x<tile;x+=14){g.beginPath();g.ellipse(x,y,rad,Math.max(2,rad*.7),.3,0,Math.PI*2);g.stroke();}
-    if(id==='mixed') for(let y=3;y<tile;y+=8) for(let x=3;x<tile;x+=8) g.fillRect(x,y,1.3,1.3);
-  } else if(id==='matrix'||id==='breccia'||id==='colluvium'){
+    for(let y=7;y<tile;y+=14)for(let x=7;x<tile;x+=14){g.beginPath();g.ellipse(x,y,rad,Math.max(2,rad*.7),.3,0,Math.PI*2);g.stroke();}
+    if(id==='mixed')for(let y=3;y<tile;y+=8)for(let x=3;x<tile;x+=8)g.fillRect(x,y,1.3,1.3);
+  }else if(id==='matrix'||id==='breccia'||id==='colluvium'){
     for(let i=-tile;i<tile*2;i+=10){g.beginPath();g.moveTo(i,tile);g.lineTo(i+tile,0);g.stroke();}
-    if(id==='breccia') for(let i=-tile;i<tile*2;i+=18){g.beginPath();g.moveTo(i,0);g.lineTo(i+18,tile);g.stroke();}
-  } else if(id==='alluvium'){
+    if(id==='breccia')for(let i=-tile;i<tile*2;i+=18){g.beginPath();g.moveTo(i,0);g.lineTo(i+18,tile);g.stroke();}
+  }else if(id==='alluvium'){
     for(let y=5;y<tile;y+=8){g.beginPath();g.moveTo(0,y);g.lineTo(tile,y);g.stroke();}
   }
   const pattern=ctx.createPattern(c,'repeat');
-  if(pattern?.setTransform && typeof DOMMatrix!=='undefined'){
-    const tx=((anchor.x%tile)+tile)%tile, ty=((anchor.y%tile)+tile)%tile;
+  if(pattern?.setTransform&&typeof DOMMatrix!=='undefined'){
+    const tx=((anchor.x%tile)+tile)%tile,ty=((anchor.y%tile)+tile)%tile;
     pattern.setTransform(new DOMMatrix().translate(tx,ty));
   }
   return pattern;
@@ -1774,11 +1823,23 @@ function drawFeatureBase(ctx,f,{ghost=false}={}) {
 
   if(f.paint){
     ctx.strokeStyle=makePattern(f.material,ctx,pts[0]);
-    ctx.lineWidth=18;
+    const style=materialStyleConfig(f.material);
+    ctx.lineWidth=style?.brushWidth||18;
     ctx.stroke();
-    ctx.strokeStyle='rgba(40,45,40,.45)';ctx.lineWidth=1;ctx.stroke();
+    if(!style || style.outline){
+      ctx.strokeStyle=style?style.outlineColor:'rgba(40,45,40,.45)';
+      ctx.lineWidth=style?Math.min(3,style.outlineWidth):1;ctx.setLineDash(materialOutlineDash(style));ctx.stroke();ctx.setLineDash([]);
+    }
   } else {
-    if(f.closed&&f.filled){ctx.fillStyle=makePattern(f.material,ctx,pts[0]);ctx.fill();}
+    if(f.closed&&f.filled){
+      ctx.fillStyle=makePattern(f.material,ctx,pts[0]);ctx.fill();
+      const style=materialStyleConfig(f.material);
+      if(style){
+        if(style.outline){ctx.strokeStyle=style.outlineColor;ctx.lineWidth=style.outlineWidth;ctx.setLineDash(materialOutlineDash(style));ctx.stroke();ctx.setLineDash([]);}
+        // A custom material outline replaces the old generic dark polygon border.
+        if(f.type==='deposit'){ctx.restore();return;}
+      }
+    }
     if(f.type==='basin'){
       const st=featureLineStyle(f,{color:'#416d55',width:2.2,dash:'dash'});ctx.lineWidth=st.width;ctx.strokeStyle=st.color;ctx.setLineDash(st.dash);ctx.stroke();ctx.setLineDash([]);
     } else if(f.type==='watercourse'){
@@ -1840,7 +1901,7 @@ function drawGnss(){
 }
 
 function reachBoundaryScreenGeometry(course,b){const frag=courseFragments(course)[b.fragmentIndex];if(!frag)return null;const p=worldToScreen(b.point),eps=Math.max(.2,8/state.view.scale),a=worldToScreen(pointAtAlong(frag,Math.max(0,b.along-eps))),z=worldToScreen(pointAtAlong(frag,Math.min(polylineLength(frag),b.along+eps))),dx=z.x-a.x,dy=z.y-a.y,L=Math.hypot(dx,dy)||1,nx=-dy/L,ny=dx/L;return{p,nx,ny};}
-function drawReachBoundaryMarkers(){mapCtx.save();const used=[];for(const c of hydroCourses()){const active=c.id===state.activeCourseId;for(const b of reachBoundaryRecords(c.id)){const g=reachBoundaryScreenGeometry(c,b);if(!g)continue;const shared=(b.starts.length+b.ends.length)>1;mapCtx.strokeStyle=active?'#8c4d0c':'rgba(140,77,12,.65)';mapCtx.fillStyle=shared?'#f2a53a':'#fff8eb';mapCtx.lineWidth=active?2.2:1.5;const half=active?7:5;mapCtx.beginPath();mapCtx.moveTo(g.p.x-g.nx*half,g.p.y-g.ny*half);mapCtx.lineTo(g.p.x+g.nx*half,g.p.y+g.ny*half);mapCtx.stroke();mapCtx.beginPath();mapCtx.arc(g.p.x,g.p.y,active?3.6:2.8,0,Math.PI*2);mapCtx.fill();mapCtx.stroke();}
+function drawReachBoundaryMarkers(){mapCtx.save();const used=[];for(const c of hydroCourses()){const active=c.id===state.activeCourseId;for(const b of reachBoundaryRecords(c.id)){const g=reachBoundaryScreenGeometry(c,b);if(!g)continue;const shared=(b.starts.length+b.ends.length)>1;mapCtx.strokeStyle=active?'#8c4d0c':'rgba(140,77,12,.65)';mapCtx.fillStyle=shared?'#f2a53a':'#fff8eb';mapCtx.lineWidth=active?3.4:2.6;const half=active?10:8;mapCtx.beginPath();mapCtx.moveTo(g.p.x-g.nx*half,g.p.y-g.ny*half);mapCtx.lineTo(g.p.x+g.nx*half,g.p.y+g.ny*half);mapCtx.stroke();mapCtx.beginPath();mapCtx.arc(g.p.x,g.p.y,active?3.6:2.8,0,Math.PI*2);mapCtx.fill();mapCtx.stroke();}
     const rs=orderedCourseReaches(c.id);for(let i=0;i<rs.length;i++){const r=rs[i];if(!r.points?.length)continue;const mid=reachLabelPoint(r),m=worldToScreen(mid),label=r.reachCode||r.id;mapCtx.font=`700 ${active?11:10}px system-ui,sans-serif`;const tw=mapCtx.measureText(label).width,side=i%2?1:-1;let x=m.x+6,y=m.y+side*9,box;for(let k=0;k<5;k++){box={x:x-2,y:y-7,w:tw+4,h:14};if(!used.some(q=>box.x<q.x+q.w&&box.x+box.w>q.x&&box.y<q.y+q.h&&box.y+box.h>q.y))break;y+=side*12;}used.push(box);mapCtx.lineWidth=3;mapCtx.strokeStyle='rgba(255,255,255,.92)';mapCtx.strokeText(label,x,y);mapCtx.fillStyle='#7b4612';mapCtx.fillText(label,x,y);}}
   mapCtx.restore();}
 function nearestReachBoundary(sp){let best=null;const courses=hydroCourses().slice().sort((a,b)=>(a.id===state.activeCourseId?-1:0)-(b.id===state.activeCourseId?-1:0));for(const c of courses){for(const b of reachBoundaryRecords(c.id)){const q=worldToScreen(b.point),d=Math.hypot(sp.x-q.x,sp.y-q.y);if(d<=14&&(!best||d<best.d))best={...b,courseId:c.id,d};}}return best;}
@@ -2064,16 +2125,91 @@ function updateMaterialButton(){
   if(['fill','paint'].includes(state.tool))a.querySelector('span').textContent=`${state.tool==='fill'?'Rellenar':'Pintar'} · ${m.name}`;
   if(state.tool==='erase')a.querySelector('span').textContent=`Borrar ${state.eraseMode==='zone'?'zona':'elemento'}`;
 }
-function renderMaterials(){
-  const root=$('#materialList');root.innerHTML='';let g='';
-  for(const m of materials){
-    if(m.group!==g){g=m.group;const grp=document.createElement('div');grp.className='material-group';grp.innerHTML=`<h4>${g}</h4>`;root.appendChild(grp);}
-    const row=document.createElement('div');row.className='material-item'+(m.id===state.material?' selected':'');
-    row.innerHTML=`<div class="pattern-swatch" data-pattern="${m.id}"></div><span>${m.name}</span><b>${m.id===state.material?'✓':''}</b>`;
-    row.onclick=()=>{state.material=m.id;renderMaterials();updateMaterialButton();$('#materialPanel').classList.add('hidden');persistState();toast(m.name);};
-    root.lastElementChild.appendChild(row);
+function drawMaterialPreview(canvas,id,styleOverride=null){
+  if(!canvas)return;
+  const ctx=canvas.getContext('2d');if(!ctx)return;
+  const w=canvas.width,h=canvas.height;
+  ctx.clearRect(0,0,w,h);ctx.fillStyle='#f5f3ed';ctx.fillRect(0,0,w,h);
+  // Temporary preview uses the same renderer but never alters saved project styles.
+  const saved=state.materialStyles?.[id];
+  try{
+    if(styleOverride){state.materialStyles=state.materialStyles||{};state.materialStyles[id]=styleOverride;}
+    ctx.fillStyle=makePattern(id,ctx,{x:0,y:0});ctx.fillRect(3,3,w-6,h-6);
+    const st=styleOverride||materialStyleConfig(id);
+    if(st?.outline){ctx.strokeStyle=st.outlineColor;ctx.lineWidth=st.outlineWidth;ctx.setLineDash(materialOutlineDash(st));ctx.strokeRect(3,3,w-6,h-6);ctx.setLineDash([]);}
+  }finally{
+    if(styleOverride){if(saved===undefined)delete state.materialStyles[id];else state.materialStyles[id]=saved;}
   }
 }
+let editingMaterialId=null,editingMaterialDraft=null;
+function renderMaterials(){
+  const root=$('#materialList');if(!root)return;root.innerHTML='';let g='',parent=root;
+  for(const m of materials){
+    if(m.group!==g){g=m.group;parent=document.createElement('div');parent.className='material-group';const head=document.createElement('h4');head.textContent=g;parent.appendChild(head);root.appendChild(parent);}
+    const row=document.createElement('div');row.className='material-item material-item-editable'+(m.id===state.material?' selected':'');
+    const preview=document.createElement('canvas');preview.className='material-symbol-thumb';preview.width=76;preview.height=36;preview.setAttribute('aria-hidden','true');
+    const choose=document.createElement('button');choose.type='button';choose.className='material-choose';choose.textContent=m.name+(m.id===state.material?' ✓':'');choose.setAttribute('aria-pressed',String(m.id===state.material));
+    choose.onclick=()=>{state.material=m.id;renderMaterials();updateMaterialButton();$('#materialPanel').classList.add('hidden');persistState();toast(m.name);};
+    const edit=document.createElement('button');edit.type='button';edit.className='material-edit-symbol';edit.textContent='⚙';edit.title='Editar simbología de '+m.name;edit.setAttribute('aria-label',edit.title);
+    edit.onclick=()=>openMaterialStyleEditor(m.id);
+    row.append(preview,choose,edit);parent.appendChild(row);drawMaterialPreview(preview,m.id);
+  }
+}
+function materialEditorInputs(){
+  const d=editingMaterialDraft;if(!d)return;
+  const fields={pattern:'materialStylePattern',color:'materialStyleColor',ink:'materialStyleInk',opacity:'materialStyleOpacity',spacing:'materialStyleSpacing',brushWidth:'materialStyleBrushWidth',outline:'materialStyleOutline',outlineColor:'materialStyleOutlineColor',outlineWidth:'materialStyleOutlineWidth',outlineDash:'materialStyleOutlineDash'};
+  for(const [key,id] of Object.entries(fields)){const el=$('#'+id);if(el)el[key==='outline'?'checked':'value']=d[key];}
+  refreshMaterialStylePreview();
+}
+function refreshMaterialStylePreview(){
+  const d=editingMaterialDraft;if(!d)return;
+  drawMaterialPreview($('#materialStylePreview'),editingMaterialId,d);
+  const text=(id,value)=>{const el=$('#'+id);if(el)el.textContent=value;};
+  text('materialStyleOpacityValue',Math.round(d.opacity*100)+'%');
+  text('materialStyleSpacingValue',d.spacing+' px');
+  text('materialStyleBrushValue',d.brushWidth+' px');
+  text('materialStyleOutlineValue',d.outlineWidth+' px');
+  const border=$('#materialStyleBorderControls');if(border)border.classList.toggle('hidden',!d.outline);
+}
+function openMaterialStyleEditor(id){
+  if(!materials.some(m=>m.id===id))return;
+  editingMaterialId=id;editingMaterialDraft=normalizeMaterialStyle(id,materialStyleConfig(id)||defaultMaterialStyle(id));
+  const modal=$('#materialStyleModal');if(!modal)return;
+  $('#materialStyleTitle').textContent='Simbología · '+materialById(id).name;
+  materialEditorInputs();modal.classList.remove('hidden');
+}
+function closeMaterialStyleEditor(){
+  $('#materialStyleModal')?.classList.add('hidden');
+  editingMaterialId=null;editingMaterialDraft=null;
+}
+function saveMaterialStyleEditor(){
+  if(!editingMaterialId||!editingMaterialDraft)return;
+  state.materialStyles=state.materialStyles||{};
+  state.materialStyles[editingMaterialId]=normalizeMaterialStyle(editingMaterialId,editingMaterialDraft);
+  persistState();renderMaterials();drawAll();renderLegend();closeMaterialStyleEditor();
+  toast('Simbología guardada en este proyecto · se aplica a las zonas existentes');
+}
+function resetMaterialStyleEditor(){
+  if(!editingMaterialId)return;
+  delete state.materialStyles[editingMaterialId];
+  persistState();renderMaterials();drawAll();renderLegend();closeMaterialStyleEditor();
+  toast('Simbología original restaurada');
+}
+function installMaterialStyleEditor(){
+  for(const [key,id] of Object.entries({pattern:'materialStylePattern',color:'materialStyleColor',ink:'materialStyleInk',opacity:'materialStyleOpacity',spacing:'materialStyleSpacing',brushWidth:'materialStyleBrushWidth',outline:'materialStyleOutline',outlineColor:'materialStyleOutlineColor',outlineWidth:'materialStyleOutlineWidth',outlineDash:'materialStyleOutlineDash'})){
+    const el=$('#'+id);if(!el)continue;
+    el.addEventListener('input',()=>{
+      if(!editingMaterialDraft)return;
+      editingMaterialDraft=normalizeMaterialStyle(editingMaterialId,{...editingMaterialDraft,[key]:key==='outline'?el.checked:el.value});
+      refreshMaterialStylePreview();
+    });
+  }
+  $('#materialStyleSave')?.addEventListener('click',saveMaterialStyleEditor);
+  $('#materialStyleCancel')?.addEventListener('click',closeMaterialStyleEditor);
+  $('#materialStyleClose')?.addEventListener('click',closeMaterialStyleEditor);
+  $('#materialStyleReset')?.addEventListener('click',resetMaterialStyleEditor);
+}
+
 
 function beginPan(p,pointerId){state.pointerPan={pointerId,p,center:{...state.view}};inkCanvas.setPointerCapture?.(pointerId);inkCanvas.style.cursor='grabbing';}
 function movePan(p){if(!state.pointerPan)return;markMapMotion();const dx=p.x-state.pointerPan.p.x,dy=p.y-state.pointerPan.p.y,d=screenOffsetToWorld(dx,dy,state.pointerPan.center.scale,state.pointerPan.center.rotation||0);state.view.cx=state.pointerPan.center.cx-d.x;state.view.cy=state.pointerPan.center.cy-d.y;drawAll();}
@@ -3599,7 +3735,7 @@ function restoreState(projectId=state.projectId){
     if(!rawState&&ANDROID_NATIVE){try{const pack=JSON.parse(nativeCall('getProjectSnapshot',projectId)||'{}');if(pack?.state){rawState=JSON.stringify(pack.state);localStorage.setItem(projectStateKey(projectId),rawState);if(Array.isArray(pack.palette)&&pack.palette.length){sectionPalette=pack.palette;saveSectionPalette();}}}catch(e){console.warn('No se pudo restaurar SQLite',e);}}
     const sv=JSON.parse(rawState||'null');
     if(!sv){return;}
-    state.tool=sv.appVersion?sv.tool||state.tool:'pan';state.material=sv.material||state.material;state.mapInk=Array.isArray(sv.mapInk)?sv.mapInk:[];state.mapInkColor=sv.mapInkColor||'#d73a49';state.mapInkWidth=Math.max(1,+sv.mapInkWidth||4);state.mapInkMode=sv.mapInkMode==='eraser'?'eraser':'pen';state.mapPins=Array.isArray(sv.mapPins)?sv.mapPins:[];state.historicalPhotoPoints=Array.isArray(sv.historicalPhotoPoints)?sv.historicalPhotoPoints:[];state.showHistoricalPhotoPoints=sv.showHistoricalPhotoPoints!==false;state.notebook=sv.notebook||state.notebook;state.activeCourseId=sv.activeCourseId||null;state.referenceLayers=Array.isArray(sv.referenceLayers)?sv.referenceLayers.filter((layer,i,all)=>!layer?.id||all.findIndex(x=>x?.id===layer.id)===i):[];state.demGroups=Array.isArray(sv.demGroups)?sv.demGroups:[];state.activeDemGroupId=sv.activeDemGroupId||null;state.view={...(sv.view||state.view),rotation:sv.view?.rotation||0};state.eraseMode=sv.eraseMode||state.eraseMode;state.eraseSize=sv.eraseSize||state.eraseSize;state.autoPanAfterDraw=sv.autoPanAfterDraw!==false;state.comparePrevious=!!sv.comparePrevious;state.compareOpacity=Number.isFinite(+sv.compareOpacity)?+sv.compareOpacity:.35;
+    state.tool=sv.appVersion?sv.tool||state.tool:'pan';state.material=sv.material||state.material;state.materialStyles=Object.fromEntries(Object.entries(sv.materialStyles&&typeof sv.materialStyles==='object'&&!Array.isArray(sv.materialStyles)?sv.materialStyles:{}).filter(([id])=>materials.some(m=>m.id===id)).map(([id,style])=>[id,normalizeMaterialStyle(id,style)]));state.mapInk=Array.isArray(sv.mapInk)?sv.mapInk:[];state.mapInkColor=sv.mapInkColor||'#d73a49';state.mapInkWidth=Math.max(1,+sv.mapInkWidth||4);state.mapInkMode=sv.mapInkMode==='eraser'?'eraser':'pen';state.mapPins=Array.isArray(sv.mapPins)?sv.mapPins:[];state.historicalPhotoPoints=Array.isArray(sv.historicalPhotoPoints)?sv.historicalPhotoPoints:[];state.showHistoricalPhotoPoints=sv.showHistoricalPhotoPoints!==false;state.notebook=sv.notebook||state.notebook;state.activeCourseId=sv.activeCourseId||null;state.referenceLayers=Array.isArray(sv.referenceLayers)?sv.referenceLayers.filter((layer,i,all)=>!layer?.id||all.findIndex(x=>x?.id===layer.id)===i):[];state.demGroups=Array.isArray(sv.demGroups)?sv.demGroups:[];state.activeDemGroupId=sv.activeDemGroupId||null;state.view={...(sv.view||state.view),rotation:sv.view?.rotation||0};state.eraseMode=sv.eraseMode||state.eraseMode;state.eraseSize=sv.eraseSize||state.eraseSize;state.autoPanAfterDraw=sv.autoPanAfterDraw!==false;state.comparePrevious=!!sv.comparePrevious;state.compareOpacity=Number.isFinite(+sv.compareOpacity)?+sv.compareOpacity:.35;
     const alreadyIncremental=Array.isArray(sv.campaigns)&&sv.campaigns.length&&sv.campaigns.every(c=>Array.isArray(c.upserts)&&Array.isArray(c.deleted)&&Array.isArray(c.order));
     if(alreadyIncremental){
       state.campaigns=sv.campaigns.map(c=>({...c,parentId:c.parentId||null,author:c.author||'',event:c.event||'none',notes:c.notes||'',upserts:(c.upserts||[]).map(f=>normalizeFeature(f,c.id)),deleted:[...(c.deleted||[])],order:[...(c.order||[])],createdAt:c.createdAt||Date.now()}));
@@ -4586,6 +4722,7 @@ for(const [id,out,digits] of [['rasterStyleBrightness','rasterStyleBrightnessOut
 if($('#rasterStyleSave'))$('#rasterStyleSave').onclick=saveRasterStyle;
 if($('#rasterStyleReset'))$('#rasterStyleReset').onclick=()=>{const r=state.rasters.find(x=>x.id===rasterStyleEditingId);if(!r)return;const st=rasterStyleDefault(r),lo=r.meta?.range?.[0]??st.min,hi=r.meta?.range?.[1]??st.max;$('#rasterStyleRenderer').value='original';$('#rasterStyleRamp').value='spectral';$('#rasterStyleUniqueRamp').value='spectral';$('#rasterStyleInterpolation').value='linear';$('#rasterStyleClassMode').value='continuous';$('#rasterStyleClassCount').value='5';$('#rasterStylePrecision').value='4';$('#rasterStyleMin').value=String(lo);$('#rasterStyleMax').value=String(hi);$('#rasterStyleGrayMin').value=String(lo);$('#rasterStyleGrayMax').value=String(hi);$('#rasterStyleInvert').checked=false;rasterStyleBreaks=makeRasterBreaks(+lo,+hi,5,'spectral',false);rasterStyleClasses=[];renderRasterStyleClasses();renderRasterStyleBreaks();$('#rasterStyleBrightness').value='0';$('#rasterStyleContrast').value='0';$('#rasterStyleGamma').value='1';$('#rasterStyleSaturation').value='0';$('#rasterStyleBrightnessOut').value='0';$('#rasterStyleContrastOut').value='0';$('#rasterStyleGammaOut').value='1.00';$('#rasterStyleSaturationOut').value='0';$('#rasterStyleIsDem').checked=(r.meta?.originalKind||r.meta?.kind)==='dem';$('#rasterStyleSaveStatus').textContent='Prem “Guardar” per restablir el raster original';updateRasterRampVisuals();updateRasterStylePanels();};
 
+installMaterialStyleEditor();
 window.GeoCauceMobileApi={
   getState:()=>state,
   getSettings:()=>appSettings,
