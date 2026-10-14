@@ -4,7 +4,7 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const shell=$('#mobileShell'), content=$('#mobileContent'), mapBar=$('#mobileMapBar');
 const api=window.GeoCauceMobileApi;
 if(!shell||!content||!api)return;
-let route='home', mapOpening=false;
+let route='home', mapOpening=false, lastFramedMapProjectId=null;
 const ACTIVE_KEY='geocauce-active-project-v010';
 const previewMobile=new URLSearchParams(location.search).get('previewMobile')==='1';
 const isNarrow=()=>matchMedia('(max-width: 820px)').matches;
@@ -47,7 +47,20 @@ async function showMap(){
   shell.classList.add('hidden');document.body.classList.add('mobile-map-lite');
   $('#mapScreen')?.classList.remove('hidden');mapBar.classList.remove('hidden');
   try{api.getState().screen='map';}catch{}
-  requestAnimationFrame(()=>{window.dispatchEvent(new Event('resize'));setTimeout(()=>window.dispatchEvent(new Event('resize')),120);});
+  // Resize canvases after the mobile shell is hidden and before fitting the map.
+  // Previously the desktop map viewport was reused on a narrow phone,
+  // which left the raster and its annotations cropped or off-screen.
+  requestAnimationFrame(()=>{
+    window.dispatchEvent(new Event('resize'));
+    requestAnimationFrame(()=>{
+      window.dispatchEvent(new Event('resize'));
+      const st=api.getState(),hasContent=(st?.rasters||[]).some(r=>r.visible!==false)||(st?.features||[]).some(f=>f.points?.length);
+      if(hasContent&&lastFramedMapProjectId!==st?.projectId){
+        $('#fitAllBtn')?.click();
+        lastFramedMapProjectId=st.projectId;
+      }
+    });
+  });
 }
 function selectProjectMobile(id){
   const p=(api.getProjects()||[]).find(x=>x.id===id);if(!p)return;
