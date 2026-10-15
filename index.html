@@ -11,8 +11,8 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=20261015-orientation-r20" />
-  <link rel="stylesheet" href="mobile-pwa.css?v=20261015-orientation-r20" />
+  <link rel="stylesheet" href="styles.css?v=20261015-qgis-r21" />
+  <link rel="stylesheet" href="mobile-pwa.css?v=20261015-qgis-r21" />
 </head>
 <body>
   <div id="app">
@@ -582,7 +582,12 @@ CON | Confluencia"></textarea></div>
                   <label>Precisió<input id="rasterStylePrecision" type="number" min="0" max="8" step="1" value="4"></label>
                   <button id="rasterStylePseudoClassify" class="secondary" type="button">Classificar</button>
                 </div>
-                <small id="rasterStylePseudoStatus" class="muted">Defineix el mode i prem “Classificar”. Els intervals es poden editar després.</small>
+                <div class="raster-qgis-import">
+  <label for="rasterStyleImportQgisFile"><b>Importar mapa de colors QGIS (.txt)</b></label>
+  <input id="rasterStyleImportQgisFile" type="file" accept=".txt,text/plain" aria-label="Importar mapa de colors de QGIS">
+  <small id="rasterStyleQgisStatus" class="muted">Els valors i colors importats no es reclasifiquen automàticament. Pots modificar cada punt i guardar.</small>
+</div>
+<small id="rasterStylePseudoStatus" class="muted">Defineix el mode i prem “Classificar”. Els intervals es poden editar després.</small>
                 <div class="raster-break-table">
                   <div class="raster-break-head"><span>Interval</span><span>Color</span><span>Etiqueta</span><span>✓</span></div>
                   <div id="rasterStyleBreaks"></div>
@@ -1256,11 +1261,11 @@ CON | Confluencia"></textarea></div>
     <div class="cloud-progress-track" role="progressbar" aria-label="Progreso de sincronización" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="cloudProgressBar"></span></div>
     <small id="cloudProgressDetail">Preparando transferencia…</small>
   </aside>
-  <script src="supabase-config.js?v=20261015-orientation-r20"></script>
-  <script src="native-adapter.js?v=20261015-orientation-r20"></script>
-  <script src="geotiff-lite.js?v=20261015-orientation-r20"></script>
-  <script src="modal-layer.js?v=20261015-orientation-r20"></script>
-  <script src="app.js?v=20261015-orientation-r20"></script>
-  <script src="mobile-pwa.js?v=20261015-orientation-r20"></script>
+  <script src="supabase-config.js?v=20261015-qgis-r21"></script>
+  <script src="native-adapter.js?v=20261015-qgis-r21"></script>
+  <script src="geotiff-lite.js?v=20261015-qgis-r21"></script>
+  <script src="modal-layer.js?v=20261015-qgis-r21"></script>
+  <script src="app.js?v=20261015-qgis-r21"></script>
+  <script src="mobile-pwa.js?v=20261015-qgis-r21"></script>
 </body>
 </html>

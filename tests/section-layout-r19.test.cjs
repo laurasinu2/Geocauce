@@ -87,8 +87,8 @@ test('FITXA III has five compact table columns, one row label, and internal scro
  assert.match(segment,/\.section-field-table td\{[^}]*overflow:hidden/);
 });
 test('revision bump loads corrected CSS and JS without erasing local data',()=>{
- assert.match(html,/app\.js\?v=20261015-orientation-r20/);
- assert.match(html,/styles\.css\?v=20261015-orientation-r20/);
- assert.match(sw,/mobile-pwa-r20/);
+ assert.match(html,/app\.js\?v=20261015-qgis-r21/);
+ assert.match(html,/styles\.css\?v=20261015-qgis-r21/);
+ assert.match(sw,/mobile-pwa-r21/);
  assert.doesNotMatch(code,/localStorage\.clear\(\)/);
 });
