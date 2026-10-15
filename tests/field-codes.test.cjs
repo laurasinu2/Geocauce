@@ -10,6 +10,7 @@ assert.ok(start>0&&end>start,'Field dictionary exists');
 const ctx={escapeHtml:s=>String(s),Math,Number,Set};
 vm.createContext(ctx);
 vm.runInContext(app.slice(start,end),ctx);
+Object.assign(ctx,vm.runInContext('({FIELD_CHANGE_REASONS,FIELD_CERTAINTY})',ctx));
 test('app remains valid JavaScript',()=>assert.doesNotThrow(()=>new vm.Script(app)));
 test('cardinal orientation respects direction of drawn section',()=>{
   assert.equal(ctx.sectionOrientationLabel({points:[{x:0,y:0},{x:20,y:0}]}),'O–E');
