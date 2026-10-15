@@ -4914,6 +4914,8 @@ async function localPdfSectionSheet(section,stage){
  if(templates.length!==3)throw Error('No es troben les tres pàgines originals de FITXA III');
  const pages=templates.map(source=>localPdfClone(source,stage,1200));
  pages.forEach(page=>{page.style.width='1200px';page.style.borderRadius='0';localPdfHideTools(page);page.querySelectorAll('.section-table-zoom-wrap,.section-field-table,.reach-sheet-fic-table').forEach(el=>{el.style.overflow='visible';el.style.maxHeight='none';el.style.height='auto';});});
+ // Use the field table's full native width instead of cutting off right-bank columns.
+ pages[1].style.width='1590px';
  const first=pages[0];
  localPdfField(first,'sectionTorrentName',sectionCourse(section)?[sectionCourse(section)?.abbr,sectionCourse(section)?.name].filter(Boolean).join(', '):'—');
  localPdfField(first,'sectionReachName',sectionReach(section)?.reachCode||sectionReach(section)?.id||'—');
