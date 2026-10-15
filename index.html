@@ -11,8 +11,8 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=20261015-qgis-r21" />
-  <link rel="stylesheet" href="mobile-pwa.css?v=20261015-qgis-r21" />
+  <link rel="stylesheet" href="styles.css?v=20261015-download-r23" />
+  <link rel="stylesheet" href="mobile-pwa.css?v=20261015-download-r23" />
 </head>
 <body>
   <div id="app">
@@ -1117,10 +1117,14 @@ CON | Confluencia"></textarea></div>
       <div class="modal-backdrop"></div>
       <div class="download-contents-card">
         <header><div><img src="icons/guardar.png" alt=""><div><b>Descargar contenidos</b><small>Selecciona fitxes i mapes per exportar.</small></div></div><button id="downloadContentsClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
-        <div id="downloadContentsList" class="download-contents-list"></div>
-        <p class="export-note">Cada FITXA I enquadra automàticament el torrent actiu. El mapa general és un fitxer separat: la seva extensió la defineixen els mapes del projecte i mostra els cursos amb els seus noms, sense divisions de trams.</p>
+        <div class="download-tree-controls">
+          <label class="download-tree-all"><input id="downloadContentsSelectAll" type="checkbox" checked><strong>Seleccionar-ho tot</strong></label>
+          <span id="downloadContentsCount" aria-live="polite">0 fitxers</span>
+        </div>
+        <div id="downloadContentsList" class="download-contents-list" role="group" aria-label="Arbre de fitxers per exportar"></div>
+        <p class="export-note">Marca carpetes senceres o fitxers individuals. <b>Descarregar carpetes (ZIP)</b> crea les subcarpetes dins de l’arxiu amb fitxes PDF (amb esquemes, anotacions i taules) i mapes JPG, per consultar sense connexió. <b>Exportar per separat</b> manté el format habitual, inclosos els PDF a l’aplicació nativa Android. No es modifica cap dada del projecte.</p>
         <div id="downloadContentsStatus" class="download-export-status hidden" aria-live="polite"></div>
-        <footer><button id="downloadContentsCancel" class="secondary">Cancelar</button><button id="downloadContentsExport" class="primary">Exportar seleccionades</button></footer>
+        <footer class="download-tree-footer"><button id="downloadContentsCancel" class="secondary">Cancel·lar</button><button id="downloadContentsExport" class="secondary">Exportar per separat</button><button id="downloadContentsZip" class="primary">Descarregar carpetes (ZIP)</button></footer>
       </div>
     </div>
 
@@ -1261,11 +1265,12 @@ CON | Confluencia"></textarea></div>
     <div class="cloud-progress-track" role="progressbar" aria-label="Progreso de sincronización" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="cloudProgressBar"></span></div>
     <small id="cloudProgressDetail">Preparando transferencia…</small>
   </aside>
-  <script src="supabase-config.js?v=20261015-qgis-r21"></script>
-  <script src="native-adapter.js?v=20261015-qgis-r21"></script>
-  <script src="geotiff-lite.js?v=20261015-qgis-r21"></script>
-  <script src="modal-layer.js?v=20261015-qgis-r21"></script>
-  <script src="app.js?v=20261015-qgis-r21"></script>
-  <script src="mobile-pwa.js?v=20261015-qgis-r21"></script>
+  <script src="supabase-config.js?v=20261015-download-r23"></script>
+  <script src="native-adapter.js?v=20261015-download-r23"></script>
+  <script src="geotiff-lite.js?v=20261015-download-r23"></script>
+  <script src="modal-layer.js?v=20261015-download-r23"></script>
+  <script src="local-export-zip.js?v=20261015-download-r23"></script>
+<script src="app.js?v=20261015-download-r23"></script>
+  <script src="mobile-pwa.js?v=20261015-download-r23"></script>
 </body>
 </html>

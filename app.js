@@ -4667,20 +4667,256 @@ async function profileExportPayload(course){
   const profilePng=longProfile?safeExportProfile(course,longProfile):'';
   persistState();
   return{title:'FITXA I - PERFIL LONGITUDINAL',projectName:state.project?.name||'',torrentName:course.name||'',abbr:course.abbr||'',crs:state.project?.crs||'EPSG:25831',author:state.project?.author||currentCampaign()?.author||'',organization:state.project?.institution||'',exportDate:today(),campaignDate:currentCampaign()?.date||'',campaignName:currentCampaign()?.name||state.campaign,mapPng:safeExportMap(course),profilePng,profileSource:longProfile?.sourceName||'',profileResolution:Number.isFinite(longProfile?.resolution)?longProfile.resolution:null,rows:reaches.map(r=>({code:r.reachCode||r.id,startX:Math.round(r.points[0]?.x||0),startY:Math.round(r.points[0]?.y||0),endX:Math.round(r.points.at(-1)?.x||0),endY:Math.round(r.points.at(-1)?.y||0),lengthM:r.mdeStats?.lengthM??featureLength(r),minElevation:r.mdeStats?.minElevation??null,maxElevation:r.mdeStats?.maxElevation??null,mdeSlopePct:r.mdeStats?.mdeSlopePct??null,slopePng:safeExportInk(r.fieldSlopeInk,150,300),changeReasonCode:r.changeReasonCode||'',changeReasonText:codedFieldLabel(FIELD_CHANGE_REASONS,r.changeReasonCode),changePng:profileCellTextImage(r.changeCodeInk,r.changeReasonCode||'',220,300),obsPng:profileCellTextImage(r.observationsInk,[codedFieldLabel(FIELD_CHANGE_REASONS,r.changeReasonCode),r.changeReasonNote].filter(Boolean).join(' · '),900,300)}))};}
-function updateDownloadExportButton(){const btn=$('#downloadContentsExport'),checked=$$('#downloadContentsList input:checked').length;if(btn)btn.disabled=checked===0;const st=$('#downloadContentsStatus');if(st&&!btn?.disabled&&st.dataset.busy!=='1')st.textContent=`${checked} contingut${checked===1?'':'s'} seleccionat${checked===1?'':'s'}`;}
+function localArchiveSegment(text){
+  return String(text||'Sense_nom').normalize('NFC').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').replace(/^\.+/,'').trim().slice(0,95)||'Sense_nom';
+}
+function localArchiveRootName(){
+ const d=new Date(),pad=n=>String(n).padStart(2,'0'),date=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+ return localArchiveSegment(state.project?.name||'Projecte').slice(0,84)+'_'+date;
+}
+function localExportTreeSelection(){
+ const root=$('#downloadContentsList');if(!root)return [];
+ return [...root.querySelectorAll('input[data-export-id]:checked')];
+}
+function syncLocalExportTree(){
+ const root=$('#downloadContentsList');if(!root)return;
+ const leaves=[...root.querySelectorAll('input[data-export-id]')];
+ for(const detail of [...root.querySelectorAll('details[data-export-folder]')].reverse()){
+  const group=detail.querySelector(':scope > summary input[data-export-group]');
+  const descendants=[...detail.querySelectorAll('input[data-export-id]')];
+  if(!group)continue;
+  const count=descendants.filter(x=>x.checked).length;
+  group.checked=count===descendants.length&&count>0;
+  group.indeterminate=count>0&&count<descendants.length;
+ }
+ const total=leaves.filter(x=>x.checked).length,master=$('#downloadContentsSelectAll');
+ if(master){master.checked=total>0&&total===leaves.length;master.indeterminate=total>0&&total<leaves.length;master.disabled=!leaves.length;}
+ const button=$('#downloadContentsExport'),zip=$('#downloadContentsZip'),status=$('#downloadContentsStatus');
+ if(button)button.disabled=total===0;
+ if(zip)zip.disabled=total===0;
+ const counter=$('#downloadContentsCount');if(counter)counter.textContent=`${total} / ${leaves.length} fitxers`;
+ if(status&&status.dataset.busy!=='1')status.textContent=total?`${total} fitxer${total===1?'':'s'} seleccionat${total===1?'':'s'}`:'Selecciona el contingut que vols descarregar';
+}
+function updateDownloadExportButton(){syncLocalExportTree();}
 function openDownloadContents(){
-  const root=$('#downloadContentsList'),btn=$('#downloadContentsExport'),st=$('#downloadContentsStatus');root.innerHTML='';if(btn){btn.disabled=false;btn.textContent='Exportar seleccionades';}if(st){st.dataset.busy='0';st.textContent='';st.classList.add('hidden');}
-  if(projectRasterBounds()){const row=document.createElement('label');row.className='download-item';row.innerHTML=`<input type="checkbox" value="__general_map__" checked><img src="icons/mapa.png" alt=""><span><b>MAPA GENERAL · ${escapeHtml(state.project?.name||'Projecte')}</b><small>Extensió definida pels mapes del projecte · cursos i noms · sense trams</small></span>`;row.querySelector('input').addEventListener('change',updateDownloadExportButton);root.appendChild(row);}
-  const listedSections=new Set();
-  for(const c of hydroCourses()){
-    const row=document.createElement('label');row.className='download-item';row.innerHTML=`<input type="checkbox" value="course:${c.id}" checked><img src="icons/ficha.png" alt=""><span><b>FITXA I · ${escapeHtml(c.abbr)} · ${escapeHtml(c.name)}</b><small>${courseReaches(c.id).length} trams · mapa enquadrat automàticament al torrent</small></span>`;row.querySelector('input').addEventListener('change',updateDownloadExportButton);root.appendChild(row);
-    for(const r of orderedCourseReaches(c.id)){
-      const sub=document.createElement('label');sub.className='download-item';sub.style.paddingLeft='46px';sub.innerHTML=`<input type="checkbox" value="reachsheet:${r.id}" checked><img src="icons/pagina.png" alt=""><span><b>FITXA II · ${escapeHtml(r.reachCode||r.id)}</b><small>${escapeHtml(c.abbr||'')} · ${escapeHtml(c.name||'')} · perfil longitudinal del tram</small></span>`;sub.querySelector('input').addEventListener('change',updateDownloadExportButton);root.appendChild(sub);
-      for(const sec of reachSections(r.id)){listedSections.add(sec.id);const secRow=document.createElement('label');secRow.className='download-item';secRow.style.paddingLeft='78px';secRow.innerHTML=`<input type="checkbox" value="sectionsheet:${sec.id}" checked><img src="icons/seccion.svg" alt=""><span><b>FITXA III · ${escapeHtml(sec.sectionName||sec.sheetIII?.sectionName||sec.id)}</b><small>${escapeHtml(r.reachCode||r.id)} · secció transversal</small></span>`;secRow.querySelector('input').addEventListener('change',updateDownloadExportButton);root.appendChild(secRow);}
+ const root=$('#downloadContentsList'),button=$('#downloadContentsExport'),zip=$('#downloadContentsZip'),
+       status=$('#downloadContentsStatus'),master=$('#downloadContentsSelectAll');
+ root.replaceChildren();if(status){status.dataset.busy='0';status.classList.add('hidden');status.textContent='';}
+ if(button){button.disabled=false;button.textContent='Exportar per separat';}
+ if(zip){zip.disabled=false;zip.textContent='Descarregar carpetes (ZIP)';}
+ if(master){master.checked=true;master.indeterminate=false;}
+ const usedPaths=new Set(),projectRoot=localArchiveRootName();root.dataset.archiveRoot=projectRoot;
+ const uniqueFile=(directory,fileName)=>{
+  const base=directory+'/'+localArchiveSegment(fileName.replace(/\.[^./]+$/,'')),
+        suffix=fileName.match(/\.[^.]+$/)?.[0]||'';
+  let path=base+suffix,i=2;
+  while(usedPaths.has(path)){path=base+'_'+i+suffix;i++;}
+  usedPaths.add(path);return path;
+ };
+ const folder=(parent,title,{description='',opened=false}={})=>{
+  const details=document.createElement('details');details.className='download-tree-folder';details.dataset.exportFolder='1';details.open=opened;
+  const summary=document.createElement('summary');const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=true;checkbox.dataset.exportGroup='1';
+  checkbox.setAttribute('aria-label','Seleccionar '+title);
+  // Clicking on the checkbox should select the folder, not collapse it.
+  checkbox.onclick=e=>e.stopPropagation();
+  const label=document.createElement('span');label.className='download-tree-folder-name';label.textContent=title;
+  summary.append(checkbox,label);
+  if(description){const small=document.createElement('small');small.textContent=description;summary.appendChild(small);}
+  const children=document.createElement('div');children.className='download-tree-children';details.append(summary,children);parent.appendChild(details);
+  return children;
+ };
+ const leaf=(parent,value,title,description,img,path)=>{
+  const label=document.createElement('label');label.className='download-tree-file';
+  const check=document.createElement('input');check.type='checkbox';check.dataset.exportId='1';check.value=value;check.checked=true;
+  check.dataset.zipPath=path;
+  const icon=document.createElement('img');icon.src=img;icon.alt='';icon.loading='lazy';
+  const span=document.createElement('span'),bold=document.createElement('b'),small=document.createElement('small');
+  bold.textContent=title;small.textContent=description||'';span.append(bold,small);label.append(check,icon,span);parent.appendChild(label);
+ };
+ if(projectRasterBounds()){
+  const maps=folder(root,'Mapes',{opened:true,description:'Cartografia general'});
+  leaf(maps,'__general_map__','MAPA GENERAL · '+(state.project?.name||'Projecte'),'Extensió dels mapes del projecte · sense trams','icons/mapa.png',
+    uniqueFile(projectRoot+'/Mapes','MAPA_GENERAL_'+(state.project?.name||'Projecte')+'.jpg'));
+ }
+ const courses=hydroCourses(),coursesRoot=courses.length?folder(root,'Cursos d’aigua',{opened:true,description:`${courses.length} curs${courses.length===1?'':'os'}`}):null;
+ const listedSections=new Set();
+ for(const course of courses){
+  const courseLabel=(course.abbr||'Curs')+' · '+(course.name||course.id);
+  const courseDir=projectRoot+'/Cursos/'+localArchiveSegment(courseLabel);
+  const courseGroup=folder(coursesRoot,courseLabel,{opened:courses.length<4,description:courseReaches(course.id).length+' trams'});
+  leaf(courseGroup,'course:'+course.id,'FITXA I · '+courseLabel,'Perfil longitudinal i mapa del curs','icons/ficha.png',
+    uniqueFile(courseDir,'FITXA_I_'+courseLabel+'.pdf'));
+  const reaches=orderedCourseReaches(course.id);
+  if(reaches.length){
+   const group=folder(courseGroup,'Trams',{opened:false,description:reaches.length+' fitxes II'});
+   for(const reach of reaches){
+    const code=reach.reachCode||reach.id,reachDir=courseDir+'/Trams/'+localArchiveSegment(code);
+    const reachGroup=folder(group,code,{opened:false});
+    leaf(reachGroup,'reachsheet:'+reach.id,'FITXA II · '+code,'Perfil longitudinal del tram','icons/pagina.png',
+      uniqueFile(reachDir,'FITXA_II_'+code+'.pdf'));
+    const sections=reachSections(reach.id);
+    if(sections.length){
+     const secGroup=folder(reachGroup,'Seccions',{opened:false,description:sections.length+' fitxes III'});
+     for(const sec of sections){
+      listedSections.add(sec.id);const secName=sec.sectionName||sec.sheetIII?.sectionName||sec.id;
+      leaf(secGroup,'sectionsheet:'+sec.id,'FITXA III · '+secName,'Secció transversal','icons/seccion.svg',
+        uniqueFile(reachDir+'/Seccions','FITXA_III_'+secName+'.pdf'));
+     }
     }
+   }
   }
-  for(const sec of state.features.filter(f=>f.type==='section'&&!listedSections.has(f.id))){const secRow=document.createElement('label');secRow.className='download-item';secRow.innerHTML=`<input type="checkbox" value="sectionsheet:${sec.id}" checked><img src="icons/seccion.svg" alt=""><span><b>FITXA III · ${escapeHtml(sec.sectionName||sec.sheetIII?.sectionName||sec.id)}</b><small>Secció transversal</small></span>`;secRow.querySelector('input').addEventListener('change',updateDownloadExportButton);root.appendChild(secRow);}
-  if(!root.children.length)root.innerHTML='<p class="muted">Encara no hi ha continguts exportables.</p>';$('#downloadContentsModal').classList.remove('hidden');updateDownloadExportButton();
+ }
+ const unattached=state.features.filter(f=>f.type==='section'&&!listedSections.has(f.id));
+ if(unattached.length){
+  const loose=folder(root,'Seccions sense tram',{opened:true,description:unattached.length+' fitxes III'});
+  for(const sec of unattached){
+   const name=sec.sectionName||sec.sheetIII?.sectionName||sec.id;
+   leaf(loose,'sectionsheet:'+sec.id,'FITXA III · '+name,'Secció transversal','icons/seccion.svg',
+     uniqueFile(projectRoot+'/Seccions_sense_tram','FITXA_III_'+name+'.pdf'));
+  }
+ }
+ if(!root.querySelector('input[data-export-id]'))root.textContent='Encara no hi ha continguts exportables.';
+ root.onchange=e=>{
+  const target=e.target;if(!(target instanceof HTMLInputElement))return;
+  if(target.matches('input[data-export-group]')){
+   const details=target.closest('details[data-export-folder]');
+   details?.querySelectorAll('input[type="checkbox"]').forEach(x=>{x.checked=target.checked;x.indeterminate=false;});
+  }
+  syncLocalExportTree();
+ };
+ if(master)master.onchange=e=>{root.querySelectorAll('input[data-export-id]').forEach(x=>x.checked=e.target.checked);syncLocalExportTree();};
+ $('#downloadContentsModal').classList.remove('hidden');syncLocalExportTree();
+}
+
+// Renders PDF from the same FITXA page images used by existing native exports.
+// Only the ZIP path is changed; separate exports and project storage stay intact.
+function localExportLoadImage(src){
+ return new Promise((resolve,reject)=>{
+  const img=new Image();
+  img.onload=()=>resolve(img);
+  img.onerror=()=>reject(Error('No s’ha pogut obrir una imatge de la fitxa'));
+  img.src=src;
+ });
+}
+async function localExportDrawImage(g,src,x,y,width,height){
+ if(!src)return false;
+ const img=await localExportLoadImage(src),w=img.naturalWidth||img.width,h=img.naturalHeight||img.height;
+ if(!w||!h)throw Error('Imatge de la fitxa buida');
+ const scale=Math.min(width/w,height/h);
+ g.drawImage(img,x+(width-w*scale)/2,y+(height-h*scale)/2,w*scale,h*scale);
+ return true;
+}
+function localExportPage(title,subtitle){
+ const c=document.createElement('canvas');c.width=1240;c.height=1754;
+ const g=c.getContext('2d');
+ g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
+ g.fillStyle='#29352c';g.font='700 30px sans-serif';g.fillText(title,55,66);
+ g.fillStyle='#4b6052';g.font='18px sans-serif';g.fillText(subtitle,55,103);
+ g.strokeStyle='#bfc8bd';g.lineWidth=2;g.beginPath();g.moveTo(55,123);g.lineTo(1185,123);g.stroke();
+ return {c,g};
+}
+async function localCoursePdfPages(p){
+ const pages=[],title='FITXA I · PERFIL LONGITUDINAL',course=[p.abbr,p.torrentName].filter(Boolean).join(' · ');
+ const cover=localExportPage(title,course+'  |  '+(p.projectName||'GeoCauce')),g=cover.g;
+ g.font='17px sans-serif';g.fillStyle='#27352b';
+ g.fillText('Autor: '+(p.author||'—')+'  ·  Institució: '+(p.organization||'—'),55,152);
+ g.fillText('Campanya: '+(p.campaignName||'—')+'  ·  Data: '+(p.exportDate||'—')+'  ·  '+(p.crs||''),55,180);
+ g.font='700 20px sans-serif';g.fillText('Mapa del curs',55,218);
+ if(p.mapPng)await localExportDrawImage(g,p.mapPng,55,230,1130,1450);
+ else{g.font='19px sans-serif';g.fillText('Mapa no disponible',55,300);}
+ pages.push(cover.c.toDataURL('image/jpeg',.88));
+ const profile=localExportPage(title,course+'  ·  Perfil longitudinal'),pctx=profile.g;
+ pctx.font='17px sans-serif';pctx.fillStyle='#27352b';
+ pctx.fillText('MDE: '+(p.profileSource||'—')+'  ·  Resolució: '+(p.profileResolution??'—'),55,170);
+ if(p.profilePng)await localExportDrawImage(pctx,p.profilePng,55,210,1130,1120);
+ else pctx.fillText('Perfil longitudinal no disponible',55,265);
+ pctx.fillText('Trams registrats: '+(p.rows||[]).length,55,1430);
+ pages.push(profile.c.toDataURL('image/jpeg',.88));
+ const rows=p.rows||[];
+ for(let offset=0;offset<rows.length;offset+=3){
+  const page=localExportPage(title,course+'  ·  Fitxes dels trams '+(offset+1)+' a '+Math.min(offset+3,rows.length)),ctx=page.g;
+  for(let index=0;index<Math.min(3,rows.length-offset);index++){
+   const row=rows[offset+index],x=55,y=155+index*515,w=1130,h=490;
+   ctx.fillStyle='#f3f6f0';ctx.fillRect(x,y,w,47);ctx.strokeStyle='#c2ccc1';ctx.lineWidth=2;ctx.strokeRect(x,y,w,h);
+   ctx.fillStyle='#26362b';ctx.font='700 22px sans-serif';ctx.fillText('Tram '+(row.code||'—'),x+15,y+32);
+   ctx.font='16px sans-serif';ctx.fillText('Longitud: '+(row.lengthM??'—')+' m   ·   Z mín.: '+(row.minElevation??'—')+'   ·   Z màx.: '+(row.maxElevation??'—')+'   ·   Pendent MDE: '+(row.mdeSlopePct??'—')+' %',x+15,y+80);
+   ctx.fillText('Inici: X '+(row.startX??'—')+', Y '+(row.startY??'—')+'   ·   Final: X '+(row.endX??'—')+', Y '+(row.endY??'—'),x+15,y+112);
+   ctx.font='700 16px sans-serif';ctx.fillText('Pendent de camp',x+20,y+158);
+   ctx.fillText('Motiu canvi de tram: '+(row.changeReasonCode||'—')+'  '+(row.changeReasonText||''),x+298,y+158);
+   ctx.fillText('Observacions',x+600,y+158);
+   if(row.slopePng)await localExportDrawImage(ctx,row.slopePng,x+20,y+172,245,286);
+   if(row.changePng)await localExportDrawImage(ctx,row.changePng,x+300,y+172,266,286);
+   if(row.obsPng)await localExportDrawImage(ctx,row.obsPng,x+600,y+172,495,286);
+  }
+  pages.push(page.c.toDataURL('image/jpeg',.88));
+ }
+ return pages;
+}
+async function localExportArchiveFile(id){
+ if(id==='__general_map__'){
+  const blob=dataUrlBlob(generalMapDataUrl());
+  if(!blob)throw Error('No hi ha mapes georeferenciats visibles');
+  return blob;
+ }
+ if(id.startsWith('course:')){
+  const course=state.features.find(f=>f.id===id.slice(7)&&f.type==='watercourse');
+  if(!course)throw Error('El curs seleccionat ja no existeix');
+  return window.GeoCauceLocalZip.createPdfFromImages(await localCoursePdfPages(await profileExportPayload(course)));
+ }
+ if(id.startsWith('reachsheet:')){
+  const reach=state.features.find(f=>f.id===id.slice(11)&&f.type==='reach');
+  if(!reach)throw Error('El tram seleccionat ja no existeix');
+  const p=await buildReachSheetExportPayload(reach);
+  return window.GeoCauceLocalZip.createPdfFromImages([p.page1Png,p.page2Png,p.page3Png,p.page4Png].filter(Boolean));
+ }
+ if(id.startsWith('sectionsheet:')){
+  const section=state.features.find(f=>f.id===id.slice(13)&&f.type==='section');
+  if(!section)throw Error('La secció seleccionada ja no existeix');
+  const p=await buildSectionSheetExportPayload(section);
+  return window.GeoCauceLocalZip.createPdfFromImages([p.page1Png,p.page2Png,p.page3Png].filter(Boolean));
+ }
+ throw Error('Contingut no compatible amb l’exportació: '+id);
+}
+async function exportSelectedContentsZip(){
+ const selected=localExportTreeSelection(),btn=$('#downloadContentsZip'),other=$('#downloadContentsExport'),
+   status=$('#downloadContentsStatus'),close=$('#downloadContentsClose'),cancel=$('#downloadContentsCancel');
+ if(!selected.length){toast('Selecciona almenys una fitxa o mapa');return;}
+ if(!window.GeoCauceLocalZip){toast('No s’ha pogut carregar el generador ZIP. Actualitza l’aplicació.',6500);return;}
+ if(btn){btn.disabled=true;btn.textContent='Preparant ZIP…';}
+ if(other)other.disabled=true;
+ if(close)close.disabled=true;if(cancel)cancel.disabled=true;
+ if(status){status.classList.remove('hidden');status.dataset.busy='1';}
+ const rootName=$('#downloadContentsList')?.dataset.archiveRoot||localArchiveRootName();
+ try{
+  const entries=[];
+  // Do not trigger any network calls, Cloud or project writes. Only render local
+  // snapshots already used by the individual export workflow.
+  for(let i=0;i<selected.length;i++){
+   const check=selected[i],file=check.closest('.download-tree-file'),label=file?.querySelector('b')?.textContent||check.value;
+   if(status)status.textContent=`Preparant ${i+1} / ${selected.length} · ${label}`;
+   await new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
+   const blob=await localExportArchiveFile(check.value);
+   entries.push({path:check.dataset.zipPath,blob});
+  }
+  const zip=await window.GeoCauceLocalZip.createZip(entries,{onProgress:async progress=>{
+   if(status)status.textContent=`Creant ZIP ${progress.current} / ${progress.total} · ${progress.name.split('/').pop()}`;
+   await new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
+  }});
+  if(status)status.textContent=`Descarregant ${selected.length} fitxers · ${formatBytes(zip.size)}`;
+  await downloadBlob(zip,rootName+'.zip');
+  $('#downloadContentsModal').classList.add('hidden');
+  toast(`ZIP amb ${selected.length} fitxers i les seves carpetes preparat`,4500);
+ }catch(error){
+  console.error('Local ZIP export',error);
+  const message=error?.message||String(error);
+  if(status)status.textContent='Error: '+message+' · no s’ha creat cap ZIP incomplet';
+  toast('No s’ha pogut crear el ZIP: '+message,8000);
+ }finally{
+  if(btn)btn.textContent='Descarregar carpetes (ZIP)';
+  if(close)close.disabled=false;if(cancel)cancel.disabled=false;
+  if(status)status.dataset.busy='0';
+  syncLocalExportTree();
+ }
 }
 
 function exportWrapText(ctx,text,x,y,maxW,lineH,maxLines=99){
@@ -4725,7 +4961,7 @@ function nativeExportProfileSheetPdf(payload){
   return window.GeoCauceNative?.exportProfileSheetPdf?nativeCall('exportProfileSheetPdf',json)||'':'';
 }
 async function exportSelectedContents(){
-  const ids=$$('#downloadContentsList input:checked').map(x=>x.value);if(!ids.length){toast('Selecciona almenys un contingut');return;}
+  const ids=localExportTreeSelection().map(x=>x.value);if(!ids.length){toast('Selecciona almenys un contingut');return;}
   const btn=$('#downloadContentsExport'),st=$('#downloadContentsStatus'),oldLabel=btn?.textContent||'Exportar seleccionades';let ok=0,failed=[];
   if(btn){btn.disabled=true;btn.textContent='Preparant…';}if(st){st.dataset.busy='1';st.classList.remove('hidden');st.textContent='Preparant l’exportació…';}
   try{
@@ -4791,7 +5027,7 @@ function initUi(){
   $('#fitAllBtn').onclick=fitAllContent;$('#zoomInBtn').onclick=()=>zoomAtCenter(1.35);$('#zoomOutBtn').onclick=()=>zoomAtCenter(1/1.35);$('#locateQuickBtn').onclick=locateMe;$('#fitVisibleBtn').onclick=()=>{fitVisibleRasters();$('#layersPanel').classList.add('hidden');};
   $('#exportGeojsonBtn').onclick=exportGeoJSON;$('#clearProjectBtn').onclick=clearProject;
   $('#loadReadyImportsBtn').onclick=loadReadyImports;
-  $('#downloadContentsBtn').onclick=openDownloadContents;$('#downloadContentsClose').onclick=$('#downloadContentsCancel').onclick=()=>$('#downloadContentsModal').classList.add('hidden');$('#downloadContentsExport').onclick=exportSelectedContents;
+  $('#downloadContentsBtn').onclick=openDownloadContents;$('#downloadContentsClose').onclick=$('#downloadContentsCancel').onclick=()=>$('#downloadContentsModal').classList.add('hidden');$('#downloadContentsExport').onclick=exportSelectedContents;if($('#downloadContentsZip'))$('#downloadContentsZip').onclick=exportSelectedContentsZip;
   $('#profileSheetFab').onclick=()=>openProfileSheet(state.activeCourseId);$('#profileSheetClose').onclick=closeProfileSheet;$('#profileInkPen').onclick=()=>{state.profileInkTool='pen';$('#profileInkPen').classList.add('active');$('#profileInkEraser').classList.remove('active');};$('#profileInkEraser').onclick=()=>{state.profileInkTool='eraser';$('#profileInkEraser').classList.add('active');$('#profileInkPen').classList.remove('active');};
   $('#profileZoomOut').onclick=()=>setProfileSheetZoom(state.profileSheetZoom-.15);$('#profileZoomIn').onclick=()=>setProfileSheetZoom(state.profileSheetZoom+.15);$('#profileOrderSelect').onchange=e=>{const c=state.features.find(f=>f.id===state.currentProfileCourseId&&f.type==='watercourse');if(!c)return;c.direction=e.target.value;renumberCourseReaches(c.id);persistState();renderProfileSheetRows(c);refreshProfileAutomaticValues(c.id);drawAll();};$('#courseLongProfileBtn').onclick=()=>openCourseLongProfile(state.currentProfileCourseId);installProfileSheetGestures();
   $('#reachSheetClose').onclick=closeReachSheet;$('#reachSheetPage1Btn').onclick=()=>setReachSheetPage(1);$('#reachSheetPage2Btn').onclick=()=>setReachSheetPage(2);$('#reachSheetZoomOut').onclick=()=>setReachSheetZoom(state.reachSheetZoom-.15);$('#reachSheetZoomIn').onclick=()=>setReachSheetZoom(state.reachSheetZoom+.15);['#reachSheetObserver','#reachSheetVisitDate','#reachSheetFieldSlope','#reachSheetLithology','#reachSheetProfileType','#reachSheetVegetationCover','#reachSheetVegetationType','#reachSheetAnthropic'].forEach(sel=>bindReachSheetInput(sel,saveReachSheetFields));installReachSheetGestures();
