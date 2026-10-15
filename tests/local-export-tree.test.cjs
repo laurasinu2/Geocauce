@@ -166,7 +166,7 @@ test('field PDF is text and vector, not a full-page JPEG photograph',async()=>{
 });
 test('all FITXA export types reuse existing HTML document and real field data',()=>{
  const p=app.slice(app.indexOf('function localPdfStage('),app.indexOf('async function exportSelectedContentsZip(){'));
- for(const name of ['profileSheetDoc','reachSheetDoc','section-fitxa-page','renderReachProfileCanvas','drawSectionBase','SECTION_TABLE_ROWS','REACH_FIC_ROWS'])
+ for(const name of ['profileSheetDoc','reachSheetDoc','section-fitxa-page','drawReachProfileCanvas','drawSectionBase','SECTION_TABLE_ROWS','REACH_FIC_ROWS'])
   assert.ok(p.includes(name),'missing original field view: '+name);
  assert.doesNotMatch(p,/localPdfStage\([\s\S]*?cloudUpload/);
  assert.doesNotMatch(p,/localPdfStage\([\s\S]*?persistState\(\)/);
