@@ -926,7 +926,7 @@ function normalizeFeature(f, campaignId=null){
   const n=cloneAny(f||{});
   n.erasures=n.erasures||[];n.photos=n.photos||[];n.ink=n.ink||[];
   if(n.type==='section'){n.sectionInk=n.sectionInk||[];n.sectionObjects=Array.isArray(n.sectionObjects)?n.sectionObjects:[];n.sectionProfile=n.sectionProfile||null;n.sectionView=n.sectionView||{gridStep:1,verticalScale:'1',zoomX:1,centerD:null};if(!Number.isFinite(+n.sectionView.zoomX))n.sectionView.zoomX=1;if(!n.sectionView.verticalScale||n.sectionView.verticalScale==='auto')n.sectionView.verticalScale='1';n.sectionMeasurements=n.sectionMeasurements||{width:'',depth:'',note:'',widthInk:[],depthInk:[],noteInk:[]};n.sheetIII=normalizeSectionSheetIII(n.sheetIII);}
-  if(n.type==='reach'){n.fieldSlopeInk=n.fieldSlopeInk||[];n.changeCodeInk=n.changeCodeInk||[];n.observationsInk=n.observationsInk||[];n.fragmentIndex=Number.isInteger(n.fragmentIndex)?n.fragmentIndex:0;n.createdOrder=Number.isFinite(+n.createdOrder)?+n.createdOrder:(n.createdAt||Number(n.startAlong)||0);n.sheetII=n.sheetII||{observer:'',visitDate:'',schemeInk:[],fieldSlope:'',lithology:'',profileType:'',vegetationCover:'',vegetationType:'',anthropic:'',fic:{ad:{score:null,note:''},bd:{score:null,note:''},cd:{score:null,note:''},dd1:{score:null,note:''},dd2:{score:null,note:''}}};}
+  if(n.type==='reach'){n.fieldSlopeInk=n.fieldSlopeInk||[];n.changeCodeInk=n.changeCodeInk||[];n.observationsInk=n.observationsInk||[];n.changeReasonCode=FIELD_CHANGE_REASONS.some(([c])=>c===n.changeReasonCode)?n.changeReasonCode:'';n.changeReasonNote=String(n.changeReasonNote||'');n.fragmentIndex=Number.isInteger(n.fragmentIndex)?n.fragmentIndex:0;n.createdOrder=Number.isFinite(+n.createdOrder)?+n.createdOrder:(n.createdAt||Number(n.startAlong)||0);n.sheetII=n.sheetII||{observer:'',visitDate:'',schemeInk:[],fieldSlope:'',lithology:'',profileType:'',vegetationCover:'',vegetationType:'',anthropic:'',fic:{ad:{score:null,note:''},bd:{score:null,note:''},cd:{score:null,note:''},dd1:{score:null,note:''},dd2:{score:null,note:''}}};}
   if(n.type==='watercourse'){
     n.abbr=n.abbr||'TR';n.name=n.name||n.id;n.kind=n.kind||'main';n.direction=n.direction||'entry';
     if(!Array.isArray(n.fragments)||!n.fragments.length)n.fragments=n.points?.length?[cloneAny(n.points)]:[];
@@ -950,6 +950,47 @@ function uid(prefix) {
 }
 function formatNum(n, digits=1) {
   return Number(n).toLocaleString('es-ES', { maximumFractionDigits: digits });
+}
+
+
+const FIELD_CHANGE_REASONS=[['P','Pendent'],['L','Litologia'],['C','Confinament'],['M','Morfologia/material'],['V','Vegetació sí/no'],['A','Afluent'],['O','Obra'],['X','Altres']];
+const FIELD_CERTAINTY=[['A','Observació directa / mesura'],['B','Estimació raonable'],['C','Interpretació / estimada / assumit'],['D','Incert'],['X','No possible']];
+const FIELD_VEGETATION_COVER=[['0','Sòl nu'],['1','<25 %'],['2','25–50 %'],['3','50–75 %'],['4','>75 %']];
+const FIELD_VEGETATION_TYPES=['Herbàcia','Arbustiva','Arbòria','Mixta'];
+const FIELD_SUBSTRATE=['Roca','Sediment consolidat','Sediment no consolidat'];
+const FIELD_PROFILE_TYPES=['Homogeni','Esglaó','Piscina'];
+const FIELD_SECTION_TYPES=['Ample','Moderadament incisiu','Incisiu'];
+const FIELD_SECTION_CHOICES={
+ vegetationCover:FIELD_VEGETATION_COVER.map(([k,v])=>k+' · '+v),
+ vegetationType:FIELD_VEGETATION_TYPES,
+ erosionCertainty:FIELD_CERTAINTY.map(([k,v])=>k+' · '+v),
+ accumulationCertainty:FIELD_CERTAINTY.map(([k,v])=>k+' · '+v),
+ thicknessCertainty:FIELD_CERTAINTY.map(([k,v])=>k+' · '+v),
+ shapeCertainty:FIELD_CERTAINTY.map(([k,v])=>k+' · '+v),
+ sedimentShape:['Canto','Bretxa','Bloc'],
+ matrixSupport:['Absent','Escassa','Moderada','Abundant','Clast suportat','Matriu suportat'],
+ grainClasses:['Arena','Grava','Còdols','Blocs','Llim-argila']
+};
+function fieldSectionChoices(row,col){
+ if(row==='erosionEvidence')return col==='channel'?['Canal · incidit','Canal · socavació local']:
+ /Bank$/.test(col)?['Banc · retrocés de marge','Banc · esllavissament']:['Pendent · rierols petits','Pendent · erosió difusa'];
+ if(row==='accumulationEvidence')return col==='channel'?['Canal · dipòsit','Canal · presa natural']:
+ /Bank$/.test(col)?['Banc · reomplert']:['Pendent · dipòsit','Pendent · lòbul','Pendent · blocs dispersos'];
+ return FIELD_SECTION_CHOICES[row]||null;
+}
+function codedFieldLabel(dict,code){return dict.find(([c])=>c===code)?.[1]||'';}
+function fieldChoiceHTML(options,selected){
+ let html='<option value="">— Selecciona —</option>';
+ for(const text of options){html+='<option value="'+escapeHtml(text)+'"'+(text===selected?' selected':'')+'>'+escapeHtml(text)+'</option>';}
+ if(selected&&!options.includes(selected))html+='<option selected value="'+escapeHtml(selected)+'">'+escapeHtml(selected)+'</option>';
+ return html;
+}
+function sectionOrientationLabel(f){
+ const a=f?.points?.[0],b=f?.points?.at(-1);if(!a||!b)return '—';
+ const dx=b.x-a.x,dy=b.y-a.y;if(Math.hypot(dx,dy)<1e-8)return '—';
+ const rose=['E','NE','N','NO','O','SO','S','SE'];
+ const dir=(x,y)=>rose[((Math.round(Math.atan2(y,x)/(Math.PI/4))%8)+8)%8];
+ return dir(-dx,-dy)+'–'+dir(dx,dy);
 }
 
 const SECTION_TABLE_ROWS=[
@@ -2553,10 +2594,10 @@ function sectionRawRange(f){
 function sectionDisplayRange(f,c){
   const raw=sectionRawRange(f);if(!raw)return null;const view=sectionView(f),step=sectionGridStep(f),pr=sectionPlotRect(c),len=sectionVisibleWindow(f).span;
   const pad=Math.max(step||.25,raw.span*.12);let lo=raw.lo-pad,hi=raw.hi+pad;
-  if(view.verticalScale!=='auto'){
+  if(view.verticalScale!=='auto'&&view.verticalScale!=='real'){
     const ex=Math.max(.1,Number(view.verticalScale)||1),sx=pr.width/Math.max(.001,len),sy=sx*ex,span=Math.max(raw.span+2*pad,pr.height/Math.max(.001,sy));lo=raw.mid-span/2;hi=raw.mid+span/2;
   }
-  if(step>0){lo=Math.floor(lo/step)*step;hi=Math.ceil(hi/step)*step;if(hi<=lo)hi=lo+step;}
+  if(view.verticalScale==='real'){const metresPerPx=len/Math.max(1,pr.width);const span=pr.height*metresPerPx;lo=raw.mid-span/2;hi=raw.mid+span/2;}else if(step>0){lo=Math.floor(lo/step)*step;hi=Math.ceil(hi/step)*step;if(hi<=lo)hi=lo+step;}
   return{lo,hi,span:hi-lo};
 }
 function updateSectionCanvasMetricSize(f){
@@ -2641,7 +2682,7 @@ function drawSectionBase(c,tempManual=null){
 }
 function syncSectionControls(f){
   const v=sectionView(f),grid=$('#sectionGridSelect'),custom=$('#sectionGridCustom'),wrap=$('#sectionGridCustomWrap');const common=[0,.5,1,2];const n=Number(v.gridStep)||0;if(common.includes(n)){grid.value=String(n);wrap.classList.add('hidden');}else{grid.value='custom';custom.value=String(n||1);wrap.classList.remove('hidden');}
-  $('#sectionVerticalScale').value=String(v.verticalScale||'1');updateSectionZoomUi(f);const len=f.sectionProfile?.length||featureLength(f)||0;$('#sectionLengthBadge').textContent=`Longitud: ${formatLengthUnit(len,2)}`;$('#sectionLengthField').textContent=formatLengthUnit(len,2);$('#sectionFillOpacity').value=String(state.sectionFillOpacity||.45);if($('#sectionStraightToggle'))$('#sectionStraightToggle').classList.toggle('active',state.sectionStraightSegments!==false);if($('#sectionGeoClass'))$('#sectionGeoClass').value=state.sectionGeoClass||'none';if($('#sectionZoneClass'))$('#sectionZoneClass').value=state.sectionZoneClass||'channel';if($('#sectionZoneCustom'))$('#sectionZoneCustom').value=state.sectionZoneCustom||'';const zoneOn=state.sectionTool==='zone';$('#sectionZoneSelectorWrap')?.classList.toggle('hidden',!zoneOn);$('#sectionZoneCustom')?.classList.toggle('hidden',!zoneOn||state.sectionZoneClass!=='custom');renderSectionColorChips();$$('[data-section-material]').forEach(b=>b.classList.toggle('active',b.dataset.sectionMaterial===state.sectionMaterial));$$('[data-section-tool]').forEach(b=>b.classList.toggle('active',b.dataset.sectionTool===state.sectionTool));updateSectionToolHint();updateSectionMeasureSummary(f);
+  $('#sectionVerticalScale').value=String(v.verticalScale||'1');if($('#sectionOrientationLabel'))$('#sectionOrientationLabel').textContent=sectionOrientationLabel(f);if($('#sectionScaleSummary'))$('#sectionScaleSummary').textContent=v.verticalScale==='real'?'Escala 1:1 · X = Y':'Visualització habitual · ×'+(v.verticalScale||'1');updateSectionZoomUi(f);const len=f.sectionProfile?.length||featureLength(f)||0;$('#sectionLengthBadge').textContent=`Longitud: ${formatLengthUnit(len,2)}`;$('#sectionLengthField').textContent=formatLengthUnit(len,2);$('#sectionFillOpacity').value=String(state.sectionFillOpacity||.45);if($('#sectionStraightToggle'))$('#sectionStraightToggle').classList.toggle('active',state.sectionStraightSegments!==false);if($('#sectionGeoClass'))$('#sectionGeoClass').value=state.sectionGeoClass||'none';if($('#sectionZoneClass'))$('#sectionZoneClass').value=state.sectionZoneClass||'channel';if($('#sectionZoneCustom'))$('#sectionZoneCustom').value=state.sectionZoneCustom||'';const zoneOn=state.sectionTool==='zone';$('#sectionZoneSelectorWrap')?.classList.toggle('hidden',!zoneOn);$('#sectionZoneCustom')?.classList.toggle('hidden',!zoneOn||state.sectionZoneClass!=='custom');renderSectionColorChips();$$('[data-section-material]').forEach(b=>b.classList.toggle('active',b.dataset.sectionMaterial===state.sectionMaterial));$$('[data-section-tool]').forEach(b=>b.classList.toggle('active',b.dataset.sectionTool===state.sectionTool));updateSectionToolHint();updateSectionMeasureSummary(f);
 }
 function ensureSectionMeasurements(f){
   if(!f)return null;f.sectionMeasurements=f.sectionMeasurements||{width:'',depth:'',note:'',widthInk:[],depthInk:[],noteInk:[]};
@@ -4562,7 +4603,7 @@ function initUi(){
   $$('[data-clear-measure]').forEach(b=>b.onclick=()=>{if(!isEditableCampaign())return;const map={width:'sectionWidthInk',depth:'sectionDepthInk',note:'sectionNoteInk'},c=$('#'+map[b.dataset.clearMeasure]);if(c){c._inkStore=[];redrawInkStore(c);}});
   $('#sectionGridSelect').onchange=e=>{const f=state.features.find(x=>x.id===state.currentSection);if(!f)return;const v=e.target.value,wrap=$('#sectionGridCustomWrap');if(v==='custom'){wrap.classList.remove('hidden');const n=Math.max(.05,+$('#sectionGridCustom').value||1);sectionView(f).gridStep=n;}else{wrap.classList.add('hidden');sectionView(f).gridStep=Math.max(0,+v||0);}if(isEditableCampaign())persistState();updateSectionCanvasMetricSize(f);redrawInkStore($('#sectionCanvas'));};
   $('#sectionGridCustom').oninput=e=>{const f=state.features.find(x=>x.id===state.currentSection);if(!f)return;sectionView(f).gridStep=Math.max(.05,+e.target.value||1);if(isEditableCampaign())persistState();redrawInkStore($('#sectionCanvas'));};
-  $('#sectionVerticalScale').onchange=e=>{const f=state.features.find(x=>x.id===state.currentSection),c=$('#sectionCanvas');if(!f||!c)return;const oldRg=sectionDisplayRange(f,c);sectionView(f).verticalScale=e.target.value;const newRg=sectionDisplayRange(f,c);remapSectionDrawingForRange(f,c,oldRg,newRg);if(isEditableCampaign())persistState();updateSectionCanvasMetricSize(f);redrawInkStore(c);};
+  $('#sectionVerticalScale').onchange=e=>{const f=state.features.find(x=>x.id===state.currentSection),c=$('#sectionCanvas');if(!f||!c)return;const oldRg=sectionDisplayRange(f,c);sectionView(f).verticalScale=e.target.value;const newRg=sectionDisplayRange(f,c);remapSectionDrawingForRange(f,c,oldRg,newRg);if(isEditableCampaign())persistState();updateSectionCanvasMetricSize(f);syncSectionControls(f);redrawInkStore(c);};
   $('#sectionEditColors').onclick=openSectionPaletteEditor;$('#sectionPaletteClose').onclick=()=>$('#sectionPaletteModal').classList.add('hidden');$('#sectionPaletteAdd').onclick=()=>{sectionPalette.push({id:'new'+Date.now(),name:`Color ${sectionPalette.length+1}`,hex:'#7a6a58'});renderSectionPaletteRows();};$('#sectionPaletteReset').onclick=()=>{sectionPalette=cloneAny(DEFAULT_SECTION_COLORS);renderSectionPaletteRows();};$('#sectionPaletteSave').onclick=()=>{sectionPalette=collectSectionPaletteRows();if(!sectionPalette.length)sectionPalette=cloneAny(DEFAULT_SECTION_COLORS);if(!sectionPalette.some(c=>String(c.hex).toLowerCase()===String(state.sectionColor).toLowerCase()))state.sectionColor=sectionPalette[0].hex;saveSectionPalette();$('#sectionPaletteModal').classList.add('hidden');updateSectionToolHint();toast('Paleta guardada para todos los proyectos');};
   $('#sectionRebuildProfile').onclick=async()=>{const f=state.features.find(x=>x.id===state.currentSection);if(!f||!requireEditable('recalcular la sección'))return;await ensureSectionProfile(f,{force:true,preserveManual:true});updateSectionCanvasMetricSize(f);syncSectionControls(f);redrawInkStore($('#sectionCanvas'));};$('#sectionResetProfile').onclick=()=>{const f=state.features.find(x=>x.id===state.currentSection);if(!f||!requireEditable('restablecer el perfil'))return;if(f.sectionProfile){f.sectionProfile.manual=null;f.sectionProfile.manualEdits=[];const c=$('#sectionCanvas');if(c)c._sectionSelection=null;syncSectionSelectionUi();persistState();updateSectionCanvasMetricSize(f);redrawInkStore(c);toast('Perfil de campo restablecido al MDT/LiDAR');}};['showDemProfile','showManualProfile','showSectionRefs'].forEach(id=>$('#'+id).onchange=()=>redrawInkStore($('#sectionCanvas')));
   $$('[data-erase-mode]').forEach(b=>b.onclick=()=>{state.eraseMode=b.dataset.eraseMode;$$('[data-erase-mode]').forEach(x=>x.classList.toggle('active',x===b));updateMaterialButton();persistState();toast(state.eraseMode==='zone'?'Borrador de zona: dibuja sobre lo que quieras quitar':'Borrador de elemento: toca el polígono o línea completa');});
