@@ -70,6 +70,6 @@ test('QGIS file picker and progressive raster rendering are kept intact',()=>{
  assert.match(app,/renderStyledValues\(dec\.values,w,h,style/);
  assert.match(app,/function cloudRemoteAssetIndex\(/);
  assert.doesNotMatch(app,/method:'HEAD'/);
- assert.match(html,/20261015-qgis-r21/);
- assert.match(sw,/mobile-pwa-r21/);
+ assert.match(html,/20261015-download-r23/);
+ assert.match(sw,/mobile-pwa-r23/);
 });
