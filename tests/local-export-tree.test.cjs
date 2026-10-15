@@ -5,11 +5,11 @@ const vm=require('node:vm');
 const path=require('node:path');
 const root=path.join(__dirname,'..');
 const read=name=>fs.readFileSync(path.join(root,name),'utf8');
-const app=read('app.js'),html=read('index.html'),sw=read('sw.js'),module=read('local-export-zip.js');
+const app=read('app.js'),html=read('index.html'),sw=read('sw.js'),zipSource=read('local-export-zip.js');
 const zipRoot={Blob,TextEncoder,Uint8Array,Uint32Array,DataView,Date,Error,Math};
 zipRoot.globalThis=zipRoot;
-vm.runInNewContext(module,zipRoot);
-const {createZip,cleanPath}=zipRoot.GeoCauceLocalZip;
+vm.runInNewContext(zipSource,zipRoot);
+const {createZip,cleanPath,createPdfFromJpegs}=zipRoot.GeoCauceLocalZip;
 function findZipEntries(bytes){
   const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
   let eocd=-1;
@@ -76,21 +76,63 @@ test('selection tree supports course, reach, section, map and unassigned section
   assert.match(src,/master\.onchange/);
   assert.match(src,/group\.indeterminate/);
 });
-test('ZIP exports local HTML/JPG without invoking cloud sync or altering project records',()=>{
-  const part=app.slice(app.indexOf('function localExportHtml('),app.indexOf('function exportWrapText('));
+test('ZIP exports PDF/JPG locally without invoking cloud sync or altering project records',()=>{
+  const part=app.slice(app.indexOf('function localExportLoadImage('),app.indexOf('function exportWrapText('));
   assert.match(part,/window\.GeoCauceLocalZip\.createZip/);
+  assert.match(part,/createPdfFromImages/);
+  assert.match(part,/localCoursePdfPages/);
+  assert.doesNotMatch(part,/localExportHtml|text\/html/);
   assert.match(part,/await downloadBlob\(zip,rootName\+'\.zip'\)/);
   assert.doesNotMatch(part,/cloudFetch\(|cloudUpload|cloudDownload|dbClear\(|dbDelete\(|deleteProject\(/);
 });
-test('HTML UI has an all-selection checkbox, both real export actions and cached module',()=>{
+test('PDF UI has an all-selection checkbox, both export actions and cached module',()=>{
   assert.match(html,/id="downloadContentsSelectAll"/);
   assert.match(html,/id="downloadContentsZip"/);
   assert.match(html,/id="downloadContentsExport"/);
-  assert.match(html,/local-export-zip\.js\?v=20261015-download-r22/);
-  assert.match(sw,/mobile-pwa-r22/);
+  assert.match(html,/local-export-zip\.js\?v=20261015-download-r23/);
+  assert.match(sw,/mobile-pwa-r23/);
   assert.match(sw,/"local-export-zip\.js"/);
+  assert.match(html,/fitxes PDF/);
 });
 test('all scripts parse',()=>{
   assert.doesNotThrow(()=>new vm.Script(app));
-  assert.doesNotThrow(()=>new vm.Script(module));
+  assert.doesNotThrow(()=>new vm.Script(zipSource));
+});
+
+
+test('project-date ZIP folder uses the local export day without an extra product prefix',()=>{
+  const part=app.slice(app.indexOf('function localArchiveRootName('),app.indexOf('function localExportTreeSelection('));
+  assert.match(part,/d\.getFullYear\(\)/);
+  assert.match(part,/d\.getMonth\(\)\+1/);
+  assert.match(part,/d\.getDate\(\)/);
+  assert.match(part,/localArchiveSegment\(state\.project\?\.name/);
+  assert.doesNotMatch(part,/GeoCauce_/);
+  assert.match(app,/root\.dataset\.archiveRoot=projectRoot/);
+  assert.match(app,/dataset\.archiveRoot\|\|localArchiveRootName/);
+});
+test('all hierarchical FITXA files use PDF extensions; the general map remains JPG',()=>{
+  const part=app.slice(app.indexOf('function openDownloadContents(){'),app.indexOf('function localExportLoadImage('));
+  assert.match(part,/MAPA_GENERAL_.*\.jpg/);
+  assert.ok((part.match(/\.pdf/g)||[]).length>=4);
+  assert.doesNotMatch(part,/\.html/);
+});
+test('PDF writer embeds genuine image objects and a correct byte-offset cross reference',async()=>{
+  const sample='/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAACAAIDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AL+AD//Z';
+  const blob=new Blob([Buffer.from(sample,'base64')],{type:'image/jpeg'});
+  const pdf=await createPdfFromJpegs([{blob,width:2,height:2},{blob,width:2,height:2}]);
+  assert.equal(pdf.type,'application/pdf');
+  const bytes=Buffer.from(await pdf.arrayBuffer()),src=bytes.toString('latin1');
+  assert.match(src,/^%PDF-1\.4/);
+  assert.match(src,/\/Count 2 \/Kids \[3 0 R 6 0 R\]/);
+  assert.equal((src.match(/\/Filter \/DCTDecode/g)||[]).length,2);
+  const match=/startxref\n(\d+)\n%%EOF/.exec(src);
+  assert.ok(match,'PDF has its cross reference pointer');
+  const pos=Number(match[1]);
+  assert.equal(src.slice(pos,pos+4),'xref');
+  const body=src.slice(pos).split('\n'),count=Number(body[1].split(' ')[1]);
+  assert.equal(count,9);
+  for(let i=1;i<count;i++){
+    const line=body[i+2],offset=Number(line.slice(0,10));
+    assert.ok(src.slice(offset).startsWith(i+' 0 obj\n'),'PDF object '+i+' has correct byte offset');
+  }
 });
