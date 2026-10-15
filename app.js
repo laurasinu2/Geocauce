@@ -4913,7 +4913,7 @@ async function localPdfSectionSheet(section,stage){
  const templates=[...document.querySelectorAll('#sectionModal .section-fitxa-page')],d=ensureSectionSheetData(section);
  if(templates.length!==3)throw Error('No es troben les tres pàgines originals de FITXA III');
  const pages=templates.map(source=>localPdfClone(source,stage,1200));
- pages.forEach(page=>{page.style.width='1200px';page.style.borderRadius='0';localPdfHideTools(page);});
+ pages.forEach(page=>{page.style.width='1200px';page.style.borderRadius='0';localPdfHideTools(page);page.querySelectorAll('.section-table-zoom-wrap,.section-field-table,.reach-sheet-fic-table').forEach(el=>{el.style.overflow='visible';el.style.maxHeight='none';el.style.height='auto';});});
  const first=pages[0];
  localPdfField(first,'sectionTorrentName',sectionCourse(section)?[sectionCourse(section)?.abbr,sectionCourse(section)?.name].filter(Boolean).join(', '):'—');
  localPdfField(first,'sectionReachName',sectionReach(section)?.reachCode||sectionReach(section)?.id||'—');
@@ -4966,6 +4966,7 @@ async function localExportArchiveFile(id){
    if(!section)throw Error('La secció seleccionada ja no existeix');
    pages=await localPdfSectionSheet(section,stage);
   }else throw Error('Contingut no compatible amb l’exportació: '+id);
+  await Promise.all([...stage.querySelectorAll('img')].map(img=>img.decode?.().catch(()=>{})||Promise.resolve()));
   return await window.GeoCauceFieldPdf.fromElements(pages);
  }finally{stage.remove();}
 }
