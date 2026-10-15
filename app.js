@@ -4934,11 +4934,11 @@ async function localPdfSectionSheet(section,stage){
    graph.style.display='block';graph.style.width='100%';graph.style.height='455px';
    await new Promise(r=>requestAnimationFrame(r));
    const rect=graph.getBoundingClientRect(),w=Math.max(1,Math.round(rect.width)),h=Math.max(1,Math.round(rect.height));
-   graph.width=w;graph.height=h;graph._dpr=1;
+   const dpr=2;graph.width=w*dpr;graph.height=h*dpr;graph._dpr=dpr;
    drawSectionBase(graph);
    const g=graph.getContext('2d'),box={width:w,height:h};
-   for(const stroke of section.sectionInk||[])drawInkRecord(g,box,stroke,1,false);
-   for(const obj of section.sectionObjects||[])drawSectionStructuredObject(g,box,obj,1,false,graph,section);
+   for(const stroke of section.sectionInk||[])drawInkRecord(g,box,stroke,dpr,false);
+   for(const obj of section.sectionObjects||[])drawSectionStructuredObject(g,box,obj,dpr,false,graph,section);
   }finally{state.currentSection=previous;}
  }
  await new Promise(r=>requestAnimationFrame(r));
