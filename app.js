@@ -985,12 +985,32 @@ function fieldChoiceHTML(options,selected){
  if(selected&&!options.includes(selected))html+='<option selected value="'+escapeHtml(selected)+'">'+escapeHtml(selected)+'</option>';
  return html;
 }
-function sectionOrientationLabel(f){
- const a=f?.points?.[0],b=f?.points?.at(-1);if(!a||!b)return '—';
- const dx=b.x-a.x,dy=b.y-a.y;if(Math.hypot(dx,dy)<1e-8)return '—';
+function sectionOrientationEnds(f){
+ // f.points is ordered when the section is drawn; do not sort, reverse or infer
+ // direction from the associated river reach. The MDE profile samples point 0 -> last.
+ const first=f?.points?.[0],last=f?.points?.at(-1);
+ if(!first||!last)return null;
+ const dx=Number(last.x)-Number(first.x),dy=Number(last.y)-Number(first.y);
+ if(!Number.isFinite(dx)||!Number.isFinite(dy)||Math.hypot(dx,dy)<1e-8)return null;
+ // Coordinates are projected eastings/northings (Y increases towards north),
+ // not DOM screen pixels, where Y grows downward.
  const rose=['E','NE','N','NO','O','SO','S','SE'];
- const dir=(x,y)=>rose[((Math.round(Math.atan2(y,x)/(Math.PI/4))%8)+8)%8];
- return dir(-dx,-dy)+'–'+dir(dx,dy);
+ const compass=(x,y)=>rose[((Math.round(Math.atan2(y,x)/(Math.PI/4))%8)+8)%8];
+ return{start:compass(-dx,-dy),end:compass(dx,dy)};
+}
+function sectionOrientationLabel(f){
+ const ends=sectionOrientationEnds(f);
+ return ends?ends.start+'–'+ends.end:'—';
+}
+function drawSectionOrientationEnds(ctx,f,pr){
+ const dirs=sectionOrientationEnds(f);if(!dirs)return;
+ ctx.save();ctx.font='700 12px sans-serif';ctx.fillStyle='#315a43';
+ // Label the actual horizontal ends of the section profile, so E->O is never
+ // presented as O->E. Allow a compact layout when 1:1 scale narrows the plot.
+ const short=pr.width<210;
+ ctx.textAlign='left';ctx.fillText(short?'I · '+dirs.start:'INICI · '+dirs.start,pr.left,pr.top-17);
+ ctx.textAlign='right';ctx.fillText(short?'F · '+dirs.end:'FINAL · '+dirs.end,pr.right,pr.top-17);
+ ctx.restore();
 }
 
 const SECTION_TABLE_ROWS=[
@@ -2696,6 +2716,7 @@ function drawSectionBase(c,tempManual=null){
   ctx.fillStyle='rgba(255,253,248,.97)';ctx.fillRect(0,0,r.width,r.height);ctx.strokeStyle='#8f8b82';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(pr.left,pr.top);ctx.lineTo(pr.left,pr.bottom);ctx.lineTo(pr.right,pr.bottom);ctx.stroke();
   if(!p?.samples?.length||!rg){ctx.fillStyle='#777268';ctx.font='14px sans-serif';ctx.fillText('Sin perfil MDT/LiDAR. Importa una capa de elevación o pulsa Recalcular.',pr.left+20,pr.top+35);ctx.restore();return;}
   drawMetricSectionGrid(ctx,f,c,pr,rg);
+  drawSectionOrientationEnds(ctx,f,pr);
   if($('#showSectionRefs')?.checked!==false){const refs=sectionReferences(f),vw=sectionVisibleWindow(f),showLabels=vw.zoom>1.25;for(const ref of refs){
     if(ref.type==='area'){const d0=ref.t0*vw.len,d1=ref.t1*vw.len;if(d1<vw.start||d0>vw.end)continue;const x0=pr.left+((Math.max(vw.start,d0)-vw.start)/vw.span)*pr.width,x1=pr.left+((Math.min(vw.end,d1)-vw.start)/vw.span)*pr.width,y=pr.top+13,col=materialReferenceStyle(ref.material);ctx.fillStyle=col;ctx.globalAlpha=.78;ctx.fillRect(x0,y,Math.max(2,x1-x0),8);ctx.globalAlpha=1;if(showLabels){ctx.fillStyle='#3f3c36';ctx.font='10px sans-serif';ctx.textAlign='center';ctx.fillText(`${ref.id} · ${ref.label}`,Math.max(pr.left+35,Math.min(pr.right-35,(x0+x1)/2)),y-3);}}
     else{const d=ref.t*vw.len;if(d<vw.start-.001||d>vw.end+.001)continue;const x=pr.left+((d-vw.start)/vw.span)*pr.width,col=ref.color||'#2473a7';ctx.fillStyle=col;ctx.strokeStyle='rgba(255,255,255,.96)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,pr.top+20,5,0,Math.PI*2);ctx.fill();ctx.stroke();if(showLabels){const txt=ref.label||ref.id;ctx.font='600 10px sans-serif';ctx.textAlign='center';const tw=ctx.measureText(txt).width;ctx.fillStyle='rgba(255,253,248,.94)';ctx.fillRect(Math.max(pr.left,Math.min(pr.right-tw-10,x-tw/2-5)),pr.top+2,tw+10,14);ctx.fillStyle=col;ctx.fillText(txt,Math.max(pr.left+tw/2+5,Math.min(pr.right-tw/2-5,x)),pr.top+12);}}
@@ -2706,7 +2727,7 @@ function drawSectionBase(c,tempManual=null){
 }
 function syncSectionControls(f){
   const v=sectionView(f),grid=$('#sectionGridSelect'),custom=$('#sectionGridCustom'),wrap=$('#sectionGridCustomWrap');const common=[0,.5,1,2];const n=Number(v.gridStep)||0;if(common.includes(n)){grid.value=String(n);wrap.classList.add('hidden');}else{grid.value='custom';custom.value=String(n||1);wrap.classList.remove('hidden');}
-  $('#sectionVerticalScale').value=String(v.verticalScale||'1');if($('#sectionOrientationLabel'))$('#sectionOrientationLabel').textContent=sectionOrientationLabel(f);if($('#sectionScaleSummary'))$('#sectionScaleSummary').textContent=v.verticalScale==='real'?'Escala 1:1 · X = Y':'Visualització habitual · ×'+(v.verticalScale||'1');updateSectionZoomUi(f);const len=f.sectionProfile?.length||featureLength(f)||0;$('#sectionLengthBadge').textContent=`Longitud: ${formatLengthUnit(len,2)}`;$('#sectionLengthField').textContent=formatLengthUnit(len,2);$('#sectionFillOpacity').value=String(state.sectionFillOpacity||.45);if($('#sectionStraightToggle'))$('#sectionStraightToggle').classList.toggle('active',state.sectionStraightSegments!==false);if($('#sectionGeoClass'))$('#sectionGeoClass').value=state.sectionGeoClass||'none';if($('#sectionZoneClass'))$('#sectionZoneClass').value=state.sectionZoneClass||'channel';if($('#sectionZoneCustom'))$('#sectionZoneCustom').value=state.sectionZoneCustom||'';const zoneOn=state.sectionTool==='zone';$('#sectionZoneSelectorWrap')?.classList.toggle('hidden',!zoneOn);$('#sectionZoneCustom')?.classList.toggle('hidden',!zoneOn||state.sectionZoneClass!=='custom');renderSectionColorChips();$$('[data-section-material]').forEach(b=>b.classList.toggle('active',b.dataset.sectionMaterial===state.sectionMaterial));$$('[data-section-tool]').forEach(b=>b.classList.toggle('active',b.dataset.sectionTool===state.sectionTool));updateSectionToolHint();updateSectionMeasureSummary(f);
+  $('#sectionVerticalScale').value=String(v.verticalScale||'1');if($('#sectionOrientationLabel'))$('#sectionOrientationLabel').textContent=sectionOrientationLabel(f);if($('#sectionOrientationEndPoints')){const ends=sectionOrientationEnds(f);$('#sectionOrientationEndPoints').textContent=ends?`Inici: ${ends.start} → Final: ${ends.end}`:'Sense orientació';}if($('#sectionScaleSummary'))$('#sectionScaleSummary').textContent=v.verticalScale==='real'?'Escala 1:1 · X = Y':'Visualització habitual · ×'+(v.verticalScale||'1');updateSectionZoomUi(f);const len=f.sectionProfile?.length||featureLength(f)||0;$('#sectionLengthBadge').textContent=`Longitud: ${formatLengthUnit(len,2)}`;$('#sectionLengthField').textContent=formatLengthUnit(len,2);$('#sectionFillOpacity').value=String(state.sectionFillOpacity||.45);if($('#sectionStraightToggle'))$('#sectionStraightToggle').classList.toggle('active',state.sectionStraightSegments!==false);if($('#sectionGeoClass'))$('#sectionGeoClass').value=state.sectionGeoClass||'none';if($('#sectionZoneClass'))$('#sectionZoneClass').value=state.sectionZoneClass||'channel';if($('#sectionZoneCustom'))$('#sectionZoneCustom').value=state.sectionZoneCustom||'';const zoneOn=state.sectionTool==='zone';$('#sectionZoneSelectorWrap')?.classList.toggle('hidden',!zoneOn);$('#sectionZoneCustom')?.classList.toggle('hidden',!zoneOn||state.sectionZoneClass!=='custom');renderSectionColorChips();$$('[data-section-material]').forEach(b=>b.classList.toggle('active',b.dataset.sectionMaterial===state.sectionMaterial));$$('[data-section-tool]').forEach(b=>b.classList.toggle('active',b.dataset.sectionTool===state.sectionTool));updateSectionToolHint();updateSectionMeasureSummary(f);
 }
 function ensureSectionMeasurements(f){
   if(!f)return null;f.sectionMeasurements=f.sectionMeasurements||{width:'',depth:'',note:'',widthInk:[],depthInk:[],noteInk:[]};
