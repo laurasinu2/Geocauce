@@ -4670,6 +4670,10 @@ async function profileExportPayload(course){
 function localArchiveSegment(text){
   return String(text||'Sense_nom').normalize('NFC').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').replace(/^\.+/,'').trim().slice(0,95)||'Sense_nom';
 }
+function localArchiveRootName(){
+ const d=new Date(),pad=n=>String(n).padStart(2,'0'),date=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+ return localArchiveSegment(state.project?.name||'Projecte').slice(0,84)+'_'+date;
+}
 function localExportTreeSelection(){
  const root=$('#downloadContentsList');if(!root)return [];
  return [...root.querySelectorAll('input[data-export-id]:checked')];
@@ -4701,7 +4705,7 @@ function openDownloadContents(){
  if(button){button.disabled=false;button.textContent='Exportar per separat';}
  if(zip){zip.disabled=false;zip.textContent='Descarregar carpetes (ZIP)';}
  if(master){master.checked=true;master.indeterminate=false;}
- const usedPaths=new Set(),projectRoot=localArchiveSegment('GeoCauce_'+(state.project?.name||'Projecte')+'_'+isoToday());
+ const usedPaths=new Set(),projectRoot=localArchiveRootName();root.dataset.archiveRoot=projectRoot;
  const uniqueFile=(directory,fileName)=>{
   const base=directory+'/'+localArchiveSegment(fileName.replace(/\.[^./]+$/,'')),
         suffix=fileName.match(/\.[^.]+$/)?.[0]||'';
@@ -4741,7 +4745,7 @@ function openDownloadContents(){
   const courseDir=projectRoot+'/Cursos/'+localArchiveSegment(courseLabel);
   const courseGroup=folder(coursesRoot,courseLabel,{opened:courses.length<4,description:courseReaches(course.id).length+' trams'});
   leaf(courseGroup,'course:'+course.id,'FITXA I · '+courseLabel,'Perfil longitudinal i mapa del curs','icons/ficha.png',
-    uniqueFile(courseDir,'FITXA_I_'+courseLabel+'.html'));
+    uniqueFile(courseDir,'FITXA_I_'+courseLabel+'.pdf'));
   const reaches=orderedCourseReaches(course.id);
   if(reaches.length){
    const group=folder(courseGroup,'Trams',{opened:false,description:reaches.length+' fitxes II'});
@@ -4749,14 +4753,14 @@ function openDownloadContents(){
     const code=reach.reachCode||reach.id,reachDir=courseDir+'/Trams/'+localArchiveSegment(code);
     const reachGroup=folder(group,code,{opened:false});
     leaf(reachGroup,'reachsheet:'+reach.id,'FITXA II · '+code,'Perfil longitudinal del tram','icons/pagina.png',
-      uniqueFile(reachDir,'FITXA_II_'+code+'.html'));
+      uniqueFile(reachDir,'FITXA_II_'+code+'.pdf'));
     const sections=reachSections(reach.id);
     if(sections.length){
      const secGroup=folder(reachGroup,'Seccions',{opened:false,description:sections.length+' fitxes III'});
      for(const sec of sections){
       listedSections.add(sec.id);const secName=sec.sectionName||sec.sheetIII?.sectionName||sec.id;
       leaf(secGroup,'sectionsheet:'+sec.id,'FITXA III · '+secName,'Secció transversal','icons/seccion.svg',
-        uniqueFile(reachDir+'/Seccions','FITXA_III_'+secName+'.html'));
+        uniqueFile(reachDir+'/Seccions','FITXA_III_'+secName+'.pdf'));
      }
     }
    }
@@ -4768,7 +4772,7 @@ function openDownloadContents(){
   for(const sec of unattached){
    const name=sec.sectionName||sec.sheetIII?.sectionName||sec.id;
    leaf(loose,'sectionsheet:'+sec.id,'FITXA III · '+name,'Secció transversal','icons/seccion.svg',
-     uniqueFile(projectRoot+'/Seccions_sense_tram','FITXA_III_'+name+'.html'));
+     uniqueFile(projectRoot+'/Seccions_sense_tram','FITXA_III_'+name+'.pdf'));
   }
  }
  if(!root.querySelector('input[data-export-id]'))root.textContent='Encara no hi ha continguts exportables.';
@@ -4784,9 +4788,69 @@ function openDownloadContents(){
  $('#downloadContentsModal').classList.remove('hidden');syncLocalExportTree();
 }
 
-function localExportHtml(title,body){
- const head=`<!doctype html><html lang="ca"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>body{font:15px/1.5 system-ui,sans-serif;color:#202820;max-width:1100px;margin:20px auto;padding:0 18px}h1{font-size:23px}img{max-width:100%;height:auto;display:block;margin:12px 0;break-inside:avoid}pre{font:12px/1.3 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f5f0;padding:16px}@media print{body{margin:0;max-width:none}h1{font-size:18px}img{page-break-inside:avoid}}</style></head><body>`;
- return new Blob([head,'<h1>'+escapeHtml(title)+'</h1>',body,'</body></html>'],{type:'text/html;charset=utf-8'});
+// Renders PDF from the same FITXA page images used by existing native exports.
+// Only the ZIP path is changed; separate exports and project storage stay intact.
+function localExportLoadImage(src){
+ return new Promise((resolve,reject)=>{
+  const img=new Image();
+  img.onload=()=>resolve(img);
+  img.onerror=()=>reject(Error('No s’ha pogut obrir una imatge de la fitxa'));
+  img.src=src;
+ });
+}
+async function localExportDrawImage(g,src,x,y,width,height){
+ if(!src)return false;
+ const img=await localExportLoadImage(src),w=img.naturalWidth||img.width,h=img.naturalHeight||img.height;
+ if(!w||!h)throw Error('Imatge de la fitxa buida');
+ const scale=Math.min(width/w,height/h);
+ g.drawImage(img,x+(width-w*scale)/2,y+(height-h*scale)/2,w*scale,h*scale);
+ return true;
+}
+function localExportPage(title,subtitle){
+ const c=document.createElement('canvas');c.width=1240;c.height=1754;
+ const g=c.getContext('2d');
+ g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
+ g.fillStyle='#29352c';g.font='700 30px sans-serif';g.fillText(title,55,66);
+ g.fillStyle='#4b6052';g.font='18px sans-serif';g.fillText(subtitle,55,103);
+ g.strokeStyle='#bfc8bd';g.lineWidth=2;g.beginPath();g.moveTo(55,123);g.lineTo(1185,123);g.stroke();
+ return {c,g};
+}
+async function localCoursePdfPages(p){
+ const pages=[],title='FITXA I · PERFIL LONGITUDINAL',course=[p.abbr,p.torrentName].filter(Boolean).join(' · ');
+ const cover=localExportPage(title,course+'  |  '+(p.projectName||'GeoCauce')),g=cover.g;
+ g.font='17px sans-serif';g.fillStyle='#27352b';
+ g.fillText('Autor: '+(p.author||'—')+'  ·  Institució: '+(p.organization||'—'),55,152);
+ g.fillText('Campanya: '+(p.campaignName||'—')+'  ·  Data: '+(p.exportDate||'—')+'  ·  '+(p.crs||''),55,180);
+ g.font='700 20px sans-serif';g.fillText('Mapa del curs',55,218);
+ if(p.mapPng)await localExportDrawImage(g,p.mapPng,55,230,1130,1450);
+ else{g.font='19px sans-serif';g.fillText('Mapa no disponible',55,300);}
+ pages.push(cover.c.toDataURL('image/jpeg',.88));
+ const profile=localExportPage(title,course+'  ·  Perfil longitudinal'),pctx=profile.g;
+ pctx.font='17px sans-serif';pctx.fillStyle='#27352b';
+ pctx.fillText('MDE: '+(p.profileSource||'—')+'  ·  Resolució: '+(p.profileResolution??'—'),55,170);
+ if(p.profilePng)await localExportDrawImage(pctx,p.profilePng,55,210,1130,1120);
+ else pctx.fillText('Perfil longitudinal no disponible',55,265);
+ pctx.fillText('Trams registrats: '+(p.rows||[]).length,55,1430);
+ pages.push(profile.c.toDataURL('image/jpeg',.88));
+ const rows=p.rows||[];
+ for(let offset=0;offset<rows.length;offset+=3){
+  const page=localExportPage(title,course+'  ·  Fitxes dels trams '+(offset+1)+' a '+Math.min(offset+3,rows.length)),ctx=page.g;
+  for(let index=0;index<Math.min(3,rows.length-offset);index++){
+   const row=rows[offset+index],x=55,y=155+index*515,w=1130,h=490;
+   ctx.fillStyle='#f3f6f0';ctx.fillRect(x,y,w,47);ctx.strokeStyle='#c2ccc1';ctx.lineWidth=2;ctx.strokeRect(x,y,w,h);
+   ctx.fillStyle='#26362b';ctx.font='700 22px sans-serif';ctx.fillText('Tram '+(row.code||'—'),x+15,y+32);
+   ctx.font='16px sans-serif';ctx.fillText('Longitud: '+(row.lengthM??'—')+' m   ·   Z mín.: '+(row.minElevation??'—')+'   ·   Z màx.: '+(row.maxElevation??'—')+'   ·   Pendent MDE: '+(row.mdeSlopePct??'—')+' %',x+15,y+80);
+   ctx.fillText('Inici: X '+(row.startX??'—')+', Y '+(row.startY??'—')+'   ·   Final: X '+(row.endX??'—')+', Y '+(row.endY??'—'),x+15,y+112);
+   ctx.font='700 16px sans-serif';ctx.fillText('Pendent de camp',x+20,y+158);
+   ctx.fillText('Motiu canvi de tram: '+(row.changeReasonCode||'—')+'  '+(row.changeReasonText||''),x+298,y+158);
+   ctx.fillText('Observacions',x+600,y+158);
+   if(row.slopePng)await localExportDrawImage(ctx,row.slopePng,x+20,y+172,245,286);
+   if(row.changePng)await localExportDrawImage(ctx,row.changePng,x+300,y+172,266,286);
+   if(row.obsPng)await localExportDrawImage(ctx,row.obsPng,x+600,y+172,495,286);
+  }
+  pages.push(page.c.toDataURL('image/jpeg',.88));
+ }
+ return pages;
 }
 async function localExportArchiveFile(id){
  if(id==='__general_map__'){
@@ -4795,33 +4859,21 @@ async function localExportArchiveFile(id){
   return blob;
  }
  if(id.startsWith('course:')){
-  const c=state.features.find(f=>f.id===id.slice(7)&&f.type==='watercourse');
-  if(!c)throw Error('El curs seleccionat ja no existeix');
-  const payload=await profileExportPayload(c);
-  const pictures=[
-   payload.mapPng?'<h2>Mapa del curs</h2><img alt="Mapa del curs" src="'+payload.mapPng+'">':'',
-   payload.profilePng?'<h2>Perfil longitudinal</h2><img alt="Perfil longitudinal" src="'+payload.profilePng+'">':''
-  ].join('');
-  const meta='<p><b>Nom torrent:</b> '+escapeHtml(c.abbr||'')+' · '+escapeHtml(c.name||'')+'</p><p>Autor: '+escapeHtml(payload.author||'—')+' · Organització: '+escapeHtml(payload.organization||'—')+' · Data: '+escapeHtml(payload.exportDate||'—')+'</p>';
-  const rows='<h2>Trams i mesures</h2><pre>'+escapeHtml(JSON.stringify(payload.rows,null,2))+'</pre>';
-  return localExportHtml(payload.title,meta+pictures+rows);
+  const course=state.features.find(f=>f.id===id.slice(7)&&f.type==='watercourse');
+  if(!course)throw Error('El curs seleccionat ja no existeix');
+  return window.GeoCauceLocalZip.createPdfFromImages(await localCoursePdfPages(await profileExportPayload(course)));
  }
  if(id.startsWith('reachsheet:')){
-  const r=state.features.find(f=>f.id===id.slice(11)&&f.type==='reach');
-  if(!r)throw Error('El tram seleccionat ja no existeix');
-  const c=reachCourse(r),payload=await buildReachSheetExportPayload(r);
-  const head='<p><b>Torrent:</b> '+escapeHtml(c?.name||'')+' · <b>Tram:</b> '+escapeHtml(r.reachCode||r.id)+'</p>';
-  const figs=[['Esquema',payload.schemePng],['Perfil longitudinal',payload.profilePng],['FITXA II · Esquema',payload.page1Png],['FITXA II · Taula',payload.page2Png],['FITXA II · FIC',payload.page3Png]].filter(([,img])=>!!img).map(([title,img])=>'<h2>'+escapeHtml(title)+'</h2><img alt="'+escapeHtml(title)+'" src="'+img+'">').join('');
-  const summary={...payload};for(const key of Object.keys(summary))if(key.endsWith('Png'))delete summary[key];
-  return localExportHtml(payload.title+' · '+(r.reachCode||r.id),head+figs+'<h2>Dades de la fitxa</h2><pre>'+escapeHtml(JSON.stringify(summary,null,2))+'</pre>');
+  const reach=state.features.find(f=>f.id===id.slice(11)&&f.type==='reach');
+  if(!reach)throw Error('El tram seleccionat ja no existeix');
+  const p=await buildReachSheetExportPayload(reach);
+  return window.GeoCauceLocalZip.createPdfFromImages([p.page1Png,p.page2Png,p.page3Png,p.page4Png].filter(Boolean));
  }
  if(id.startsWith('sectionsheet:')){
-  const sec=state.features.find(f=>f.id===id.slice(13)&&f.type==='section');
-  if(!sec)throw Error('La secció seleccionada ja no existeix');
-  const sd=ensureSectionSheetData(sec),payload=await buildSectionSheetExportPayload(sec);
-  const pages=[payload.page1Png,payload.page2Png,payload.page3Png].filter(Boolean);
-  const body='<p><b>Secció:</b> '+escapeHtml(sd.sectionName||sec.id)+'</p>'+pages.map((img,i)=>'<h2>Pàgina '+(i+1)+'</h2><img alt="FITXA III pàgina '+(i+1)+'" src="'+img+'">').join('');
-  return localExportHtml(payload.title+' · '+(sd.sectionName||sec.id),body);
+  const section=state.features.find(f=>f.id===id.slice(13)&&f.type==='section');
+  if(!section)throw Error('La secció seleccionada ja no existeix');
+  const p=await buildSectionSheetExportPayload(section);
+  return window.GeoCauceLocalZip.createPdfFromImages([p.page1Png,p.page2Png,p.page3Png].filter(Boolean));
  }
  throw Error('Contingut no compatible amb l’exportació: '+id);
 }
@@ -4834,7 +4886,7 @@ async function exportSelectedContentsZip(){
  if(other)other.disabled=true;
  if(close)close.disabled=true;if(cancel)cancel.disabled=true;
  if(status){status.classList.remove('hidden');status.dataset.busy='1';}
- const rootName=localArchiveSegment('GeoCauce_'+(state.project?.name||'Projecte')+'_'+isoToday());
+ const rootName=$('#downloadContentsList')?.dataset.archiveRoot||localArchiveRootName();
  try{
   const entries=[];
   // Do not trigger any network calls, Cloud or project writes. Only render local
