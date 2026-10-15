@@ -74,7 +74,7 @@ test('selection tree supports course, reach, section, map and unassigned section
   }
   assert.match(src,/details\?\.querySelectorAll\('input\[type="checkbox"\]'\)/);
   assert.match(src,/master\.onchange/);
-  assert.match(src,/group\.indeterminate/);
+  assert.match(app.slice(app.indexOf('function syncLocalExportTree('),app.indexOf('function updateDownloadExportButton(')),/group\.indeterminate/);
 });
 test('ZIP exports PDF/JPG locally without invoking cloud sync or altering project records',()=>{
   const part=app.slice(app.indexOf('function localExportLoadImage('),app.indexOf('function exportWrapText('));
