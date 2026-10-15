@@ -91,6 +91,37 @@ test('handwriting and synchronization pathways remain available',()=>{
   assert.match(app,/function cloudCollectObsoleteAssets/);
 });
 test('new PWA revision references all edited files',()=>{
-  assert.match(html,/app\.js\?v=20261015-fitxa-fix-r19/);
-  assert.match(sw,/mobile-pwa-r19/);
+  assert.match(html,/app\.js\?v=20261015-orientation-r20/);
+  assert.match(sw,/mobile-pwa-r20/);
+});
+
+
+test('cardinal ends follow the original drawing order, never the river or a sorted axis',()=>{
+ const examples=[
+   [{x:0,y:0},{x:100,y:0},'O','E'],
+   [{x:100,y:0},{x:0,y:0},'E','O'],
+   [{x:0,y:0},{x:0,y:100},'S','N'],
+   [{x:0,y:100},{x:0,y:0},'N','S'],
+   [{x:0,y:0},{x:100,y:100},'SO','NE'],
+   [{x:100,y:100},{x:0,y:0},'NE','SO'],
+   [{x:0,y:100},{x:100,y:0},'NO','SE'],
+   [{x:100,y:0},{x:0,y:100},'SE','NO']
+ ];
+ for(const [a,b,from,to] of examples){
+   const section={points:[a,b],reachId:'unrelated-river'},old=JSON.stringify(section.points);
+   const ends=ctx.sectionOrientationEnds(section);
+   assert.equal(ends.start,from);assert.equal(ends.end,to);
+   assert.equal(ctx.sectionOrientationLabel(section),from+'–'+to);
+   assert.equal(JSON.stringify(section.points),old,'must not reorder section or profile');
+ }
+ assert.equal(ctx.sectionOrientationEnds({points:[{x:0,y:0},{x:0,y:0}]}),null);
+});
+test('Fitxa III clearly identifies the cardinal beginning and end on screen and export',()=>{
+ assert.match(html,/id="sectionOrientationEndPoints"/);
+ assert.match(app,/Inici: \$\{ends.start\} → Final: \$\{ends.end\}/);
+ assert.match(app,/function drawSectionOrientationEnds\(ctx,f,pr\)/);
+ assert.match(app,/drawSectionOrientationEnds\(ctx,f,pr\)/);
+ const exportMeta=app.slice(app.indexOf('function exportFitxaIIIMeta('),app.indexOf('async function renderFitxaIIIPage1('));
+ assert.match(exportMeta,/sectionOrientationLabel\(f\)/);
+ assert.match(app,/const a=f.points\[0\],b=f.points\[f.points.length-1\]/);
 });
