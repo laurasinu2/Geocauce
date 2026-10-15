@@ -70,8 +70,8 @@ test('style editor has real accessible controls and reset/save handlers',()=>{
   assert.match(css,/\.material-style-dialog/);
 });
 test('PWA cache is bumped to material editor revision r17',()=>{
-  assert.match(html,/app\.js\?v=20261015-download-r23/);
-  assert.match(sw,/mobile-pwa-r23/);
+  assert.match(html,/app\.js\?v=20261015-download-r24/);
+  assert.match(sw,/mobile-pwa-r24/);
 });
 test('existing synchronized asset manifest and retry code remain in place',()=>{
   assert.match(app,/function cloudRemoteAssetIndex\(/);
