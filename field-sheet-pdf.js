@@ -114,15 +114,16 @@
   const push=o=>{objects.push(o);return objects.length;};
   for(const doc of documents){
    if(!(doc.width>0))throw Error('La fitxa no té amplada per imprimir');
-   const scale=(A4_W-MARGIN*2)/doc.width,perPage=(A4_H-MARGIN*2)/scale;
+   const PW=doc.width>=1450?1190.55:A4_W,PH=A4_H;
+   const scale=(PW-MARGIN*2)/doc.width,perPage=(PH-MARGIN*2)/scale;
    const count=Math.max(1,Math.ceil(doc.height/perPage-0.0001));
    const imageIds=doc.images.map(im=>push(['<< /Type /XObject /Subtype /Image /Width '+im.w+' /Height '+im.h+' /ColorSpace /DeviceRGB /BitsPerComponent 8 '+(im.flate?'/Filter /FlateDecode ':'')+'/Length '+im.data.byteLength+' >>\nstream\n',im.data,'\nendstream']));
    for(let page=0;page<count;page++){
     const yOffset=page*perPage,cmd=[];
-    const x=x=>MARGIN+x*scale,y=y=>A4_H-MARGIN-(y-yOffset)*scale;
+    const x=x=>MARGIN+x*scale,y=y=>PH-MARGIN-(y-yOffset)*scale;
     const rect=(e)=>num(x(e.x))+' '+num(y(e.y+e.h))+' '+num(e.w*scale)+' '+num(e.h*scale)+' re ';
     const rgb=c=>c.slice(0,3).map(num).join(' ');
-    cmd.push('q '+num(MARGIN)+' '+num(MARGIN)+' '+num(A4_W-2*MARGIN)+' '+num(A4_H-2*MARGIN)+' re W n\n');
+    cmd.push('q '+num(MARGIN)+' '+num(MARGIN)+' '+num(PW-2*MARGIN)+' '+num(PH-2*MARGIN)+' re W n\n');
     for(const e of doc.entries){
      if(e.y>yOffset+perPage+2||e.y+(e.h||0)<yOffset-2)continue;
      if(e.type==='fill'){cmd.push(rgb(e.color)+' rg '+rect(e)+'f\n');continue;}
@@ -146,7 +147,7 @@
     const stream=cmd.join('');
     const contentId=push(['<< /Length '+byteLength(stream)+' >>\nstream\n',stream,'\nendstream']);
     const xobjs=imageIds.map((id,i)=>'/Im'+i+' '+id+' 0 R').join(' ');
-    const pageId=push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+A4_W+' '+A4_H+'] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> /XObject << '+xobjs+' >> >> /Contents '+contentId+' 0 R >>');
+    const pageId=push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+PW+' '+PH+'] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> /XObject << '+xobjs+' >> >> /Contents '+contentId+' 0 R >>');
     pageIds.push(pageId);
    }
   }
