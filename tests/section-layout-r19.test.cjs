@@ -70,7 +70,8 @@ test('switching to true scale reprojects ink in X and Y without deleting it',()=
 test('FITXA III selector comment is absent but stored old sectionType is retained',()=>{
  assert.doesNotMatch(html,/id="sectionTypeInput"/);
  assert.doesNotMatch(html,/Tipus secció ↑/);
- assert.match(code,/sectionType:d\.sectionType/);
+ assert.match(code,/sectionType:''/);
+ assert.match(code,/defaultSectionSheetIII\(\),\.\.\.\(src\|\|\{\}\)/);
 });
 test('FITXA III has five compact table columns, one row label, and internal scroll',()=>{
  assert.match(code,/const SECTION_TABLE_COLS=\[\[/);
