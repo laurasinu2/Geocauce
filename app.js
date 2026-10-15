@@ -4784,6 +4784,88 @@ function openDownloadContents(){
  $('#downloadContentsModal').classList.remove('hidden');syncLocalExportTree();
 }
 
+function localExportHtml(title,body){
+ const head=`<!doctype html><html lang="ca"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>body{font:15px/1.5 system-ui,sans-serif;color:#202820;max-width:1100px;margin:20px auto;padding:0 18px}h1{font-size:23px}img{max-width:100%;height:auto;display:block;margin:12px 0;break-inside:avoid}pre{font:12px/1.3 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f5f0;padding:16px}@media print{body{margin:0;max-width:none}h1{font-size:18px}img{page-break-inside:avoid}}</style></head><body>`;
+ return new Blob([head,'<h1>'+escapeHtml(title)+'</h1>',body,'</body></html>'],{type:'text/html;charset=utf-8'});
+}
+async function localExportArchiveFile(id){
+ if(id==='__general_map__'){
+  const blob=dataUrlBlob(generalMapDataUrl());
+  if(!blob)throw Error('No hi ha mapes georeferenciats visibles');
+  return blob;
+ }
+ if(id.startsWith('course:')){
+  const c=state.features.find(f=>f.id===id.slice(7)&&f.type==='watercourse');
+  if(!c)throw Error('El curs seleccionat ja no existeix');
+  const payload=await profileExportPayload(c);
+  const pictures=[
+   payload.mapPng?'<h2>Mapa del curs</h2><img alt="Mapa del curs" src="'+payload.mapPng+'">':'',
+   payload.profilePng?'<h2>Perfil longitudinal</h2><img alt="Perfil longitudinal" src="'+payload.profilePng+'">':''
+  ].join('');
+  const meta='<p><b>Nom torrent:</b> '+escapeHtml(c.abbr||'')+' · '+escapeHtml(c.name||'')+'</p><p>Autor: '+escapeHtml(payload.author||'—')+' · Organització: '+escapeHtml(payload.organization||'—')+' · Data: '+escapeHtml(payload.exportDate||'—')+'</p>';
+  const rows='<h2>Trams i mesures</h2><pre>'+escapeHtml(JSON.stringify(payload.rows,null,2))+'</pre>';
+  return localExportHtml(payload.title,meta+pictures+rows);
+ }
+ if(id.startsWith('reachsheet:')){
+  const r=state.features.find(f=>f.id===id.slice(11)&&f.type==='reach');
+  if(!r)throw Error('El tram seleccionat ja no existeix');
+  const c=reachCourse(r),payload=await buildReachSheetExportPayload(r);
+  const head='<p><b>Torrent:</b> '+escapeHtml(c?.name||'')+' · <b>Tram:</b> '+escapeHtml(r.reachCode||r.id)+'</p>';
+  const figs=[['Esquema',payload.schemePng],['Perfil longitudinal',payload.profilePng],['FITXA II · Esquema',payload.page1Png],['FITXA II · Taula',payload.page2Png],['FITXA II · FIC',payload.page3Png]].filter(([,img])=>!!img).map(([title,img])=>'<h2>'+escapeHtml(title)+'</h2><img alt="'+escapeHtml(title)+'" src="'+img+'">').join('');
+  return localExportHtml(payload.title+' · '+(r.reachCode||r.id),head+figs+'<h2>Dades de la fitxa</h2><pre>'+escapeHtml(JSON.stringify(payload,null,2).replace(/"page\\dPng":"[^"]*"/g,'"image":"inclosa més amunt"'))+'</pre>');
+ }
+ if(id.startsWith('sectionsheet:')){
+  const sec=state.features.find(f=>f.id===id.slice(13)&&f.type==='section');
+  if(!sec)throw Error('La secció seleccionada ja no existeix');
+  const sd=ensureSectionSheetData(sec),payload=await buildSectionSheetExportPayload(sec);
+  const pages=[payload.page1Png,payload.page2Png,payload.page3Png].filter(Boolean);
+  const body='<p><b>Secció:</b> '+escapeHtml(sd.sectionName||sec.id)+'</p>'+pages.map((img,i)=>'<h2>Pàgina '+(i+1)+'</h2><img alt="FITXA III pàgina '+(i+1)+'" src="'+img+'">').join('');
+  return localExportHtml(payload.title+' · '+(sd.sectionName||sec.id),body);
+ }
+ throw Error('Contingut no compatible amb l’exportació: '+id);
+}
+async function exportSelectedContentsZip(){
+ const selected=localExportTreeSelection(),btn=$('#downloadContentsZip'),other=$('#downloadContentsExport'),
+   status=$('#downloadContentsStatus'),close=$('#downloadContentsClose'),cancel=$('#downloadContentsCancel');
+ if(!selected.length){toast('Selecciona almenys una fitxa o mapa');return;}
+ if(!window.GeoCauceLocalZip){toast('No s’ha pogut carregar el generador ZIP. Actualitza l’aplicació.',6500);return;}
+ if(btn){btn.disabled=true;btn.textContent='Preparant ZIP…';}
+ if(other)other.disabled=true;
+ if(close)close.disabled=true;if(cancel)cancel.disabled=true;
+ if(status){status.classList.remove('hidden');status.dataset.busy='1';}
+ const rootName=localArchiveSegment('GeoCauce_'+(state.project?.name||'Projecte')+'_'+isoToday());
+ try{
+  const entries=[];
+  // Do not trigger any network calls, Cloud or project writes. Only render local
+  // snapshots already used by the individual export workflow.
+  for(let i=0;i<selected.length;i++){
+   const check=selected[i],file=check.closest('.download-tree-file'),label=file?.querySelector('b')?.textContent||check.value;
+   if(status)status.textContent=`Preparant ${i+1} / ${selected.length} · ${label}`;
+   await new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
+   const blob=await localExportArchiveFile(check.value);
+   entries.push({path:check.dataset.zipPath,blob});
+  }
+  const zip=await window.GeoCauceLocalZip.createZip(entries,{onProgress:async progress=>{
+   if(status)status.textContent=`Creant ZIP ${progress.current} / ${progress.total} · ${progress.name.split('/').pop()}`;
+   await new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
+  }});
+  if(status)status.textContent=`Descarregant ${selected.length} fitxers · ${formatBytes(zip.size)}`;
+  await downloadBlob(zip,rootName+'.zip');
+  $('#downloadContentsModal').classList.add('hidden');
+  toast(`ZIP amb ${selected.length} fitxers i les seves carpetes preparat`,4500);
+ }catch(error){
+  console.error('Local ZIP export',error);
+  const message=error?.message||String(error);
+  if(status)status.textContent='Error: '+message+' · no s’ha creat cap ZIP incomplet';
+  toast('No s’ha pogut crear el ZIP: '+message,8000);
+ }finally{
+  if(btn)btn.textContent='Descarregar carpetes (ZIP)';
+  if(close)close.disabled=false;if(cancel)cancel.disabled=false;
+  if(status)status.dataset.busy='0';
+  syncLocalExportTree();
+ }
+}
+
 function exportWrapText(ctx,text,x,y,maxW,lineH,maxLines=99){
   const words=String(text??'').split(/\s+/).filter(Boolean);let line='',yy=y,lines=0;
   for(const word of words){const test=line?line+' '+word:word;if(ctx.measureText(test).width>maxW&&line){ctx.fillText(line,x,yy);yy+=lineH;lines++;line=word;if(lines>=maxLines)return yy;}else line=test;}
