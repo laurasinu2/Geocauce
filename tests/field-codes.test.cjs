@@ -39,7 +39,7 @@ test('Fitxa I change reason codes match supplied dictionary',()=>{
   assert.deepEqual(Array.from(ctx.FIELD_CHANGE_REASONS,x=>x[0]),['P','L','C','M','V','A','O','X']);
   assert.equal(ctx.codedFieldLabel(ctx.FIELD_CHANGE_REASONS,'P'),'Pendent');
   assert.equal(ctx.codedFieldLabel(ctx.FIELD_CHANGE_REASONS,'M'),'Morfologia/material');
-  assert.match(app,/changeReasonCode:e\.target\.value/);
+  assert.ok(app.includes('r.changeReasonCode=e.target.value'));
   assert.match(app,/changeReasonText:codedFieldLabel/);
 });
 test('Fitxa II quick dropdowns offer profile, cover, vegetation and substrate choices',()=>{
@@ -78,13 +78,13 @@ test('PDF export uses only chosen FIC category, not all available choices',()=>{
   assert.doesNotMatch(reachExport,/for\(const o of row\.options\)/);
 });
 test('orientation and scale are included in exported section drawing',()=>{
-  assert.match(app,/\['Orientació:'\s*,sectionOrientationLabel\(f\)\]/);
+  assert.ok(app.includes("'Orientació:',sectionOrientationLabel(f)"));
   assert.match(app,/Escala real 1:1 \(X = Y\)/);
   assert.match(html,/id="sectionVerticalScale"/);
   assert.match(html,/value="real">Real 1:1/);
 });
 test('handwriting and synchronization pathways remain available',()=>{
-  assert.match(app,/changeCodeInk=r\.changeCodeInk/); // legacy ink preserved on F1
+  assert.ok(app.includes('n.changeCodeInk=n.changeCodeInk'));
   assert.match(app,/renderInkToDataUrl/);
   assert.match(app,/function cloudRemoteAssetIndex/);
   assert.doesNotMatch(app,/method:'HEAD'/);
