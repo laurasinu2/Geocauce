@@ -1244,3 +1244,24 @@ body > .modal > .modal-backdrop{position:absolute;inset:0}
  .section-table-cell-editor .field-table-quick-select{min-height:38px}
  .section-type-row select{min-width:120px}
 }
+
+/* R19 · Fitxa III restores five consistently sized table columns.
+   Scrolling is inside the table wrapper rather than expanding the whole page. */
+.section-fitxa-page[data-section-fitxa-page="2"]{max-width:100%;min-width:0;width:100%}
+.section-table-zoom-wrap{display:block;width:100%;max-width:100%;min-width:0;overflow-x:auto;overflow-y:visible}
+.section-field-table{width:100%;max-width:100%;min-width:0;overflow-x:auto}
+.section-field-table table{width:100%;min-width:1120px;table-layout:fixed;border-collapse:collapse}
+.section-field-table thead th:first-child,
+.section-field-table tbody th{width:220px;min-width:220px;max-width:220px}
+.section-field-table th,.section-field-table td{display:table-cell;vertical-align:top;box-sizing:border-box}
+.section-field-table td{min-width:0;overflow:hidden}
+.section-field-table .section-table-cell-editor{min-width:0;max-width:100%;width:100%;overflow:hidden}
+.section-field-table .section-table-cell-editor select,
+.section-field-table .section-table-cell-editor input,
+.section-field-table .section-table-cell-editor textarea,
+.section-field-table .section-table-cell-editor canvas{box-sizing:border-box;min-width:0;max-width:100%;width:100%}
+@media(max-width:900px){
+ .section-fitxa-page[data-section-fitxa-page="2"]{width:100%;min-width:0}
+ .section-table-zoom-wrap{overflow-x:auto}
+ .section-field-table table{min-width:1120px}
+}
