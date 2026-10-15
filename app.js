@@ -4790,66 +4790,159 @@ function openDownloadContents(){
 
 // Renders PDF from the same FITXA page images used by existing native exports.
 // Only the ZIP path is changed; separate exports and project storage stay intact.
-function localExportLoadImage(src){
- return new Promise((resolve,reject)=>{
-  const img=new Image();
-  img.onload=()=>resolve(img);
-  img.onerror=()=>reject(Error('No s’ha pogut obrir una imatge de la fitxa'));
-  img.src=src;
- });
+// Build printable snapshots from the SAME markup and CSS as the field forms.
+// Work offscreen; never open a modal, change the active editing tool or save project data.
+function localPdfStage(){
+ const stage=document.createElement('div');
+ stage.setAttribute('aria-hidden','true');
+ Object.assign(stage.style,{position:'absolute',left:'-20000px',top:'0',zIndex:'-1',width:'1220px',height:'auto',overflow:'visible',pointerEvents:'none',background:'#fff'});
+ document.body.appendChild(stage);return stage;
 }
-async function localExportDrawImage(g,src,x,y,width,height){
- if(!src)return false;
- const img=await localExportLoadImage(src),w=img.naturalWidth||img.width,h=img.naturalHeight||img.height;
- if(!w||!h)throw Error('Imatge de la fitxa buida');
- const scale=Math.min(width/w,height/h);
- g.drawImage(img,x+(width-w*scale)/2,y+(height-h*scale)/2,w*scale,h*scale);
- return true;
+function localPdfClone(source,stage,width){
+ if(!source)throw Error('No es troba la plantilla original de la fitxa de camp');
+ const copy=source.cloneNode(true);
+ copy.classList.remove('hidden');
+ Object.assign(copy.style,{display:'block',width:width+'px',maxWidth:'none',margin:'0',height:'auto',minHeight:'0',overflow:'visible',transform:'none',zoom:'1',boxShadow:'none'});
+ stage.appendChild(copy);return copy;
 }
-function localExportPage(title,subtitle){
- const c=document.createElement('canvas');c.width=1240;c.height=1754;
- const g=c.getContext('2d');
- g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
- g.fillStyle='#29352c';g.font='700 30px sans-serif';g.fillText(title,55,66);
- g.fillStyle='#4b6052';g.font='18px sans-serif';g.fillText(subtitle,55,103);
- g.strokeStyle='#bfc8bd';g.lineWidth=2;g.beginPath();g.moveTo(55,123);g.lineTo(1185,123);g.stroke();
- return {c,g};
-}
-async function localCoursePdfPages(p){
- const pages=[],title='FITXA I · PERFIL LONGITUDINAL',course=[p.abbr,p.torrentName].filter(Boolean).join(' · ');
- const cover=localExportPage(title,course+'  |  '+(p.projectName||'GeoCauce')),g=cover.g;
- g.font='17px sans-serif';g.fillStyle='#27352b';
- g.fillText('Autor: '+(p.author||'—')+'  ·  Institució: '+(p.organization||'—'),55,152);
- g.fillText('Campanya: '+(p.campaignName||'—')+'  ·  Data: '+(p.exportDate||'—')+'  ·  '+(p.crs||''),55,180);
- g.font='700 20px sans-serif';g.fillText('Mapa del curs',55,218);
- if(p.mapPng)await localExportDrawImage(g,p.mapPng,55,230,1130,1450);
- else{g.font='19px sans-serif';g.fillText('Mapa no disponible',55,300);}
- pages.push(cover.c.toDataURL('image/jpeg',.88));
- const profile=localExportPage(title,course+'  ·  Perfil longitudinal'),pctx=profile.g;
- pctx.font='17px sans-serif';pctx.fillStyle='#27352b';
- pctx.fillText('MDE: '+(p.profileSource||'—')+'  ·  Resolució: '+(p.profileResolution??'—'),55,170);
- if(p.profilePng)await localExportDrawImage(pctx,p.profilePng,55,210,1130,1120);
- else pctx.fillText('Perfil longitudinal no disponible',55,265);
- pctx.fillText('Trams registrats: '+(p.rows||[]).length,55,1430);
- pages.push(profile.c.toDataURL('image/jpeg',.88));
- const rows=p.rows||[];
- for(let offset=0;offset<rows.length;offset+=3){
-  const page=localExportPage(title,course+'  ·  Fitxes dels trams '+(offset+1)+' a '+Math.min(offset+3,rows.length)),ctx=page.g;
-  for(let index=0;index<Math.min(3,rows.length-offset);index++){
-   const row=rows[offset+index],x=55,y=155+index*515,w=1130,h=490;
-   ctx.fillStyle='#f3f6f0';ctx.fillRect(x,y,w,47);ctx.strokeStyle='#c2ccc1';ctx.lineWidth=2;ctx.strokeRect(x,y,w,h);
-   ctx.fillStyle='#26362b';ctx.font='700 22px sans-serif';ctx.fillText('Tram '+(row.code||'—'),x+15,y+32);
-   ctx.font='16px sans-serif';ctx.fillText('Longitud: '+(row.lengthM??'—')+' m   ·   Z mín.: '+(row.minElevation??'—')+'   ·   Z màx.: '+(row.maxElevation??'—')+'   ·   Pendent MDE: '+(row.mdeSlopePct??'—')+' %',x+15,y+80);
-   ctx.fillText('Inici: X '+(row.startX??'—')+', Y '+(row.startY??'—')+'   ·   Final: X '+(row.endX??'—')+', Y '+(row.endY??'—'),x+15,y+112);
-   ctx.font='700 16px sans-serif';ctx.fillText('Pendent de camp',x+20,y+158);
-   ctx.fillText('Motiu canvi de tram: '+(row.changeReasonCode||'—')+'  '+(row.changeReasonText||''),x+298,y+158);
-   ctx.fillText('Observacions',x+600,y+158);
-   if(row.slopePng)await localExportDrawImage(ctx,row.slopePng,x+20,y+172,245,286);
-   if(row.changePng)await localExportDrawImage(ctx,row.changePng,x+300,y+172,266,286);
-   if(row.obsPng)await localExportDrawImage(ctx,row.obsPng,x+600,y+172,495,286);
+function localPdfField(root,id,value){
+ const el=root.querySelector('#'+id);if(!el)return;
+ if(el.tagName==='INPUT'||el.tagName==='SELECT'||el.tagName==='TEXTAREA'){
+  const val=String(value??'');
+  if(el.tagName==='SELECT'&&val&&![...el.options].some(o=>o.value===val)){
+   const opt=document.createElement('option');opt.value=val;opt.textContent=val;el.appendChild(opt);
   }
-  pages.push(page.c.toDataURL('image/jpeg',.88));
+  el.value=val;
+ }else el.textContent=String(value??'—');
+}
+function localPdfHideTools(root){
+ root.querySelectorAll('.reach-profile-tools,.section-workbench,.section-profile-actions,.section-more-menu,.section-scale-bar,.section-table-toolbar,.fic-note-toolbar,.section-table-help,.section-help-row,.section-geometry-options,.section-tool-row,.section-compact-selectors').forEach(el=>el.remove());
+}
+function localPdfInkCanvas(canvas,strokes){
+ const width=Math.max(8,Math.round(canvas.getBoundingClientRect().width)),height=Math.max(8,Math.round(canvas.getBoundingClientRect().height));
+ const density=3;canvas.width=width*density;canvas.height=height*density;
+ const g=canvas.getContext('2d');
+ g.clearRect(0,0,canvas.width,canvas.height);
+ for(const stroke of strokes||[])drawInkRecord(g,{width,height},stroke,density,false);
+}
+async function localPdfProfileCourse(course,stage){
+ const source=$('#profileSheetDoc'),doc=localPdfClone(source,stage,1040);
+ localPdfField(doc,'profileCourseName',(course.abbr||'')+', '+(course.name||''));
+ localPdfField(doc,'profileCrsLabel',projectCrsDisplayName());
+ const tbody=doc.querySelector('#profileSheetRows');tbody.replaceChildren();
+ const ink=[];
+ for(const reach of orderedCourseReaches(course.id)){
+  const tr=document.createElement('tr'),p0=reach.points[0],p1=reach.points.at(-1),m=reach.mdeStats||{};
+  tr.innerHTML='<td class="reach-code">'+escapeHtml(reach.reachCode||reach.id)+'</td>'+
+    '<td class="coord">'+escapeHtml(formatXY(p0))+'</td><td class="coord">'+escapeHtml(formatXY(p1))+'</td>'+
+    '<td class="profile-auto-cell">'+escapeHtml(formatNum(featureLength(reach),1))+'</td>'+
+    '<td class="profile-auto-cell">'+(Number.isFinite(m.minElevation)?escapeHtml(formatNum(m.minElevation,1)):'—')+'</td>'+
+    '<td class="profile-auto-cell">'+(Number.isFinite(m.maxElevation)?escapeHtml(formatNum(m.maxElevation,1)):'—')+'</td>'+
+    '<td class="profile-auto-cell">'+(Number.isFinite(m.mdeSlopePct)?escapeHtml(formatNum(m.mdeSlopePct,1)):'—')+'</td>'+
+    '<td class="profile-ink-cell slope"><canvas data-pdf-ink="fieldSlopeInk"></canvas></td>'+
+    '<td class="profile-ink-cell code"><div class="reach-code-choice">'+escapeHtml(reach.changeReasonCode||'—')+' · '+escapeHtml(codedFieldLabel(FIELD_CHANGE_REASONS,reach.changeReasonCode))+'</div><canvas data-pdf-ink="changeCodeInk"></canvas></td>'+
+    '<td class="profile-ink-cell obs"><span class="reach-code-meaning">'+escapeHtml(codedFieldLabel(FIELD_CHANGE_REASONS,reach.changeReasonCode)||'—')+'</span><div>'+escapeHtml(reach.changeReasonNote||'')+'</div><canvas data-pdf-ink="observationsInk"></canvas></td>';
+  tbody.appendChild(tr);
+  tr.querySelectorAll('canvas[data-pdf-ink]').forEach(cv=>ink.push([cv,reach[cv.dataset.pdfInk]||[]]));
  }
+ if(!tbody.children.length){const tr=document.createElement('tr');tr.innerHTML='<td colspan="10">Encara no hi ha trams</td>';tbody.appendChild(tr);}
+ await new Promise(r=>requestAnimationFrame(r));
+ ink.forEach(([cv,strokes])=>localPdfInkCanvas(cv,strokes));
+ return [doc];
+}
+async function localPdfReachSheet(reach,stage){
+ const course=reachCourse(reach),d=ensureReachSheetData(reach),doc=localPdfClone($('#reachSheetDoc'),stage,880);
+ const pages=[...doc.querySelectorAll('.reach-sheet-page')];
+ for(const page of pages){page.classList.remove('hidden');page.style.display='flex';page.style.minHeight='1100px';}
+ localPdfHideTools(doc);
+ localPdfField(doc,'reachSheetTorrentName',(course?.abbr||'')+', '+(course?.name||''));
+ localPdfField(doc,'reachSheetReachName',reach.reachCode||reach.id);
+ localPdfField(doc,'reachSheetSectionsPlaceholder',reachSectionNamesText(reach));
+ localPdfField(doc,'reachSheetObserver',d.observer||state.project?.author||'');
+ localPdfField(doc,'reachSheetVisitDate',d.visitDate||'');
+ localPdfField(doc,'reachSheetFieldSlope',d.fieldSlope||'');
+ localPdfField(doc,'reachSheetLithology',d.lithology||'');
+ localPdfField(doc,'reachSheetProfileType',d.profileType||'');
+ localPdfField(doc,'reachSheetVegetationCover',d.vegetationCover||'');
+ localPdfField(doc,'reachSheetVegetationType',d.vegetationType||'');
+ localPdfField(doc,'reachSheetAnthropic',d.anthropic||'');
+ const angle=Number.isFinite(reach.mdeStats?.mdeSlopePct)?Math.atan(reach.mdeStats.mdeSlopePct/100)*180/Math.PI:null;
+ localPdfField(doc,'reachSheetMdeSlope',Number.isFinite(angle)?formatNum(angle,1):'—');
+ const canvas=doc.querySelector('#reachSheetProfileEditCanvas');
+ if(canvas&&course){
+  canvas.style.width='100%';canvas.style.height='430px';canvas.style.display='block';
+  await drawReachProfileCanvas(canvas,reach,course,{width:1400,height:600,forExport:true,includeInk:true});
+ }
+ return pages;
+}
+function localPdfSectionTable(section,root){
+ const d=ensureSectionSheetData(section),target=root.querySelector('#sectionFieldTable');
+ if(!target)return [];
+ let html='<table><thead><tr><th></th>'+SECTION_TABLE_COLS.map(([,label])=>'<th>'+escapeHtml(label)+'</th>').join('')+'</tr></thead><tbody>';
+ for(const row of SECTION_TABLE_ROWS){
+  html+='<tr><th>'+escapeHtml(row.label)+'</th>';
+  for(const [col] of SECTION_TABLE_COLS){
+   const value=String(d.table?.[row.key]?.[col]??'');
+   html+='<td><div class="section-table-cell-editor"><div class="field-table-quick-select">'+escapeHtml(value||'—')+'</div>'+
+     '<canvas class="section-table-ink-canvas '+(['erosionEvidence','accumulationEvidence','grainClasses'].includes(row.key)?'tall':'')+'" data-pdf-table-ink="'+escapeHtml(row.key)+'" data-pdf-col="'+escapeHtml(col)+'"></canvas></div></td>';
+  }
+  html+='</tr>';
+ }
+ target.innerHTML=html+'</tbody></table>';
+ return [...target.querySelectorAll('[data-pdf-table-ink]')].map(cv=>[cv,d.tableInk?.[cv.dataset.pdfTableInk]?.[cv.dataset.pdfCol]||[]]);
+}
+function localPdfSectionFic(section,root){
+ const d=ensureSectionSheetData(section),target=root.querySelector('#sectionFicTable');
+ if(!target)return [];
+ let html='<div class="reach-sheet-fic-head"><div></div><div>Rang</div><div>Puntuació</div><div>notes</div></div>';
+ for(const row of REACH_FIC_ROWS){
+  if(row.group){html+='<div class="reach-sheet-fic-row"><div class="criterion"><b>'+escapeHtml(row.group)+'</b></div><div></div><div></div><div></div></div>';continue;}
+  const rec=d.fic?.[row.key]||{},label=row.options.find(o=>o.score===optionalScore(rec.score))?.text||'—';
+  html+='<div class="reach-sheet-fic-row"><div class="criterion">'+(row.prefix?'<div><b>'+escapeHtml(row.prefix)+'</b></div>':'')+
+    '<b>'+escapeHtml(row.label)+'</b>'+(row.note?'<div class="reach-sheet-fic-small">'+escapeHtml(row.note)+'</div>':'')+'</div>'+
+    '<div class="range-cell">'+escapeHtml(label)+'</div><div class="score-cell">'+(rec.score??'—')+'</div>'+
+    '<div class="fic-note-cell"><canvas class="fic-note-canvas" data-pdf-fic-ink="'+escapeHtml(row.key)+'"></canvas></div></div>';
+ }
+ const total=calcSectionFicTotal(section);
+ html+='<div class="reach-sheet-fic-total"><div><i>Total, puntuació del component pendent avall **</i><div class="reach-sheet-fic-small">Notes: ** Es proporciona la puntuació total del component de pendent ascendent. per: Sd=Ad+ Bd+Cd+ WdDd1 +(1 − Wd)Dd2</div></div><div class="value">'+(total??'—')+'</div><div></div></div>'+
+  '<div class="reach-sheet-fic-final"><div class="fic-final-text">L’índex de connectivitat del camp ve donat per FIC=(Su+Sd)/2</div></div>';
+ target.innerHTML=html;
+ return [...target.querySelectorAll('[data-pdf-fic-ink]')].map(cv=>[cv,d.fic?.[cv.dataset.pdfFicInk]?.noteInk||[]]);
+}
+async function localPdfSectionSheet(section,stage){
+ const templates=[...document.querySelectorAll('#sectionModal .section-fitxa-page')],d=ensureSectionSheetData(section);
+ if(templates.length!==3)throw Error('No es troben les tres pàgines originals de FITXA III');
+ const pages=templates.map(source=>localPdfClone(source,stage,1200));
+ pages.forEach(page=>{page.style.width='1200px';page.style.borderRadius='0';localPdfHideTools(page);page.querySelectorAll('.section-table-zoom-wrap,.section-field-table,.reach-sheet-fic-table').forEach(el=>{el.style.overflow='visible';el.style.maxHeight='none';el.style.height='auto';});});
+ // Use the field table's full native width instead of cutting off right-bank columns.
+ pages[1].style.width='1590px';
+ const first=pages[0];
+ localPdfField(first,'sectionTorrentName',sectionCourse(section)?[sectionCourse(section)?.abbr,sectionCourse(section)?.name].filter(Boolean).join(', '):'—');
+ localPdfField(first,'sectionReachName',sectionReach(section)?.reachCode||sectionReach(section)?.id||'—');
+ localPdfField(first,'sectionNameInput',d.sectionName||section.sectionName||section.id);
+ localPdfField(first,'sectionVisitDate',d.visitDate||'');
+ localPdfField(first,'sectionOrientationLabel',sectionOrientationLabel(section));
+ const ends=sectionOrientationEnds(section);
+ localPdfField(first,'sectionOrientationEndPoints',ends?'Inici: '+ends.start+' → Final: '+ends.end:'Inici: — → Final: —');
+ localPdfField(first,'sectionObservations',d.observations||'');
+ const ink=[...localPdfSectionTable(section,pages[1]),...localPdfSectionFic(section,pages[2])];
+ const graph=first.querySelector('#sectionCanvas');
+ if(graph){
+  const previous=state.currentSection;
+  try{
+   state.currentSection=section.id;
+   graph.style.display='block';graph.style.width='100%';graph.style.height='455px';
+   await new Promise(r=>requestAnimationFrame(r));
+   const rect=graph.getBoundingClientRect(),w=Math.max(1,Math.round(rect.width)),h=Math.max(1,Math.round(rect.height));
+   const dpr=2;graph.width=w*dpr;graph.height=h*dpr;graph._dpr=dpr;
+   drawSectionBase(graph);
+   const g=graph.getContext('2d'),box={width:w,height:h};
+   for(const stroke of section.sectionInk||[])drawInkRecord(g,box,stroke,dpr,false);
+   for(const obj of section.sectionObjects||[])drawSectionStructuredObject(g,box,obj,dpr,false,graph,section);
+  }finally{state.currentSection=previous;}
+ }
+ await new Promise(r=>requestAnimationFrame(r));
+ ink.forEach(([cv,strokes])=>localPdfInkCanvas(cv,strokes));
  return pages;
 }
 async function localExportArchiveFile(id){
@@ -4858,24 +4951,26 @@ async function localExportArchiveFile(id){
   if(!blob)throw Error('No hi ha mapes georeferenciats visibles');
   return blob;
  }
- if(id.startsWith('course:')){
-  const course=state.features.find(f=>f.id===id.slice(7)&&f.type==='watercourse');
-  if(!course)throw Error('El curs seleccionat ja no existeix');
-  return window.GeoCauceLocalZip.createPdfFromImages(await localCoursePdfPages(await profileExportPayload(course)));
- }
- if(id.startsWith('reachsheet:')){
-  const reach=state.features.find(f=>f.id===id.slice(11)&&f.type==='reach');
-  if(!reach)throw Error('El tram seleccionat ja no existeix');
-  const p=await buildReachSheetExportPayload(reach);
-  return window.GeoCauceLocalZip.createPdfFromImages([p.page1Png,p.page2Png,p.page3Png,p.page4Png].filter(Boolean));
- }
- if(id.startsWith('sectionsheet:')){
-  const section=state.features.find(f=>f.id===id.slice(13)&&f.type==='section');
-  if(!section)throw Error('La secció seleccionada ja no existeix');
-  const p=await buildSectionSheetExportPayload(section);
-  return window.GeoCauceLocalZip.createPdfFromImages([p.page1Png,p.page2Png,p.page3Png].filter(Boolean));
- }
- throw Error('Contingut no compatible amb l’exportació: '+id);
+ if(!window.GeoCauceFieldPdf)throw Error('El generador PDF de camp no està disponible. Actualitza la PWA.');
+ const stage=localPdfStage();
+ try{
+  let pages;
+  if(id.startsWith('course:')){
+   const course=state.features.find(f=>f.id===id.slice(7)&&f.type==='watercourse');
+   if(!course)throw Error('El curs seleccionat ja no existeix');
+   pages=await localPdfProfileCourse(course,stage);
+  }else if(id.startsWith('reachsheet:')){
+   const reach=state.features.find(f=>f.id===id.slice(11)&&f.type==='reach');
+   if(!reach)throw Error('El tram seleccionat ja no existeix');
+   pages=await localPdfReachSheet(reach,stage);
+  }else if(id.startsWith('sectionsheet:')){
+   const section=state.features.find(f=>f.id===id.slice(13)&&f.type==='section');
+   if(!section)throw Error('La secció seleccionada ja no existeix');
+   pages=await localPdfSectionSheet(section,stage);
+  }else throw Error('Contingut no compatible amb l’exportació: '+id);
+  await Promise.all([...stage.querySelectorAll('img')].map(img=>img.decode?.().catch(()=>{})||Promise.resolve()));
+  return await window.GeoCauceFieldPdf.fromElements(pages);
+ }finally{stage.remove();}
 }
 async function exportSelectedContentsZip(){
  const selected=localExportTreeSelection(),btn=$('#downloadContentsZip'),other=$('#downloadContentsExport'),

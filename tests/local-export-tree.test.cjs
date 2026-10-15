@@ -5,11 +5,13 @@ const vm=require('node:vm');
 const path=require('node:path');
 const root=path.join(__dirname,'..');
 const read=name=>fs.readFileSync(path.join(root,name),'utf8');
-const app=read('app.js'),html=read('index.html'),sw=read('sw.js'),zipSource=read('local-export-zip.js');
+const app=read('app.js'),html=read('index.html'),sw=read('sw.js'),zipSource=read('local-export-zip.js'),fieldPdfSource=read('field-sheet-pdf.js');
 const zipRoot={Blob,TextEncoder,Uint8Array,Uint32Array,DataView,Date,Error,Math};
 zipRoot.globalThis=zipRoot;
 vm.runInNewContext(zipSource,zipRoot);
 const {createZip,cleanPath,createPdfFromJpegs}=zipRoot.GeoCauceLocalZip;
+const pdfRoot={Blob,TextEncoder,Uint8Array,Uint32Array,DataView,Date,Error,Math};pdfRoot.globalThis=pdfRoot;
+vm.runInNewContext(fieldPdfSource,pdfRoot);
 function findZipEntries(bytes){
   const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
   let eocd=-1;
@@ -67,7 +69,7 @@ test('old individual exports stay on their original native/browser path',()=>{
 });
 test('selection tree supports course, reach, section, map and unassigned section groups',()=>{
   const start=app.indexOf('function openDownloadContents(){');
-  const end=app.indexOf('function localExportHtml(',start);
+  const end=app.indexOf('function localPdfStage(',start);
   const src=app.slice(start,end);
   for(const key of ['Mapes','Cursos d’aigua','Trams','Seccions','Seccions sense tram','course:','reachsheet:','sectionsheet:','__general_map__','data-export-folder']){
     assert.ok(src.includes(key),'tree missing '+key);
@@ -77,10 +79,12 @@ test('selection tree supports course, reach, section, map and unassigned section
   assert.match(app.slice(app.indexOf('function syncLocalExportTree('),app.indexOf('function updateDownloadExportButton(')),/group\.indeterminate/);
 });
 test('ZIP exports PDF/JPG locally without invoking cloud sync or altering project records',()=>{
-  const part=app.slice(app.indexOf('function localExportLoadImage('),app.indexOf('function exportWrapText('));
+  const part=app.slice(app.indexOf('function localPdfStage('),app.indexOf('function exportWrapText('));
   assert.match(part,/window\.GeoCauceLocalZip\.createZip/);
-  assert.match(part,/createPdfFromImages/);
-  assert.match(part,/localCoursePdfPages/);
+  assert.match(part,/GeoCauceFieldPdf\.fromElements/);
+  assert.match(part,/localPdfProfileCourse/);
+  assert.match(part,/localPdfReachSheet/);
+  assert.match(part,/localPdfSectionSheet/);
   assert.doesNotMatch(part,/localExportHtml|text\/html/);
   assert.match(part,/await downloadBlob\(zip,rootName\+'\.zip'\)/);
   assert.doesNotMatch(part,/cloudFetch\(|cloudUpload|cloudDownload|dbClear\(|dbDelete\(|deleteProject\(/);
@@ -89,14 +93,17 @@ test('PDF UI has an all-selection checkbox, both export actions and cached modul
   assert.match(html,/id="downloadContentsSelectAll"/);
   assert.match(html,/id="downloadContentsZip"/);
   assert.match(html,/id="downloadContentsExport"/);
-  assert.match(html,/local-export-zip\.js\?v=20261015-download-r23/);
-  assert.match(sw,/mobile-pwa-r23/);
+  assert.match(html,/local-export-zip\.js\?v=20261015-download-r24/);
+  assert.match(sw,/mobile-pwa-r24/);
   assert.match(sw,/"local-export-zip\.js"/);
   assert.match(html,/fitxes PDF/);
+  assert.match(html,/field-sheet-pdf\.js\?v=20261015-download-r24/);
+  assert.match(sw,/"field-sheet-pdf\.js"/);
 });
 test('all scripts parse',()=>{
   assert.doesNotThrow(()=>new vm.Script(app));
   assert.doesNotThrow(()=>new vm.Script(zipSource));
+  assert.doesNotThrow(()=>new vm.Script(fieldPdfSource));
 });
 
 
@@ -111,7 +118,7 @@ test('project-date ZIP folder uses the local export day without an extra product
   assert.match(app,/dataset\.archiveRoot\|\|localArchiveRootName/);
 });
 test('all hierarchical FITXA files use PDF extensions; the general map remains JPG',()=>{
-  const part=app.slice(app.indexOf('function openDownloadContents(){'),app.indexOf('function localExportLoadImage('));
+  const part=app.slice(app.indexOf('function openDownloadContents(){'),app.indexOf('function localPdfStage('));
   assert.match(part,/MAPA_GENERAL_.*\.jpg/);
   assert.ok((part.match(/\.pdf/g)||[]).length>=4);
   assert.doesNotMatch(part,/\.html/);
@@ -135,4 +142,33 @@ test('PDF writer embeds genuine image objects and a correct byte-offset cross re
     const line=body[i+2],offset=Number(line.slice(0,10));
     assert.ok(src.slice(offset).startsWith(i+' 0 obj\n'),'PDF object '+i+' has correct byte offset');
   }
+});
+
+test('field PDF is text and vector, not a full-page JPEG photograph',async()=>{
+ const pdf=await pdfRoot.GeoCauceFieldPdf.makePdf([{
+   width:880,height:1080,entries:[
+     {type:'fill',x:0,y:0,w:880,h:1080,color:[1,1,1,1]},
+     {type:'border',x:40,y:75,w:800,h:50,color:[0,0,0,1],width:1,side:'bottom'},
+     {type:'text',x:55,y:80,h:26,value:'FITXA II - PERFIL LONGITUDINAL TRAM',size:20,font:'bold',color:[0,0,0,1]},
+     {type:'text',x:55,y:145,h:18,value:'Vegetació i mesures',size:13,font:'normal',color:[0,0,0,1]}
+   ],images:[]}
+ ]);
+ assert.equal(pdf.type,'application/pdf');
+ const raw=Buffer.from(await pdf.arrayBuffer()).toString('latin1');
+ assert.match(raw,/^%PDF-1\.4/);
+ assert.match(raw,/\/Subtype \/Type1 \/BaseFont \/Helvetica/);
+ assert.match(raw,/\/F2 \d+(?:\.\d+)? Tf/);
+ assert.match(raw,/BT [\s\S]*? Tj ET/);
+ assert.match(raw,/ re f/);
+ assert.doesNotMatch(raw,/\/Filter \/DCTDecode/);
+ const m=/startxref\n(\d+)\n%%EOF/.exec(raw);assert.ok(m);
+ assert.equal(raw.slice(+m[1],+m[1]+4),'xref');
+});
+test('all FITXA export types reuse existing HTML document and real field data',()=>{
+ const p=app.slice(app.indexOf('function localPdfStage('),app.indexOf('async function exportSelectedContentsZip(){'));
+ for(const name of ['profileSheetDoc','reachSheetDoc','section-fitxa-page','drawReachProfileCanvas','drawSectionBase','SECTION_TABLE_ROWS','REACH_FIC_ROWS'])
+  assert.ok(p.includes(name),'missing original field view: '+name);
+ assert.doesNotMatch(p,/localPdfStage\([\s\S]*?cloudUpload/);
+ assert.doesNotMatch(p,/localPdfStage\([\s\S]*?persistState\(\)/);
+ assert.doesNotMatch(p,/toDataURL\('image\/jpeg'/);
 });
