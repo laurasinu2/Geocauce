@@ -11,8 +11,8 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=20261015-fitxa-fix-r19" />
-  <link rel="stylesheet" href="mobile-pwa.css?v=20261015-fitxa-fix-r19" />
+  <link rel="stylesheet" href="styles.css?v=20261015-orientation-r20" />
+  <link rel="stylesheet" href="mobile-pwa.css?v=20261015-orientation-r20" />
 </head>
 <body>
   <div id="app">
@@ -703,7 +703,7 @@ CON | Confluencia"></textarea></div>
             <table class="section-fitxa-meta">
               <tr><th>Nom torrent:</th><td id="sectionTorrentName">—</td><th>Nom tram:</th><td id="sectionReachName">—</td></tr>
               <tr><th>Nom secció:</th><td><input id="sectionNameInput" type="text" maxlength="40"></td><th>Data visita:</th><td><input id="sectionVisitDate" type="date"></td></tr>
-              <tr><th>Fotografia:</th><td><span class="muted">↑ (riu amunt) ↓ (riu avall)</span></td><th>Orientació:</th><td><strong id="sectionOrientationLabel">—</strong></td></tr>
+              <tr><th>Fotografia:</th><td><span class="muted">↑ (riu amunt) ↓ (riu avall)</span></td><th>Orientació:</th><td><strong id="sectionOrientationLabel">—</strong><small id="sectionOrientationEndPoints" class="section-orientation-ends">Inici: — → Final: —</small></td></tr>
             </table>
             <div class="section-fitxa-subtitle"><b>Esquema</b> <span>(geometria amb acotacions de pendent, bancs, riu)</span></div>
             <div class="section-profilebar section-profilebar-compact">
@@ -1256,11 +1256,11 @@ CON | Confluencia"></textarea></div>
     <div class="cloud-progress-track" role="progressbar" aria-label="Progreso de sincronización" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="cloudProgressBar"></span></div>
     <small id="cloudProgressDetail">Preparando transferencia…</small>
   </aside>
-  <script src="supabase-config.js?v=20261015-fitxa-fix-r19"></script>
-  <script src="native-adapter.js?v=20261015-fitxa-fix-r19"></script>
-  <script src="geotiff-lite.js?v=20261015-fitxa-fix-r19"></script>
-  <script src="modal-layer.js?v=20261015-fitxa-fix-r19"></script>
-  <script src="app.js?v=20261015-fitxa-fix-r19"></script>
-  <script src="mobile-pwa.js?v=20261015-fitxa-fix-r19"></script>
+  <script src="supabase-config.js?v=20261015-orientation-r20"></script>
+  <script src="native-adapter.js?v=20261015-orientation-r20"></script>
+  <script src="geotiff-lite.js?v=20261015-orientation-r20"></script>
+  <script src="modal-layer.js?v=20261015-orientation-r20"></script>
+  <script src="app.js?v=20261015-orientation-r20"></script>
+  <script src="mobile-pwa.js?v=20261015-orientation-r20"></script>
 </body>
 </html>

@@ -985,12 +985,32 @@ function fieldChoiceHTML(options,selected){
  if(selected&&!options.includes(selected))html+='<option selected value="'+escapeHtml(selected)+'">'+escapeHtml(selected)+'</option>';
  return html;
 }
-function sectionOrientationLabel(f){
- const a=f?.points?.[0],b=f?.points?.at(-1);if(!a||!b)return '—';
- const dx=b.x-a.x,dy=b.y-a.y;if(Math.hypot(dx,dy)<1e-8)return '—';
+function sectionOrientationEnds(f){
+ // f.points is ordered when the section is drawn; do not sort, reverse or infer
+ // direction from the associated river reach. The MDE profile samples point 0 -> last.
+ const first=f?.points?.[0],last=f?.points?.at(-1);
+ if(!first||!last)return null;
+ const dx=Number(last.x)-Number(first.x),dy=Number(last.y)-Number(first.y);
+ if(!Number.isFinite(dx)||!Number.isFinite(dy)||Math.hypot(dx,dy)<1e-8)return null;
+ // Coordinates are projected eastings/northings (Y increases towards north),
+ // not DOM screen pixels, where Y grows downward.
  const rose=['E','NE','N','NO','O','SO','S','SE'];
- const dir=(x,y)=>rose[((Math.round(Math.atan2(y,x)/(Math.PI/4))%8)+8)%8];
- return dir(-dx,-dy)+'–'+dir(dx,dy);
+ const compass=(x,y)=>rose[((Math.round(Math.atan2(y,x)/(Math.PI/4))%8)+8)%8];
+ return{start:compass(-dx,-dy),end:compass(dx,dy)};
+}
+function sectionOrientationLabel(f){
+ const ends=sectionOrientationEnds(f);
+ return ends?ends.start+'–'+ends.end:'—';
+}
+function drawSectionOrientationEnds(ctx,f,pr){
+ const dirs=sectionOrientationEnds(f);if(!dirs)return;
+ ctx.save();ctx.font='700 12px sans-serif';ctx.fillStyle='#315a43';
+ // Label the actual horizontal ends of the section profile, so E->O is never
+ // presented as O->E. Allow a compact layout when 1:1 scale narrows the plot.
+ const short=pr.width<210;
+ ctx.textAlign='left';ctx.fillText(short?'I · '+dirs.start:'INICI · '+dirs.start,pr.left,pr.top-17);
+ ctx.textAlign='right';ctx.fillText(short?'F · '+dirs.end:'FINAL · '+dirs.end,pr.right,pr.top-17);
+ ctx.restore();
 }
 
 const SECTION_TABLE_ROWS=[
@@ -2693,7 +2713,7 @@ function drawMetricSectionGrid(ctx,f,c,pr,rg){
 }
 function drawSectionBase(c,tempManual=null){
   if(!c||!c.width)return;const f=state.features.find(x=>x.id===state.currentSection);if(!f)return;const ctx=c.getContext('2d'),r=c.getBoundingClientRect(),dpr=c._dpr||1;ctx.save();ctx.setTransform(dpr,0,0,dpr,0,0);const pr=sectionPlotRect(c,f),p=f.sectionProfile,rg=sectionDisplayRange(f,c);
-  ctx.fillStyle='rgba(255,253,248,.97)';ctx.fillRect(0,0,r.width,r.height);ctx.strokeStyle='#8f8b82';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(pr.left,pr.top);ctx.lineTo(pr.left,pr.bottom);ctx.lineTo(pr.right,pr.bottom);ctx.stroke();
+  ctx.fillStyle='rgba(255,253,248,.97)';ctx.fillRect(0,0,r.width,r.height);ctx.strokeStyle='#8f8b82';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(pr.left,pr.top);ctx.lineTo(pr.left,pr.bottom);ctx.lineTo(pr.right,pr.bottom);ctx.stroke();drawSectionOrientationEnds(ctx,f,pr);
   if(!p?.samples?.length||!rg){ctx.fillStyle='#777268';ctx.font='14px sans-serif';ctx.fillText('Sin perfil MDT/LiDAR. Importa una capa de elevación o pulsa Recalcular.',pr.left+20,pr.top+35);ctx.restore();return;}
   drawMetricSectionGrid(ctx,f,c,pr,rg);
   if($('#showSectionRefs')?.checked!==false){const refs=sectionReferences(f),vw=sectionVisibleWindow(f),showLabels=vw.zoom>1.25;for(const ref of refs){
@@ -2706,7 +2726,7 @@ function drawSectionBase(c,tempManual=null){
 }
 function syncSectionControls(f){
   const v=sectionView(f),grid=$('#sectionGridSelect'),custom=$('#sectionGridCustom'),wrap=$('#sectionGridCustomWrap');const common=[0,.5,1,2];const n=Number(v.gridStep)||0;if(common.includes(n)){grid.value=String(n);wrap.classList.add('hidden');}else{grid.value='custom';custom.value=String(n||1);wrap.classList.remove('hidden');}
-  $('#sectionVerticalScale').value=String(v.verticalScale||'1');if($('#sectionOrientationLabel'))$('#sectionOrientationLabel').textContent=sectionOrientationLabel(f);if($('#sectionScaleSummary'))$('#sectionScaleSummary').textContent=v.verticalScale==='real'?'Escala 1:1 · X = Y':'Visualització habitual · ×'+(v.verticalScale||'1');updateSectionZoomUi(f);const len=f.sectionProfile?.length||featureLength(f)||0;$('#sectionLengthBadge').textContent=`Longitud: ${formatLengthUnit(len,2)}`;$('#sectionLengthField').textContent=formatLengthUnit(len,2);$('#sectionFillOpacity').value=String(state.sectionFillOpacity||.45);if($('#sectionStraightToggle'))$('#sectionStraightToggle').classList.toggle('active',state.sectionStraightSegments!==false);if($('#sectionGeoClass'))$('#sectionGeoClass').value=state.sectionGeoClass||'none';if($('#sectionZoneClass'))$('#sectionZoneClass').value=state.sectionZoneClass||'channel';if($('#sectionZoneCustom'))$('#sectionZoneCustom').value=state.sectionZoneCustom||'';const zoneOn=state.sectionTool==='zone';$('#sectionZoneSelectorWrap')?.classList.toggle('hidden',!zoneOn);$('#sectionZoneCustom')?.classList.toggle('hidden',!zoneOn||state.sectionZoneClass!=='custom');renderSectionColorChips();$$('[data-section-material]').forEach(b=>b.classList.toggle('active',b.dataset.sectionMaterial===state.sectionMaterial));$$('[data-section-tool]').forEach(b=>b.classList.toggle('active',b.dataset.sectionTool===state.sectionTool));updateSectionToolHint();updateSectionMeasureSummary(f);
+  $('#sectionVerticalScale').value=String(v.verticalScale||'1');if($('#sectionOrientationLabel'))$('#sectionOrientationLabel').textContent=sectionOrientationLabel(f);if($('#sectionOrientationEndPoints')){const ends=sectionOrientationEnds(f);$('#sectionOrientationEndPoints').textContent=ends?`Inici: ${ends.start} → Final: ${ends.end}`:'Sense orientació';}if($('#sectionScaleSummary'))$('#sectionScaleSummary').textContent=v.verticalScale==='real'?'Escala 1:1 · X = Y':'Visualització habitual · ×'+(v.verticalScale||'1');updateSectionZoomUi(f);const len=f.sectionProfile?.length||featureLength(f)||0;$('#sectionLengthBadge').textContent=`Longitud: ${formatLengthUnit(len,2)}`;$('#sectionLengthField').textContent=formatLengthUnit(len,2);$('#sectionFillOpacity').value=String(state.sectionFillOpacity||.45);if($('#sectionStraightToggle'))$('#sectionStraightToggle').classList.toggle('active',state.sectionStraightSegments!==false);if($('#sectionGeoClass'))$('#sectionGeoClass').value=state.sectionGeoClass||'none';if($('#sectionZoneClass'))$('#sectionZoneClass').value=state.sectionZoneClass||'channel';if($('#sectionZoneCustom'))$('#sectionZoneCustom').value=state.sectionZoneCustom||'';const zoneOn=state.sectionTool==='zone';$('#sectionZoneSelectorWrap')?.classList.toggle('hidden',!zoneOn);$('#sectionZoneCustom')?.classList.toggle('hidden',!zoneOn||state.sectionZoneClass!=='custom');renderSectionColorChips();$$('[data-section-material]').forEach(b=>b.classList.toggle('active',b.dataset.sectionMaterial===state.sectionMaterial));$$('[data-section-tool]').forEach(b=>b.classList.toggle('active',b.dataset.sectionTool===state.sectionTool));updateSectionToolHint();updateSectionMeasureSummary(f);
 }
 function ensureSectionMeasurements(f){
   if(!f)return null;f.sectionMeasurements=f.sectionMeasurements||{width:'',depth:'',note:'',widthInk:[],depthInk:[],noteInk:[]};
