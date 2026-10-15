@@ -4812,7 +4812,8 @@ async function localExportArchiveFile(id){
   const c=reachCourse(r),payload=await buildReachSheetExportPayload(r);
   const head='<p><b>Torrent:</b> '+escapeHtml(c?.name||'')+' · <b>Tram:</b> '+escapeHtml(r.reachCode||r.id)+'</p>';
   const figs=[['Esquema',payload.schemePng],['Perfil longitudinal',payload.profilePng],['FITXA II · Esquema',payload.page1Png],['FITXA II · Taula',payload.page2Png],['FITXA II · FIC',payload.page3Png]].filter(([,img])=>!!img).map(([title,img])=>'<h2>'+escapeHtml(title)+'</h2><img alt="'+escapeHtml(title)+'" src="'+img+'">').join('');
-  return localExportHtml(payload.title+' · '+(r.reachCode||r.id),head+figs+'<h2>Dades de la fitxa</h2><pre>'+escapeHtml(JSON.stringify(payload,null,2).replace(/"page\\dPng":"[^"]*"/g,'"image":"inclosa més amunt"'))+'</pre>');
+  const summary={...payload};for(const key of Object.keys(summary))if(key.endsWith('Png'))delete summary[key];
+  return localExportHtml(payload.title+' · '+(r.reachCode||r.id),head+figs+'<h2>Dades de la fitxa</h2><pre>'+escapeHtml(JSON.stringify(summary,null,2))+'</pre>');
  }
  if(id.startsWith('sectionsheet:')){
   const sec=state.features.find(f=>f.id===id.slice(13)&&f.type==='section');
