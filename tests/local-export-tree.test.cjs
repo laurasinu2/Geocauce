@@ -72,7 +72,7 @@ test('selection tree supports course, reach, section, map and unassigned section
   for(const key of ['Mapes','Cursos d’aigua','Trams','Seccions','Seccions sense tram','course:','reachsheet:','sectionsheet:','__general_map__','data-export-folder']){
     assert.ok(src.includes(key),'tree missing '+key);
   }
-  assert.match(src,/details\.querySelectorAll\('input\[type="checkbox"\]'\)/);
+  assert.match(src,/details\?\.querySelectorAll\('input\[type="checkbox"\]'\)/);
   assert.match(src,/master\.onchange/);
   assert.match(src,/group\.indeterminate/);
 });
