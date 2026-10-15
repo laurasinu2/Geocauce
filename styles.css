@@ -1220,3 +1220,27 @@ body > .modal > .modal-backdrop{position:absolute;inset:0}
  .material-style-dialog footer button{padding:8px 9px;font-size:12px}
  .material-style-fields{gap:11px}
 }
+
+
+/* Field code quick-choices: preserve independent S Pen ink canvases (r18). */
+.reach-code-choice select,.field-quick-select,.section-table-cell-editor .field-table-quick-select{
+ width:100%;min-width:0;min-height:32px;border:1px solid #b8c6ba;border-radius:7px;
+ background:#f0f5ef;color:#213b2b;font-size:12px;padding:5px 6px;touch-action:manipulation
+}
+.profile-ink-cell.code,.profile-ink-cell.obs{height:auto!important;vertical-align:top}
+.profile-ink-cell.code canvas,.profile-ink-cell.obs canvas{display:block;min-height:70px;height:75px!important}
+.profile-ink-cell .reach-code-choice{margin:3px 2px}
+.reach-code-meaning{display:block;max-width:100%;padding:3px 6px;font-size:12px;font-weight:700;color:#275338;white-space:normal;overflow-wrap:anywhere}
+.profile-ink-cell.obs input[data-reach-reason-note]{display:block;width:calc(100% - 8px);margin:3px 4px;border:1px solid #dadcd5;border-radius:6px;font-size:11px;padding:5px;background:#fff}
+.section-table-cell-editor{min-height:130px}
+.section-table-cell-editor .field-table-quick-select{font-size:11px;max-width:100%}
+.section-table-cell-editor .section-table-manual{min-height:30px!important}
+.section-table-cell-editor .section-table-manual.hidden{display:none!important}
+.section-type-row select{flex:1;min-width:180px;max-width:420px}
+.section-scale-bar #sectionScaleSummary{font-weight:700;color:#315a43}
+.section-fitxa-meta #sectionOrientationLabel{font-size:15px;letter-spacing:.03em}
+@media(max-width:760px){
+ .profile-ink-cell.code select{font-size:11px;max-width:125px}
+ .section-table-cell-editor .field-table-quick-select{min-height:38px}
+ .section-type-row select{min-width:120px}
+}

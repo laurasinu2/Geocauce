@@ -11,8 +11,8 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=20261014-symbol-r17" />
-  <link rel="stylesheet" href="mobile-pwa.css?v=20261014-symbol-r17" />
+  <link rel="stylesheet" href="styles.css?v=20261015-fichas-r18" />
+  <link rel="stylesheet" href="mobile-pwa.css?v=20261015-fichas-r18" />
 </head>
 <body>
   <div id="app">
@@ -703,7 +703,7 @@ CON | Confluencia"></textarea></div>
             <table class="section-fitxa-meta">
               <tr><th>Nom torrent:</th><td id="sectionTorrentName">—</td><th>Nom tram:</th><td id="sectionReachName">—</td></tr>
               <tr><th>Nom secció:</th><td><input id="sectionNameInput" type="text" maxlength="40"></td><th>Data visita:</th><td><input id="sectionVisitDate" type="date"></td></tr>
-              <tr><th>Fotografia:</th><td colspan="3"><span class="muted">↑ (riu amunt) ↓ (riu avall)</span></td></tr>
+              <tr><th>Fotografia:</th><td><span class="muted">↑ (riu amunt) ↓ (riu avall)</span></td><th>Orientació:</th><td><strong id="sectionOrientationLabel">—</strong></td></tr>
             </table>
             <div class="section-fitxa-subtitle"><b>Esquema</b> <span>(geometria amb acotacions de pendent, bancs, riu)</span></div>
             <div class="section-profilebar section-profilebar-compact">
@@ -727,9 +727,9 @@ CON | Confluencia"></textarea></div>
               </label>
               <label id="sectionGridCustomWrap" class="hidden">Pas <input id="sectionGridCustom" type="number" min="0.05" step="0.05" value="1"> m</label>
               <label>Escala vertical
-                <select id="sectionVerticalScale"><option value="1" selected>×1</option><option value="2">×2</option><option value="5">×5</option></select>
+                <select id="sectionVerticalScale"><option value="1" selected>Habitual ×1</option><option value="2">Habitual ×2</option><option value="5">Habitual ×5</option><option value="real">Real 1:1 (X = Y)</option></select>
               </label>
-              <span id="sectionLengthBadge" class="section-length-badge">Longitud: — m</span>
+              <span id="sectionScaleSummary" class="section-length-badge">Visualització habitual</span><span id="sectionLengthBadge" class="section-length-badge">Longitud: — m</span>
               <span id="sectionZoomBadge" class="section-length-badge section-zoom-badge">Vista: —</span>
               <button id="sectionZoomReset" type="button" class="secondary compact" title="Tornar a veure tota la secció">Vista completa</button>
             </div>
@@ -794,7 +794,7 @@ CON | Confluencia"></textarea></div>
 
           <section class="section-fitxa-page hidden" data-section-fitxa-page="2">
             <div class="section-fitxa-title">FITXA III- SECCIÓ TRANSVERSAL</div>
-            <div class="section-fitxa-subtitle section-type-row"><b>Tipus secció ↑ (riu amunt)</b><input id="sectionTypeInput" type="text" maxlength="120" placeholder="ample; moderadament incisiu; incisiu"><span class="muted">(veure Codis)</span></div>
+            <div class="section-fitxa-subtitle section-type-row"><b>Tipus secció ↑ (riu amunt)</b><select id="sectionTypeInput" class="field-quick-select"><option value="">— Selecciona —</option><option value="Ample">Ample</option><option value="Moderadament incisiu">Moderadament incisiu</option><option value="Incisiu">Incisiu</option><option value="__other__">Altres…</option></select></div>
             <div class="section-table-toolbar">
               <span class="section-table-toolbar-label">Escriptura:</span>
               <button id="sectionTablePen" class="secondary compact active icon-text" type="button"><img src="icons/editar.png" alt=""> Llapis</button>
@@ -805,7 +805,7 @@ CON | Confluencia"></textarea></div>
               <span class="section-table-zoom-tools"><span>Zoom</span><button id="sectionTableZoomOut" class="secondary compact" type="button">−</button><button id="sectionTableZoomReset" class="secondary compact" type="button"><span id="sectionTableZoomLabel">100%</span></button><button id="sectionTableZoomIn" class="secondary compact" type="button">+</button></span>
             </div>
             <div class="section-table-zoom-wrap"><div id="sectionFieldTable" class="section-field-table"></div></div>
-            <p class="section-table-help">Escriu directament a les caselles amb l’S Pen. Amb un dit pots desplaçar la fitxa; amb dos dits pots ampliar-la o reduir-la.</p>
+            <p class="section-table-help">Selecciona ràpidament els codis, o escriu directament a les caselles amb l’S Pen. Amb un dit pots desplaçar la fitxa; amb dos dits pots ampliar-la o reduir-la.</p>
             <p class="section-code-note"><b>Codis certesa:</b> A = observació directa / mesura; B = estimació raonable; C = interpretació / estimada / assumit; D = incert; X = no possible.</p>
             <div class="section-grain-reference"><b>Referència granulomètrica</b><img src="fitxa3_grain_scale.png" alt="Escala de mida de sediment"></div>
           </section>
@@ -1083,10 +1083,10 @@ CON | Confluencia"></textarea></div>
               <table class="reach-sheet-summary-table reach-sheet-complete-table">
                 <tr><th>Pendent mitjà MDE (º)</th><td colspan="2" id="reachSheetMdeSlope"></td></tr>
                 <tr><th>Pendent a camp (º)</th><td colspan="2"><input id="reachSheetFieldSlope" type="text" maxlength="30"></td></tr>
-                <tr><th>Litologia/Material</th><td colspan="2"><input id="reachSheetLithology" type="text" maxlength="120"></td></tr>
-                <tr><th>Tipus perfil</th><td colspan="2"><input id="reachSheetProfileType" type="text" maxlength="120"></td></tr>
-                <tr><th rowspan="2">Vegetació</th><th class="sub">Cobertura vegetal</th><td><input id="reachSheetVegetationCover" type="text" maxlength="120"></td></tr>
-                <tr><th class="sub">Tipus dominant</th><td><input id="reachSheetVegetationType" type="text" maxlength="120"></td></tr>
+                <tr><th>Litologia/Material</th><td colspan="2"><select id="reachSheetLithology" class="field-quick-select"><option value="">— Selecciona —</option><option value="Roca">Roca</option><option value="Sediment consolidat">Sediment consolidat</option><option value="Sediment no consolidat">Sediment no consolidat</option><option value="__other__">Altres…</option></select></td></tr>
+                <tr><th>Tipus perfil</th><td colspan="2"><select id="reachSheetProfileType" class="field-quick-select"><option value="">— Selecciona —</option><option value="Homogeni">Homogeni</option><option value="Esglaó">Esglaó</option><option value="Piscina">Piscina</option><option value="__other__">Altres…</option></select></td></tr>
+                <tr><th rowspan="2">Vegetació</th><th class="sub">Cobertura vegetal</th><td><select id="reachSheetVegetationCover" class="field-quick-select"><option value="">— Selecciona —</option><option value="0 · Sòl nu">0 · Sòl nu</option><option value="1 · &lt;25 %">1 · &lt;25 %</option><option value="2 · 25–50 %">2 · 25–50 %</option><option value="3 · 50–75 %">3 · 50–75 %</option><option value="4 · &gt;75 %">4 · &gt;75 %</option><option value="__other__">Altres…</option></select></td></tr>
+                <tr><th class="sub">Tipus dominant</th><td><select id="reachSheetVegetationType" class="field-quick-select"><option value="">— Selecciona —</option><option value="Herbàcia">Herbàcia</option><option value="Arbustiva">Arbustiva</option><option value="Arbòria">Arbòria</option><option value="Mixta">Mixta</option><option value="__other__">Altres…</option></select></td></tr>
                 <tr><th>Elements antròpics</th><td colspan="2"><textarea id="reachSheetAnthropic" rows="10"></textarea></td></tr>
               </table>
             </section>
@@ -1103,7 +1103,7 @@ CON | Confluencia"></textarea></div>
         <div class="codes-reference-body">
           <section><h3>FITXA I · General</h3><p><b>Motiu de canvi de tram:</b> P = pendent; L = litologia; C = confinament; M = morfologia/material; V = vegetació sí/no; A = afluent; O = obra; X = altres.</p><p><b>Tipus perfil:</b> homogeni, esglaó i piscina.</p></section>
           <section><h3>FITXA II</h3><p><b>Coberta vegetal:</b> 0 = sòl nu; 1 = &lt;25 %; 2 = 25–50 %; 3 = 50–75 %; 4 = &gt;75 %.</p><p><b>Tipus vegetació:</b> herbàcia; arbustiva; arbòria; mixta.</p><p><b>Material/substrat:</b> roca; sediment consolidat; sediment no consolidat.</p></section>
-          <section><h3>FITXA III</h3><p><b>Evidència erosió:</b> erosió de fons; erosió lateral; socavació local; incisió; retrocés de marge. Intensitat: no visible; molt poc; poc; molt.</p><p><b>Evidència acumulació en superfície:</b> origen pendent de definir (arrossegament superficial, paret…).</p><p><b>Gruix de sediment:</b> categories pendents de definir.</p><p><b>Forma sediment predominant:</b> canto; bretxa; bloc.</p><p><b>Matriu:</b> absent; escassa; moderada; abundant.</p><p><b>Certesa:</b> A = observació directa / mesura; B = estimació raonable; C = interpretació / estimada / assumit; D = incert; X = no possible.</p></section>
+          <section><h3>FITXA III · Codis v5</h3><p><b>Evidència erosió:</b> canal: incidit / socavació local; banc: retrocés de marge / esllavissament; pendent: rierols petits / erosió difusa.</p><p><b>Evidència acumulació:</b> canal: dipòsit / presa natural; banc: reomplert; pendent: dipòsit / lòbul / blocs dispersos.</p><p><b>Classes sedimentàries:</b> arena; grava; còdols; blocs. <b>Forma predominant:</b> canto; bretxa; bloc. <b>Matriu:</b> absent; escassa; moderada; abundant.</p><p><b>Certesa:</b> A = observació directa / mesura; B = estimació raonable; C = interpretació / estimada / assumit; D = incert; X = no possible.</p></section>
         </div>
       </div>
     </div>
@@ -1256,11 +1256,11 @@ CON | Confluencia"></textarea></div>
     <div class="cloud-progress-track" role="progressbar" aria-label="Progreso de sincronización" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="cloudProgressBar"></span></div>
     <small id="cloudProgressDetail">Preparando transferencia…</small>
   </aside>
-  <script src="supabase-config.js?v=20261014-symbol-r17"></script>
-  <script src="native-adapter.js?v=20261014-symbol-r17"></script>
-  <script src="geotiff-lite.js?v=20261014-symbol-r17"></script>
-  <script src="modal-layer.js?v=20261014-symbol-r17"></script>
-  <script src="app.js?v=20261014-symbol-r17"></script>
-  <script src="mobile-pwa.js?v=20261014-symbol-r17"></script>
+  <script src="supabase-config.js?v=20261015-fichas-r18"></script>
+  <script src="native-adapter.js?v=20261015-fichas-r18"></script>
+  <script src="geotiff-lite.js?v=20261015-fichas-r18"></script>
+  <script src="modal-layer.js?v=20261015-fichas-r18"></script>
+  <script src="app.js?v=20261015-fichas-r18"></script>
+  <script src="mobile-pwa.js?v=20261015-fichas-r18"></script>
 </body>
 </html>
