@@ -1268,3 +1268,13 @@ body > .modal > .modal-backdrop{position:absolute;inset:0}
 
 /* Directed cardinal endpoints of the section, from first drawn point to last. */
 .section-orientation-ends{display:block;margin-top:3px;color:#315a43;font-size:11px;font-weight:650;line-height:1.35;white-space:normal}
+
+/* QGIS exported colormap import: map stops stay editable on mobile/tablet. */
+.raster-qgis-import{margin:10px 0;display:flex;flex-direction:column;gap:5px;padding:10px;border:1px solid #c4d5c7;border-radius:9px;background:#f4f8f3}
+.raster-qgis-import label{font-size:12px}
+.raster-qgis-import input[type=file]{display:block;max-width:100%;font-size:12px;background:white;border:1px solid #c9d6cb;border-radius:7px;padding:8px}
+.raster-qgis-import small{font-size:11px;line-height:1.45}
+.raster-qgis-row .raster-break-rule{display:flex;gap:8px;min-width:0;align-items:center}
+.raster-qgis-row .raster-break-rule span{min-width:30px;font-size:11px}
+.raster-qgis-row .raster-break-limit{min-width:0;width:100%}
+@media(max-width:650px){.raster-qgis-row .raster-break-rule span{display:none}}
