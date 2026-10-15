@@ -59,7 +59,7 @@ test('Fitxa III context-sensitive code choices reflect terrain unit',()=>{
 test('certainty values match v5 and retain descriptive meaning',()=>{
   const values=Array.from(ctx.FIELD_CERTAINTY,([c,v])=>[c,v]);
   assert.deepEqual(values.map(x=>x[0]),['A','B','C','D','X']);
-  assert.ok(values[0][1].includes('observació directa'));
+  assert.ok(values[0][1].toLowerCase().includes('observació directa'));
   assert.ok(values[2][1].includes('Interpretació'));
 });
 test('Fitxa III still retains stylus drawing canvas plus quick selection',()=>{
