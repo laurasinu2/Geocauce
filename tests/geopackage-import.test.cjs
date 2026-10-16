@@ -52,3 +52,36 @@ test('Both import pickers accept GeoPackage and offline PWA caches the parser',(
  assert.match(importer,/async function prepare\(file,config/);
  assert.doesNotMatch(importer,/fetch\(/);
 });
+
+test('GPKG preparation returns complete vector + georeferenced raster from one file',async()=>{
+ const drawings=[],scope={
+  window:{GeoCauceGpkg:gpkg},Uint8Array,Blob,Date,Math,Number,Error,
+  createImageBitmap:async()=>({width:1,height:1,close(){}}),
+  document:{createElement:()=>({width:0,height:0,getContext:()=>({
+    imageSmoothingEnabled:true,drawImage(...args){drawings.push(args)}
+   }),toBlob(cb){cb(new Blob(['raster preview'],{type:'image/png'}));}})}
+ };
+ vm.runInNewContext(importer,scope);
+ let n=0;
+ const deps={
+  projectEpsg:()=>25831,rasterBounds:()=>null,
+  transform:(p,src,dst)=>{assert.equal(src,dst);return p;},
+  pointsBounds:paths=>({minX:Math.min(...paths.flat().map(p=>p.x)),maxX:Math.max(...paths.flat().map(p=>p.x)),
+    minY:Math.min(...paths.flat().map(p=>p.y)),maxY:Math.max(...paths.flat().map(p=>p.y))}),
+  intersects:()=>true,featureLabel:a=>a.nom,color:()=>"#113355",id:prefix=>prefix+(++n)
+ };
+ const file={name:'demo.gpkg',arrayBuffer:async()=>fixture.buffer.slice(fixture.byteOffset,fixture.byteOffset+fixture.byteLength)};
+ const prepared=await scope.window.GeoCauceGpkgImporter.prepare(file,{role:'watercourse',color:'#113355'},deps);
+ assert.equal(prepared.kind,'geopackage');
+ assert.equal(prepared.layers.length,1);
+ assert.equal(prepared.layers[0].features.length,260);
+ assert.equal(prepared.layers[0].role,'watercourse');
+ assert.equal(prepared.layers[0].features[0].label,'torrent 0');
+ assert.equal(prepared.rasters.length,1);
+ assert.equal(prepared.rasters[0].meta.epsg,25831);
+ assert.equal(prepared.rasters[0].affine.C,400000);
+ assert.equal(prepared.rasters[0].affine.F,4600156);
+ assert.equal(prepared.rasters[0].blob.type,'image/png');
+ assert.equal(drawings.length,1);
+ assert.deepEqual(Array.from(prepared.warnings),[]);
+});
