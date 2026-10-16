@@ -797,12 +797,14 @@ function cloudDeltaRootError(reason,manual){
 async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[]){
  const changed=[],baseline=new Map((baseAssets?.photos||[]).map(p=>[p.id,p]));
  const localMutations=new Set(queue.filter(q=>q.kind==='photos').map(q=>q.path.split(':').slice(1).join(':')));
+ const locallyDeleted=new Set(queue.filter(q=>q.kind==='photos'&&q.path.startsWith('delete:')).map(q=>q.path.slice(7)));
  for(const photo of assets?.photos||[]){
   if(!photo.cloudBlobPath)continue;
   const previous=baseline.get(photo.id),existing=await dbGet('photos',photo.id);
   const remoteModified=previous&&cloudStableJson(previous)!==cloudStableJson(photo);
   if((remoteModified||(!previous&&existing))&&localMutations.has(photo.id))
    throw new Error('La foto '+(photo.name||photo.id)+' fue editada desde los dos dispositivos. Se conserva la copia local y se requiere revisión.');
+  if(locallyDeleted.has(photo.id)&&!remoteModified)continue;
   if(!existing&&localMutations.has(photo.id))
    throw new Error('La fotografía '+(photo.name||photo.id)+' se ha eliminado localmente. No se volverá a añadir sin resolverlo.');
   const newContent=!existing?.blob||Boolean(remoteModified&&previous?.cloudBlobHash!==photo.cloudBlobHash);
@@ -1010,7 +1012,7 @@ function cloudConflictChoice(){
 async function uploadCloudChanges(){
   if(!state.projectId||!state.project){toast('Abre un proyecto para subir cambios');return false;}
   if(!navigator.onLine){toast('Sin conexión. Los datos siguen guardados en el dispositivo.');return false;}
-  if(cloudSyncRunning||cloudRestoreRunning){toast('Ya hay una transferencia en curso');return false;}
+  if(cloudSyncRunning||cloudRestoreRunning||cloudDeltaRunning){toast('Ya hay una transferencia en curso');return false;}
   try{
     const remote=await cloudRemoteSnapshotInfo(),remoteTime=Date.parse(remote?.updated_at||0)||0;
     const known=state.project._cloudUpdatedAt||0;
@@ -1031,7 +1033,7 @@ async function uploadCloudChanges(){
 async function downloadCloudChanges(){
   if(!state.projectId||!state.project){toast('Abre el proyecto que quieres descargar');return false;}
   if(!navigator.onLine){toast('Necesitas conexión para descargar cambios');return false;}
-  if(cloudSyncRunning||cloudRestoreRunning){toast('Ya hay una transferencia en curso');return false;}
+  if(cloudSyncRunning||cloudRestoreRunning||cloudDeltaRunning){toast('Ya hay una transferencia en curso');return false;}
   try{
     const remote=await cloudRemoteSnapshotInfo();
     if(!remote){toast('Todavía no hay una copia de este proyecto en la nube');return false;}
@@ -1406,7 +1408,7 @@ async function renderSettings(){
   $('#settingInputMode').value=appSettings.inputMode;$('#settingPersistentTool').checked=!!appSettings.persistentTool;$('#settingLengthUnit').value=appSettings.lengthUnit;$('#settingClastUnit').value=appSettings.clastUnit;$('#settingAreaUnit').value=appSettings.areaUnit;$('#settingVolumeUnit').value=appSettings.volumeUnit;$('#settingCoordMode').value=appSettings.coordMode;$('#settingGpsAccuracy').value=String(appSettings.gpsMinAccuracy);$('#settingPhotoHeading').checked=!!appSettings.photoHeading;$('#settingGpsAltitude').checked=!!appSettings.gpsAltitude;$('#settingShowAccuracy').checked=!!appSettings.showAccuracy;$('#settingNotebookBg').value=appSettings.notebookBg;$('#settingNotebookAutosave').checked=!!appSettings.notebookAutosave;if($('#settingReachPattern'))$('#settingReachPattern').value=appSettings.reachPattern||'{CURS}-{N}';if($('#settingReachCodes'))$('#settingReachCodes').value=appSettings.reachCodes||'';if($('#settingMobileUi'))$('#settingMobileUi').value=appSettings.mobileUi||'auto';
   const recovery=state.projectId?await dbGet('cloudRecovery','state').catch(()=>null):null;
   const st=await storageBreakdown();$('#settingsLocalMaps').textContent=formatBytes(st.maps);$('#settingsLocalPhotos').textContent=formatBytes(st.photos);$('#settingsLocalNotebook').textContent=formatBytes(st.notebook);$('#settingsLocalData').textContent=formatBytes(st.data);$('#settingsLocalTotal').textContent=formatBytes(st.usage??st.totalKnown);$('#settingsLocalBar').style.width=st.quota&&st.usage?`${Math.min(100,st.usage/st.quota*100)}%`:`${Math.min(100,st.totalKnown/(1024*1024*1024)*100)}%`;
-  const cloudBytes=bytesOfJson(currentStatePayloadForCloud?.()||{})+bytesOfJson(state.project||{});$('#settingsCloudState').textContent=a.kind==='account'?(online?(cloudLastError?'Pendiente':'Conectado'):'Sin conexión'):'Sin cuenta';$('#settingsCloudData').textContent=a.kind==='account'?`≈ ${formatBytes(cloudBytes)}`:'—';$('#settingsCloudLastSync').textContent=lastKnownCloudSyncAt()?new Date(lastKnownCloudSyncAt()).toLocaleString('es-ES'):'—';$('#settingsCloudPending').textContent=cloudLastError||`${cloudPendingChanges().length} operación(es) pendientes${online?'':' · sin conexión'}`;$('#settingsCloudBar').style.width='0%';if($('#settingsCloudRecoveryBtn'))$('#settingsCloudRecoveryBtn').disabled=!state.projectId||!recovery?.state||cloudSyncRunning||cloudRestoreRunning;$('#settingsCloudSyncBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;$('#settingsCloudDownloadBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;
+  const cloudBytes=bytesOfJson(currentStatePayloadForCloud?.()||{})+bytesOfJson(state.project||{});$('#settingsCloudState').textContent=a.kind==='account'?(online?(cloudLastError?'Pendiente':'Conectado'):'Sin conexión'):'Sin cuenta';$('#settingsCloudData').textContent=a.kind==='account'?`≈ ${formatBytes(cloudBytes)}`:'—';$('#settingsCloudLastSync').textContent=lastKnownCloudSyncAt()?new Date(lastKnownCloudSyncAt()).toLocaleString('es-ES'):'—';$('#settingsCloudPending').textContent=cloudLastError||`${cloudPendingChanges().length} operación(es) pendientes${online?'':' · sin conexión'}`;$('#settingsCloudBar').style.width='0%';if($('#settingsCloudRecoveryBtn'))$('#settingsCloudRecoveryBtn').disabled=!state.projectId||!recovery?.state||cloudSyncRunning||cloudRestoreRunning||cloudDeltaRunning;$('#settingsCloudSyncBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning||cloudDeltaRunning;$('#settingsCloudDownloadBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning||cloudDeltaRunning;
 }
 
 function cloneAny(v){return typeof structuredClone==='function'?structuredClone(v):JSON.parse(JSON.stringify(v));}
@@ -1501,7 +1503,7 @@ async function openProject(id,opt={}){
   if(projectOpenInProgress){toast('Espera a que termine de abrirse el proyecto');return;}
   projectOpenInProgress=true;
   try{
-  if((cloudRestoreRunning||cloudSyncRunning)&&state.projectId&&id!==state.projectId){toast('Espera a que termine la sincronización antes de cambiar de proyecto');return;}
+  if((cloudRestoreRunning||cloudSyncRunning||cloudDeltaRunning)&&state.projectId&&id!==state.projectId){toast('Espera a que termine la sincronización antes de cambiar de proyecto');return;}
   if(state.view3d?.active)exit3DMode({quiet:true});
   const p=projectById(id);if(!p)return;
   const needsCloudRestore=!localStorage.getItem(projectStateKey(id))||p._cloudOnly===true;
