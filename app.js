@@ -309,6 +309,8 @@ async function openProjectShare(id){
   if(await cloudProjectRole(p)!=='owner')throw new Error('No tienes permisos para compartir este proyecto');
   const cloudId=p.cloudProjectId;
   const rpc=(path,body)=>cloudFetch('/rest/v1/rpc/'+path,{method:'POST',body});
+  // Do not show a broken invitation form before the database migration is installed.
+  await rpc('geocauce_list_project_members',{p_project_id:cloudId});
   const urlFor=mode=>new URL(window.GeoCauceProjectAccess.routeUrl(cloudId,mode),location.href).href;
   window.GeoCauceShareDialog.open({
    name:p.name,viewUrl:urlFor('view'),editUrl:urlFor('edit'),
@@ -316,7 +318,10 @@ async function openProjectShare(id){
    invite:(email,role)=>rpc('geocauce_set_project_member',{p_project_id:cloudId,p_email:email,p_role:role}),
    remove:userId=>rpc('geocauce_remove_project_member',{p_project_id:cloudId,p_user_id:userId})
   });
- }catch(e){toast('No se puede compartir: '+(e.message||String(e)),6000);}
+ }catch(e){
+  if(cloudRoleRpcMissing(e))toast('Compartir requiere activar la migración de permisos en Supabase. No afecta a la edición normal.',6500);
+  else toast('No se puede compartir: '+(e.message||String(e)),6000);
+ }
 }
 async function cloudUploadBlob(objectPath,blob){
   if(!(blob instanceof Blob))return null;
