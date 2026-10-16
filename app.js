@@ -1567,7 +1567,7 @@ function showProjectHome({skipHistory=false}={}){
 function showProjectCreate(id=null,returnTo=null){
   if(state.view3d?.active)exit3DMode({quiet:true});
   editingProjectId=id;const p=id?projectById(id):null;
-  if(p&&!canEditProjectInUi(p)){toast('No tienes permisos para modificar este proyecto');return;}
+  if(p&&(!canEditProjectInUi(p)||(p.id===state.projectId&&!canEditCurrentProject()))){toast('Abre el modo edición para modificar este proyecto');return;}
   projectCreateReturn=returnTo||(state.screen==='map'?'map':projectCatalog.length?'projects':'splash');
   $('#projectCreateHeader').textContent=p?'Información del proyecto':'Crear nuevo proyecto';
   $('#projectCreateSub').textContent=p?'Edita los metadatos generales del estudio':'Datos generales del estudio';
@@ -1585,7 +1585,7 @@ function leaveProjectCreate(){
 function readProjectForm(){return{name:$('#projectName').value.trim(),zone:$('#projectZone').value.trim(),torrent:$('#projectTorrent').value.trim(),author:$('#projectAuthor').value.trim(),institution:$('#projectInstitution').value.trim(),startDate:$('#projectStartDate').value||isoToday(),crs:$('#projectCrs').value||'EPSG:25831',objective:$('#projectObjective').value.trim(),methodology:$('#projectMethodology').value.trim(),notes:$('#projectNotes').value.trim()};}
 async function saveProjectForm(){
   const v=readProjectForm();if(!v.name){toast('Escribe un nombre para el proyecto');return;}
-  if(editingProjectId){const p=projectById(editingProjectId);if(!p||!canEditProjectInUi(p))return;Object.assign(p,v,{updatedAt:Date.now()});saveProjectCatalog();if(state.projectId===p.id){state.project=p;updateProjectUi();}editingProjectId=null;if(projectCreateReturn==='map'){hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';updateProjectUi();resize();}else showProjectHome();toast('Información del proyecto actualizada');return;}
+  if(editingProjectId){const p=projectById(editingProjectId);if(!p||!canEditProjectInUi(p)||(p.id===state.projectId&&!canEditCurrentProject()))return;Object.assign(p,v,{updatedAt:Date.now()});saveProjectCatalog();if(state.projectId===p.id){state.project=p;updateProjectUi();}editingProjectId=null;if(projectCreateReturn==='map'){hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';updateProjectUi();resize();}else showProjectHome();toast('Información del proyecto actualizada');return;}
   if(state.projectId)persistState();
   const id='P'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);const meta={id,...v,createdAt:Date.now(),updatedAt:Date.now(),dbName:`GeoCauceDB_${id}`};projectCatalog.push(meta);saveProjectCatalog();localStorage.setItem(ACTIVE_PROJECT_KEY,id);editingProjectId=null;
   state.projectId=id;state.project=meta;resetStateForProject(meta);persistState();await openProject(id,{skipSave:true});toast(`Proyecto “${meta.name}” creado`);
@@ -1606,14 +1606,15 @@ async function openProject(id,opt={}){
   try{role=await cloudProjectRole(p);}catch(e){toast('Acceso denegado: '+(e.message||String(e)),6000);return;}
   if(!window.GeoCauceProjectAccess.canView(role)){toast('No tienes acceso a este proyecto',5500);return;}
   const desiredMode=opt.mode||(role==='viewer'?'view':'edit');
-  p._accessMode=desiredMode==='edit'&&window.GeoCauceProjectAccess.canEdit(role)?'edit':'view';
-  if(desiredMode==='edit'&&p._accessMode==='view')toast('Este proyecto solo permite visualización');
+  const openingAccessMode=desiredMode==='edit'&&window.GeoCauceProjectAccess.canEdit(role)?'edit':'view';
+  if(desiredMode==='edit'&&openingAccessMode==='view')toast('Este proyecto solo permite visualización');
   const needsCloudRestore=!localStorage.getItem(projectStateKey(id))||p._cloudOnly===true;
   if(needsCloudRestore&&(!loadCloudSession()?.access_token||!navigator.onLine)){
     toast('Proyecto en la nube: inicia sesión y conecta Internet para descargarlo.',6000);return;
   }
   const previousId=state.projectId,previousProject=state.project,previousActive=localStorage.getItem(ACTIVE_PROJECT_KEY);
   if(state.projectId&&!opt.skipSave)persistState();
+  p._accessMode=openingAccessMode;
   if(dbp){try{const old=await dbp;old.close();}catch{}dbp=null;dbpName=null;}
   state.projectId=id;state.project=p;localStorage.setItem(ACTIVE_PROJECT_KEY,id);
   if(needsCloudRestore&&!await restoreProjectFromCloud(id,{manual:true})){
