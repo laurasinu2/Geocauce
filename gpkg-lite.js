@@ -24,11 +24,11 @@
    if(signed&&v&(1n<<BigInt(n*8-1)))v-=1n<<BigInt(n*8);
    return Number(v);
   }
-  function varint(off){
+  function varint(off,input=bytes){
    let value=0n;
    for(let i=0;i<9;i++){
-    if(off+i>=bytes.length)fail('varint incomplet');
-    const b=bytes[off+i];
+    if(off+i>=input.length)fail('varint incomplet');
+    const b=input[off+i];
     if(i===8)return{value:Number((value<<8n)|BigInt(b)),next:off+9};
     value=(value<<7n)|BigInt(b&127);
     if(!(b&128))return{value:Number(value),next:off+i+1};
@@ -36,9 +36,9 @@
    fail('varint no vàlid');
   }
   function record(payload){
-   const h=varint(0),fields=[];let at=h.next;
+   const h=varint(0,payload),fields=[];let at=h.next;
    if(h.value<1||h.value>payload.length)fail('capçalera de registre invàlida');
-   while(at<h.value){const t=varint(at);fields.push(t.value);at=t.next;}
+   while(at<h.value){const t=varint(at,payload);fields.push(t.value);at=t.next;}
    let off=h.value;
    return fields.map(code=>{
     let len=0,val=null;
