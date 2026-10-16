@@ -216,6 +216,7 @@ async function cloudFetch(path,{method='GET',body=null,auth=true,headers={}}={})
   const cfg=cloudConfig();if(!cfg.enabled)throw new Error('Supabase no está configurado todavía');
   let session=loadCloudSession();
   if(auth&&session?.refresh_token&&sessionExpired(session))session=await refreshCloudSession();
+  if(auth&&(!session?.access_token||sessionExpired(session)))throw new Error('Sesión caducada. Inicia sesión para continuar.');
   const h={'apikey':cfg.key,'Content-Type':'application/json',...headers};
   if(auth&&session?.access_token)h.Authorization=`Bearer ${session.access_token}`;
   const r=await fetch(cfg.url+path,{method,headers:h,body:body==null?undefined:JSON.stringify(body),cache:'no-store'});
@@ -235,15 +236,113 @@ async function cloudBinaryFetch(path,{method='GET',body=null,contentType='applic
   if(!r.ok){let msg=`HTTP ${r.status}`;try{const t=await r.text();if(t){try{const j=JSON.parse(t);msg=j?.message||j?.error||j?.msg||t;}catch{msg=t;}}}catch{}const err=new Error(msg);err.status=r.status;throw err;}
   return r;
 }
+// Client checks improve UX. All real authorization is enforced by Supabase JWT + RLS.
+function cloudRoleRpcMissing(error){
+ const msg=String(error?.message||'');
+ return error?.code==='PGRST202'||(error?.status===404&&/could not find the function|schema cache|function .* does not exist/i.test(msg));
+}
+async function cloudProjectRoleFromLegacyRpc(cloudId){
+ if(!isUuid(cloudId))throw new Error('ID de proyecto cloud inválido');
+ // No local owner flags or URL parameters can confer a role here.
+ // Every RPC carries the current Bearer token and reads auth.uid() server-side.
+ const call=async name=>{
+  const result=await cloudFetch('/rest/v1/rpc/'+name,{method:'POST',body:{p_project:cloudId}});
+  return result===true;
+ };
+ if(await call('geocauce_is_project_owner'))return 'owner';
+ if(await call('geocauce_can_edit_project'))return 'editor';
+ if(await call('geocauce_can_view_project'))return 'viewer';
+ return null;
+}
+async function cloudProjectRole(p){
+ if(!p)return null;
+ const user=sessionUser();
+ const onlyLocal=!p.ownerUserId&&!p._cloudOnly&&!p._cloudSyncedAt&&!p._cloudPulledAt&&!p._cloudUpdatedAt;
+ if(onlyLocal)return 'owner';
+ if(!user?.id)throw new Error('Inicia sesión para abrir un proyecto compartido');
+ if(!navigator.onLine){
+  if(p._roleUser===user.id&&p._sharedRole)return p._sharedRole;
+  if(p.ownerUserId===user.id)return 'owner';
+  throw new Error('Conéctate para verificar los permisos de este proyecto');
+ }
+ const cloudId=p.cloudProjectId||(isUuid(p.id)?p.id:null);
+ if(!cloudId)throw new Error('El proyecto no tiene identificador cloud');
+ let role;
+ try{
+  role=await cloudFetch('/rest/v1/rpc/geocauce_project_role',{method:'POST',body:{p_project_id:cloudId}});
+ }catch(error){
+  // Existing GeoCauce installations already have JWT-bound UUID RPCs.
+  // The new combined role RPC is installed only by the sharing migration.
+  // Fallback only when that RPC is missing, never for a genuine 401/403.
+  if(!cloudRoleRpcMissing(error))throw error;
+  role=await cloudProjectRoleFromLegacyRpc(cloudId);
+ }
+ p._sharedRole=['owner','editor','viewer'].includes(role)?role:null;
+ p._roleUser=user.id;
+ saveProjectCatalog();
+ return p._sharedRole;
+}
+function canEditProjectInUi(p){
+ if(!p)return false;
+ if(!p.ownerUserId&&!p._cloudOnly)return true;
+ const uid=sessionUser()?.id;
+ return !!uid&&(p.ownerUserId===uid||(p._roleUser===uid&&window.GeoCauceProjectAccess?.canEdit(p._sharedRole)));
+}
+function canEditCurrentProject(){
+ return !!state.project&&canEditProjectInUi(state.project)&&state.project._accessMode!=='view';
+}
+function isCurrentProjectOwner(p=state.project){
+ if(!p)return false;
+ if(!p.ownerUserId&&!p._cloudOnly)return true;
+ return !!sessionUser()?.id&&p.ownerUserId===sessionUser().id;
+}
+async function openProjectShare(id){
+ const p=projectById(id);
+ if(!p||!isCurrentProjectOwner(p)){toast('Solo el propietario puede compartir el proyecto');return;}
+ if(!loadCloudSession()?.access_token||!navigator.onLine){toast('Inicia sesión y conéctate para compartir');return;}
+ if(state.projectId!==id){
+  await openProject(id,{mode:'edit'});
+  if(state.projectId!==id)return;
+ }
+ if(!p._cloudSyncedAt&&!p._cloudPulledAt){const ok=await syncNow();if(!ok){toast('Sincroniza el proyecto antes de compartirlo');return;}}
+ try{
+  if(await cloudProjectRole(p)!=='owner')throw new Error('No tienes permisos para compartir este proyecto');
+  const cloudId=p.cloudProjectId;
+  const rpc=(path,body)=>cloudFetch('/rest/v1/rpc/'+path,{method:'POST',body});
+  // Do not show a broken invitation form before the database migration is installed.
+  await rpc('geocauce_list_project_members',{p_project_id:cloudId});
+  const urlFor=mode=>new URL(window.GeoCauceProjectAccess.routeUrl(cloudId,mode),location.href).href;
+  window.GeoCauceShareDialog.open({
+   name:p.name,viewUrl:urlFor('view'),editUrl:urlFor('edit'),
+   list:()=>rpc('geocauce_list_project_members',{p_project_id:cloudId}),
+   invite:(email,role)=>rpc('geocauce_set_project_member',{p_project_id:cloudId,p_email:email,p_role:role}),
+   remove:userId=>rpc('geocauce_remove_project_member',{p_project_id:cloudId,p_user_id:userId})
+  });
+ }catch(e){
+  if(cloudRoleRpcMissing(e))toast('Compartir requiere activar la migración de permisos en Supabase. No afecta a la edición normal.',6500);
+  else toast('No se puede compartir: '+(e.message||String(e)),6000);
+ }
+}
 async function cloudUploadBlob(objectPath,blob){
   if(!(blob instanceof Blob))return null;
   const p=objectPath.split('/').map(encodeURIComponent).join('/');
   await cloudBinaryFetch(`/storage/v1/object/geocauce-files/${p}`,{method:'POST',body:blob,contentType:blob.type||'application/octet-stream',headers:{'x-upsert':'true','cache-control':'3600'}});
   return objectPath;
 }
-async function cloudDownloadBlob(objectPath){
-  if(!objectPath)return null;const p=String(objectPath).split('/').map(encodeURIComponent).join('/');
-  const r=await cloudBinaryFetch(`/storage/v1/object/authenticated/geocauce-files/${p}`,{method:'GET',contentType:null});return await r.blob();
+// Small, immutable Storage objects: this works even when Supabase's per-object
+// size limit is below the original GeoTIFF size. A chunked asset keeps the first
+// part in the legacy path field and all part paths in the extended manifest.
+const CLOUD_ASSET_PART_SIZE=8*1024*1024;
+async function cloudDownloadBlob(objectPath,parts=null,type='application/octet-stream'){
+ const objectPaths=cloudAssetParts(objectPath,parts);
+ if(!objectPaths.length)return null;
+ const blobs=[];
+ for(const part of objectPaths){
+  const p=String(part).split('/').map(encodeURIComponent).join('/');
+  const response=await cloudBinaryFetch(`/storage/v1/object/authenticated/geocauce-files/${p}`,{method:'GET',contentType:null});
+  blobs.push(await response.blob());
+ }
+ return objectPaths.length===1?blobs[0]:new Blob(blobs,{type:type||''});
 }
 async function cloudAssetDigest(blob){
   if(!(blob instanceof Blob))throw new Error('Archivo local inválido');
@@ -281,30 +380,44 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
   const tinyHash=str=>{let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return (h>>>0).toString(36);};
   let done=0,reused=0,uploaded=0;
   const put=async function(key,base,blob,legacySig,label,ext){
+ const CLOUD_ASSET_PART_SIZE=8*1024*1024;
  if(manual)cloudProgressUpdate('Analizando · '+label,done,total+2);
  const old=cache[key],remote=remoteFiles.get(key);
- // Reuse an immutable object acknowledged in the last committed cloud manifest.
  const committed=!!(old?.hash&&old.path&&old.sig===legacySig&&remote?.path===old.path&&remote.hash===old.hash&&Number(remote.size)===blob.size);
  const fingerprint=committed?old.hash:`sha256-chunks-v1:${blob.size}:${blob.type||''}:${await cloudAssetDigest(blob)}`;
  const hash=fingerprint.split(':').pop();
- let path=committed?old.path:null,didUpload=false;
- if(!path&&remote?.path&&remote.hash===fingerprint&&Number(remote.size)===blob.size)path=remote.path;
- // Uncommitted cache entries are only hints. They may point to missing objects
- // after interrupted uploads, so never probe or trust them as cloud truth.
- // An identical blob can be uploaded safely to its content-addressed path.
- if(!path){
-  const pending=old?.pending,candidate=pending?.hash===fingerprint&&pending.path?pending.path:`${base}.${hash}${ext}`;
-  // No HEAD/INFO lookup for new or interrupted objects: a nonexistent object
-  // can produce an opaque HTTP 400. Uploading the deterministic path is safe,
-  // and the current snapshot is updated only after the entire upload succeeds.
-  cache[key]={sig:legacySig,hash:fingerprint,pending:{hash:fingerprint,path:candidate}};persist();
-  if(manual)cloudProgressUpdate('Subiendo · '+label,done,total+2);
-  await cloudUploadBlob(candidate,blob);
-  path=candidate;didUpload=true;uploaded++;
+ let path=committed?old.path:null,parts=committed?(remote?.parts||old.parts||null):null,didUpload=false;
+ if(!path&&remote?.path&&remote.hash===fingerprint&&Number(remote.size)===blob.size){
+  path=remote.path;parts=remote.parts||null;
  }
- if(!didUpload)reused++;
- cache[key]={sig:legacySig,hash:fingerprint,path};
- globalCache[fingerprint]={path,size:blob.size,savedAt:Date.now()};persist();
+ if(!path){
+  const chunked=blob.size>CLOUD_ASSET_PART_SIZE;
+  const candidate=`${base}.${hash}${ext}`;
+  parts=chunked?Array.from({length:Math.ceil(blob.size/CLOUD_ASSET_PART_SIZE)},(_,i)=>candidate+'.part'+String(i).padStart(4,'0')):null;
+  path=parts?.[0]||candidate;
+  // An interrupted upload may have completed some chunks. Confirm their
+  // existence with object/info before reusing; never trust local hints alone.
+  const pending=old?.pending?.hash===fingerprint?old.pending:null;
+  const verified=[];
+  cache[key]={sig:legacySig,hash:fingerprint,pending:{hash:fingerprint,path,parts,uploaded:pending?.uploaded||[]}};persist();
+  for(let i=0;i<(parts?.length||1);i++){
+   const partPath=parts?parts[i]:path;
+   const start=parts?i*CLOUD_ASSET_PART_SIZE:0;
+   const length=parts?Math.min(CLOUD_ASSET_PART_SIZE,blob.size-start):blob.size;
+   const alreadyUploaded=!!(pending?.uploaded?.includes(i)&&pending?.parts?.[i]===partPath
+     &&await cloudStorageObjectExists(partPath,length,uid));
+   if(!alreadyUploaded){
+    if(manual)cloudProgressUpdate('Subiendo · '+label+(parts?` (${i+1}/${parts.length})`:''),done+(parts?i/parts.length:0),total+2);
+    await cloudUploadBlob(partPath,parts?blob.slice(start,start+length,blob.type):blob);
+    didUpload=true;
+   }
+   verified.push(i);
+   cache[key].pending.uploaded=verified.slice();persist();
+  }
+ }
+ if(didUpload)uploaded++;else reused++;
+ cache[key]={sig:legacySig,hash:fingerprint,path,...(parts?{parts}:{})};
+ globalCache[fingerprint]={path,parts,size:blob.size,savedAt:Date.now()};persist();
  done++;if(manual)cloudProgressUpdate((didUpload?'Subido':'Reutilizado')+' · '+label,done,total+2);
  return path;
 };
@@ -314,7 +427,7 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
     const x={...rec};delete x.blob;
     const base=cloudObjectPath(uid,projectId,'photos',rec.id);
     const path=await put('photo:'+rec.id,base,rec.blob,sigBlob(rec.blob,rec.date||rec.importedAt||rec.updatedAt||''),rec.name||'foto','.bin');
-    result.photos.push({...x,cloudBlobPath:path,cloudBlobType:rec.blob.type||null,cloudBlobSize:rec.blob.size,cloudBlobHash:cache['photo:'+rec.id].hash});
+    result.photos.push({...x,cloudBlobPath:path,cloudBlobType:rec.blob.type||null,cloudBlobSize:rec.blob.size,cloudBlobHash:cache['photo:'+rec.id].hash,cloudBlobParts:cache['photo:'+rec.id].parts||null});
   }
   for(const rec of rasters){
     if(!(rec.blob instanceof Blob)&&!(rec.sourceBlob instanceof Blob))throw new Error('El mapa '+(rec.name||rec.id)+' no tiene archivo local. No se ha creado un snapshot incompleto.');
@@ -322,14 +435,14 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
     const base=cloudObjectPath(uid,projectId,'rasters',rec.id),extra=rec.importedAt||rec.meta?.importedAt||rec.meta?.sourceWidth||'',previewRevision=extra+'|'+(rec.styleCache?.generatedAt||'');
     const previewPath=rec.blob instanceof Blob?await put('raster-preview:'+rec.id,base,rec.blob,sigBlob(rec.blob,previewRevision),rec.name||'mapa','.preview'):null;
     const sourcePath=rec.sourceBlob instanceof Blob?await put('raster-source:'+rec.id,base,rec.sourceBlob,sigBlob(rec.sourceBlob,extra),rec.name||'original','.source'):null;
-    result.rasters.push({...x,cloudPreviewPath:previewPath,cloudSourcePath:sourcePath,cloudPreviewType:rec.blob?.type||null,cloudSourceType:rec.sourceBlob?.type||null,cloudPreviewSize:rec.blob?.size||0,cloudSourceSize:rec.sourceBlob?.size||0,cloudPreviewHash:cache['raster-preview:'+rec.id]?.hash||null,cloudSourceHash:cache['raster-source:'+rec.id]?.hash||null});
+    result.rasters.push({...x,cloudPreviewPath:previewPath,cloudSourcePath:sourcePath,cloudPreviewType:rec.blob?.type||null,cloudSourceType:rec.sourceBlob?.type||null,cloudPreviewSize:rec.blob?.size||0,cloudSourceSize:rec.sourceBlob?.size||0,cloudPreviewHash:cache['raster-preview:'+rec.id]?.hash||null,cloudSourceHash:cache['raster-source:'+rec.id]?.hash||null,cloudPreviewParts:cache['raster-preview:'+rec.id]?.parts||null,cloudSourceParts:cache['raster-source:'+rec.id]?.parts||null});
   }
   for(const rec of vectorLayers){
     const x={...rec};delete x.features;delete x.renderBlob;
     const base=cloudObjectPath(uid,projectId,'vectors',rec.id),geomText=JSON.stringify(rec.features||[]),geomBlob=new Blob([geomText],{type:'application/json'});
     const geomPath=await put('vector-geometry:'+rec.id,base,geomBlob,`${geomBlob.size}:${tinyHash(geomText)}`,(rec.name||'SHP')+' · geometría','.geometry.json');
     const renderPath=rec.renderBlob instanceof Blob?await put('vector-render:'+rec.id,base,rec.renderBlob,sigBlob(rec.renderBlob,vectorRenderSignature(rec)+'|'+(rec.renderCache?.createdAt||'')),(rec.name||'SHP')+' · render','.render'):null;
-    result.vectorLayers.push({...x,cloudFeaturesPath:geomPath,cloudRenderPath:renderPath,cloudFeaturesSize:geomBlob.size,cloudRenderType:rec.renderBlob?.type||null,cloudRenderSize:rec.renderBlob?.size||0,cloudFeaturesHash:cache['vector-geometry:'+rec.id]?.hash||null,cloudRenderHash:cache['vector-render:'+rec.id]?.hash||null});
+    result.vectorLayers.push({...x,cloudFeaturesPath:geomPath,cloudRenderPath:renderPath,cloudFeaturesSize:geomBlob.size,cloudRenderType:rec.renderBlob?.type||null,cloudRenderSize:rec.renderBlob?.size||0,cloudFeaturesHash:cache['vector-geometry:'+rec.id]?.hash||null,cloudRenderHash:cache['vector-render:'+rec.id]?.hash||null,cloudFeaturesParts:cache['vector-geometry:'+rec.id]?.parts||null,cloudRenderParts:cache['vector-render:'+rec.id]?.parts||null});
   }
   // Preserve cloud-only media metadata when a second device has not downloaded its
   // maps or photos locally. Removing a file requires an explicit deletion operation.
@@ -347,11 +460,14 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
   return {metadata:result,steps:done,total:total+2,reused,uploaded};
 }
 function cloudStableJson(v){if(Array.isArray(v))return '['+v.map(x=>cloudStableJson(x)).join(',')+']';if(v&&typeof v==='object')return '{'+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+cloudStableJson(v[k])).join(',')+'}';return JSON.stringify(v)??'null';}
+function cloudAssetParts(path,parts){
+ return Array.isArray(parts)&&parts.length?parts:[path].filter(Boolean);
+}
 function cloudRemoteAssetIndex(m){
  const x=new Map();
- for(const p of m?.photos||[])x.set('photo:'+p.id,{path:p.cloudBlobPath,hash:p.cloudBlobHash,size:p.cloudBlobSize});
- for(const r of m?.rasters||[]){x.set('raster-preview:'+r.id,{path:r.cloudPreviewPath,hash:r.cloudPreviewHash,size:r.cloudPreviewSize});x.set('raster-source:'+r.id,{path:r.cloudSourcePath,hash:r.cloudSourceHash,size:r.cloudSourceSize});}
- for(const v of m?.vectorLayers||[]){x.set('vector-geometry:'+v.id,{path:v.cloudFeaturesPath,hash:v.cloudFeaturesHash,size:v.cloudFeaturesSize});x.set('vector-render:'+v.id,{path:v.cloudRenderPath,hash:v.cloudRenderHash,size:v.cloudRenderSize});}
+ for(const p of m?.photos||[])x.set('photo:'+p.id,{path:p.cloudBlobPath,parts:p.cloudBlobParts,hash:p.cloudBlobHash,size:p.cloudBlobSize});
+ for(const r of m?.rasters||[]){x.set('raster-preview:'+r.id,{path:r.cloudPreviewPath,parts:r.cloudPreviewParts,hash:r.cloudPreviewHash,size:r.cloudPreviewSize});x.set('raster-source:'+r.id,{path:r.cloudSourcePath,parts:r.cloudSourceParts,hash:r.cloudSourceHash,size:r.cloudSourceSize});}
+ for(const v of m?.vectorLayers||[]){x.set('vector-geometry:'+v.id,{path:v.cloudFeaturesPath,parts:v.cloudFeaturesParts,hash:v.cloudFeaturesHash,size:v.cloudFeaturesSize});x.set('vector-render:'+v.id,{path:v.cloudRenderPath,parts:v.cloudRenderParts,hash:v.cloudRenderHash,size:v.cloudRenderSize});}
  return x;
 }
 async function cloudStorageObjectExists(path,size,uid){
@@ -380,9 +496,9 @@ async function cloudCollectObsoleteAssets(uid,cloudId,before,after){
   // Old cloud backup projects can share these objects, so inspect every accessible snapshot.
   const paths=m=>{
     const refs=new Set();
-    for(const p of m?.photos||[])if(p.cloudBlobPath)refs.add(p.cloudBlobPath);
-    for(const r of m?.rasters||[])for(const x of [r.cloudPreviewPath,r.cloudSourcePath])if(x)refs.add(x);
-    for(const v of m?.vectorLayers||[])for(const x of [v.cloudFeaturesPath,v.cloudRenderPath])if(x)refs.add(x);
+    for(const p of m?.photos||[])for(const x of cloudAssetParts(p.cloudBlobPath,p.cloudBlobParts))refs.add(x);
+    for(const r of m?.rasters||[])for(const x of [...cloudAssetParts(r.cloudPreviewPath,r.cloudPreviewParts),...cloudAssetParts(r.cloudSourcePath,r.cloudSourceParts)])refs.add(x);
+    for(const v of m?.vectorLayers||[])for(const x of [...cloudAssetParts(v.cloudFeaturesPath,v.cloudFeaturesParts),...cloudAssetParts(v.cloudRenderPath,v.cloudRenderParts)])refs.add(x);
     return refs;
   };
   const prefix=cloudObjectPath(uid,cloudId)+'/',queueKey='geocauce-cloud-gc-v1:'+uid+':'+cloudId;
@@ -430,6 +546,14 @@ async function cloudRefreshProjectCatalog({quiet=true}={}){
   try{
     const schema=await cloudSchema();
     const rows=await cloudFetch(schema==='legacy'?'/rest/v1/project?deleted_at=is.null&select=*&order=updated_at.desc':'/rest/v1/projects?select=*&order=updated_at.desc');
+    // The live Supabase schema uses personas/project_persona, NOT project_members.
+    // Roles are derived server-side from auth.uid(); the project must still pass
+    // the token-scoped geocauce_project_role RPC when opened or edited.
+    let sharedRoles=new Map();
+    try{
+      const memberships=await cloudFetch('/rest/v1/rpc/geocauce_my_project_roles',{method:'POST',body:{}});
+      sharedRoles=new Map((memberships||[]).map(m=>[m.project_id,m.role]));
+    }catch(e){console.warn('No se pudieron leer los permisos de proyectos compartidos',e);}
     if(!Array.isArray(rows))throw new Error('Respuesta de proyectos no válida');
     for(const row of rows){
       const cloudId=schema==='legacy'?row.id_project:row.id,extra=schema==='legacy'?row:(row.metadata&&typeof row.metadata==='object'?row.metadata:{});
@@ -449,6 +573,8 @@ async function cloudRefreshProjectCatalog({quiet=true}={}){
       if(!existing)existing=matches[0]||null;
       const localId=existing?.id||cloudId,hasLocal=!!localStorage.getItem(projectStateKey(localId)),remoteUpdatedAt=Date.parse(row.updated_at||0)||0;
       const meta={id:localId,cloudProjectId:cloudId,name:row.name||'Proyecto',zone:(schema==='legacy'?row.zona:row.zone)||'',torrent:row.torrent||'',author:(schema==='legacy'?row.autor:extra.author)||'',institution:extra.institution||'',startDate:(schema==='legacy'?row.start_date:extra.startDate)||'',crs:row.crs||'EPSG:25831',objective:extra.objective||'',methodology:extra.methodology||'',notes:extra.notes||'',dbName:existing?.dbName||`GeoCauceDB_${localId}`,ownerUserId:(schema==='legacy'?row.owner_user_id:row.owner_id),createdAt:Date.parse(row.created_at||0)||existing?.createdAt||0,updatedAt:remoteUpdatedAt,_cloudCatalogUpdatedAt:remoteUpdatedAt,_cloudOnly:!hasLocal};
+      meta._roleUser=sessionUser()?.id||null;
+      meta._sharedRole=meta.ownerUserId===meta._roleUser?'owner':sharedRoles.get(cloudId)||(existing?._roleUser===meta._roleUser?existing?._sharedRole:null)||'viewer';
       if(!existing)projectCatalog.push(meta);
       else{
         const i=projectCatalog.indexOf(existing);
@@ -466,23 +592,23 @@ function cloudSeedDownloadedAssets(uid,cloudId,lists){
   const cacheKey=`geocauce-cloud-assets-${cloudId}`,globalKey=`geocauce-cloud-asset-index-v1:${uid}`;
   const read=key=>{try{return JSON.parse(localStorage.getItem(key)||'{}')||{};}catch{return {};}};
   const cache=read(cacheKey),globalCache=read(globalKey);
-  const add=(key,path,hash,legacySig,size)=>{
+  const add=(key,path,hash,legacySig,size,parts=null)=>{
     if(!path||!String(path).startsWith(encodeURIComponent(String(uid))+'/'))return;
-    cache[key]={path,sig:legacySig,hash:hash||undefined};
-    if(hash)globalCache[hash]={path,size,savedAt:Date.now()};
+    cache[key]={path,sig:legacySig,hash:hash||undefined,...(parts?.length?{parts}:{})};
+    if(hash)globalCache[hash]={path,parts,size,savedAt:Date.now()};
   };
   const sig=(size,type,extra='')=>`${size||0}:${type||''}:${extra}`;
   for(const p of lists.photos||[]){
-    add('photo:'+p.id,p.cloudBlobPath,p.cloudBlobHash,sig(p.cloudBlobSize,p.cloudBlobType,p.date||p.importedAt||p.updatedAt||''),p.cloudBlobSize);
+    add('photo:'+p.id,p.cloudBlobPath,p.cloudBlobHash,sig(p.cloudBlobSize,p.cloudBlobType,p.date||p.importedAt||p.updatedAt||''),p.cloudBlobSize,p.cloudBlobParts);
   }
   for(const r of lists.rasters||[]){
     const extra=r.importedAt||r.meta?.importedAt||r.meta?.sourceWidth||'';
-    add('raster-preview:'+r.id,r.cloudPreviewPath,r.cloudPreviewHash,sig(r.cloudPreviewSize,r.cloudPreviewType,extra+'|'+(r.styleCache?.generatedAt||'')),r.cloudPreviewSize);
-    add('raster-source:'+r.id,r.cloudSourcePath,r.cloudSourceHash,sig(r.cloudSourceSize,r.cloudSourceType,extra),r.cloudSourceSize);
+    add('raster-preview:'+r.id,r.cloudPreviewPath,r.cloudPreviewHash,sig(r.cloudPreviewSize,r.cloudPreviewType,extra+'|'+(r.styleCache?.generatedAt||'')),r.cloudPreviewSize,r.cloudPreviewParts);
+    add('raster-source:'+r.id,r.cloudSourcePath,r.cloudSourceHash,sig(r.cloudSourceSize,r.cloudSourceType,extra),r.cloudSourceSize,r.cloudSourceParts);
   }
   for(const v of lists.vectorLayers||[]){
-    add('vector-geometry:'+v.id,v.cloudFeaturesPath,v.cloudFeaturesHash,null,v.cloudFeaturesSize);
-    add('vector-render:'+v.id,v.cloudRenderPath,v.cloudRenderHash,sig(v.cloudRenderSize,v.cloudRenderType,vectorRenderSignature(v)+'|'+(v.renderCache?.createdAt||'')),v.cloudRenderSize);
+    add('vector-geometry:'+v.id,v.cloudFeaturesPath,v.cloudFeaturesHash,null,v.cloudFeaturesSize,v.cloudFeaturesParts);
+    add('vector-render:'+v.id,v.cloudRenderPath,v.cloudRenderHash,sig(v.cloudRenderSize,v.cloudRenderType,vectorRenderSignature(v)+'|'+(v.renderCache?.createdAt||'')),v.cloudRenderSize,v.cloudRenderParts);
   }
   try{localStorage.setItem(cacheKey,JSON.stringify(cache));localStorage.setItem(globalKey,JSON.stringify(globalCache));}catch(e){console.warn('No se pudo recordar los archivos descargados',e);}
 }
@@ -573,39 +699,43 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
       lists.vectorLayers.reduce((n,x)=>n+(x.cloudFeaturesPath?1:0)+(x.cloudRenderPath?1:0),0);
     let done=0;cloudProgressStart('Descargando archivos del proyecto',total);started=true;
     await dbClear('cloudStaging');
-    const get=async(path,label,expectedSize=null,reusable=null)=>{
+    const get=async(path,label,expectedSize=null,reusable=null,parts=null,type='application/octet-stream',expectedHash=null)=>{
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
-      const blob=reusable||await cloudDownloadBlob(path);
+      const blob=reusable||await cloudDownloadBlob(path,parts,type);
       if(!(blob instanceof Blob))throw new Error('Falta el archivo '+label);
       if(Number(expectedSize)>0&&blob.size!==Number(expectedSize))throw new Error('Archivo incompleto o corrupto: '+label);
+      if(!reusable&&expectedHash){
+       const actual=`sha256-chunks-v1:${blob.size}:${type||''}:${await cloudAssetDigest(blob)}`;
+       if(actual!==expectedHash)throw new Error('El archivo cloud no coincide con su huella digital: '+label);
+      }
       done++;cloudProgressUpdate((reusable?'Reutilizado':'Descargado')+' · '+label,done,total);return blob;
     };
     for(const ph of lists.photos){
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       if(!ph.id||!ph.cloudBlobPath)throw new Error('Falta el archivo de la fotografía '+(ph.name||ph.id||''));
-      const rec={...ph};delete rec.cloudBlobPath;delete rec.cloudBlobType;delete rec.cloudBlobSize;
-      rec.blob=await get(ph.cloudBlobPath,ph.name||'fotografía',ph.cloudBlobSize,await cloudReuseBlob(oldPhotos.get(ph.id)?.blob,ph.cloudBlobSize,ph.cloudBlobHash));
+      const rec={...ph};delete rec.cloudBlobPath;delete rec.cloudBlobType;delete rec.cloudBlobSize;delete rec.cloudBlobParts;delete rec.cloudBlobHash;
+      rec.blob=await get(ph.cloudBlobPath,ph.name||'fotografía',ph.cloudBlobSize,await cloudReuseBlob(oldPhotos.get(ph.id)?.blob,ph.cloudBlobSize,ph.cloudBlobHash),ph.cloudBlobParts,ph.cloudBlobType,ph.cloudBlobHash);
       await dbPut('cloudStaging',{key:'photos:'+ph.id,record:rec});
     }
     for(const r of lists.rasters){
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       if(!r.id||!r.cloudPreviewPath)throw new Error('Falta la imagen del mapa '+(r.name||r.id||''));
-      const rec={...r};for(const k of ['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize'])delete rec[k];
+      const rec={...r};for(const k of ['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize','cloudPreviewParts','cloudSourceParts','cloudPreviewHash','cloudSourceHash'])delete rec[k];
       const localRaster=oldRasters.get(r.id);
-      if(r.cloudPreviewPath)rec.blob=await get(r.cloudPreviewPath,r.name||'mapa',r.cloudPreviewSize,await cloudReuseBlob(localRaster?.blob,r.cloudPreviewSize,r.cloudPreviewHash));
-      if(r.cloudSourcePath)rec.sourceBlob=await get(r.cloudSourcePath,(r.name||'mapa')+' · original',r.cloudSourceSize,await cloudReuseBlob(localRaster?.sourceBlob,r.cloudSourceSize,r.cloudSourceHash));
+      if(r.cloudPreviewPath)rec.blob=await get(r.cloudPreviewPath,r.name||'mapa',r.cloudPreviewSize,await cloudReuseBlob(localRaster?.blob,r.cloudPreviewSize,r.cloudPreviewHash),r.cloudPreviewParts,r.cloudPreviewType,r.cloudPreviewHash);
+      if(r.cloudSourcePath)rec.sourceBlob=await get(r.cloudSourcePath,(r.name||'mapa')+' · original',r.cloudSourceSize,await cloudReuseBlob(localRaster?.sourceBlob,r.cloudSourceSize,r.cloudSourceHash),r.cloudSourceParts,r.cloudSourceType,r.cloudSourceHash);
       if(rec.styleCache)rec.styleCache={...rec.styleCache,ready:false,missing:true};
       await dbPut('cloudStaging',{key:'rasters:'+r.id,record:rec});
     }
     for(const vl of lists.vectorLayers){
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       if(!vl.id||(!vl.cloudFeaturesPath&&Number(vl.featureCount)>0))throw new Error('Falta la geometría de '+(vl.name||vl.id||'capa'));
-      const rec={...vl};for(const k of ['cloudFeaturesPath','cloudRenderPath','cloudFeaturesSize','cloudRenderType','cloudRenderSize'])delete rec[k];
+      const rec={...vl};for(const k of ['cloudFeaturesPath','cloudRenderPath','cloudFeaturesSize','cloudRenderType','cloudRenderSize','cloudFeaturesParts','cloudRenderParts','cloudFeaturesHash','cloudRenderHash'])delete rec[k];
       const localVector=oldVectors.get(vl.id),sameFeatures=vl.cloudFeaturesPath?await cloudReuseFeatures(localVector?.features,vl.cloudFeaturesSize,vl.cloudFeaturesHash):null;
       if(sameFeatures){rec.features=sameFeatures;done++;cloudProgressUpdate('Reutilizado · geometría de '+(vl.name||'capa'),done,total);}
-      else rec.features=vl.cloudFeaturesPath?JSON.parse(await (await get(vl.cloudFeaturesPath,vl.name||'capa',vl.cloudFeaturesSize)).text()):[];
+      else rec.features=vl.cloudFeaturesPath?JSON.parse(await (await get(vl.cloudFeaturesPath,vl.name||'capa',vl.cloudFeaturesSize,null,vl.cloudFeaturesParts,'application/json',vl.cloudFeaturesHash)).text()):[];
       if(!Array.isArray(rec.features))throw new Error('Geometría de capa inválida: '+(vl.name||vl.id));
-      if(vl.cloudRenderPath)rec.renderBlob=await get(vl.cloudRenderPath,(vl.name||'capa')+' · render',vl.cloudRenderSize,await cloudReuseBlob(localVector?.renderBlob,vl.cloudRenderSize,vl.cloudRenderHash));
+      if(vl.cloudRenderPath)rec.renderBlob=await get(vl.cloudRenderPath,(vl.name||'capa')+' · render',vl.cloudRenderSize,await cloudReuseBlob(localVector?.renderBlob,vl.cloudRenderSize,vl.cloudRenderHash),vl.cloudRenderParts,vl.cloudRenderType,vl.cloudRenderHash);
       await dbPut('cloudStaging',{key:'vectorLayers:'+vl.id,record:rec});
     }
     if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
@@ -666,7 +796,18 @@ function openAuthModal(context='entry',mode='signin'){
   authUiContext=context;setAuthMode(mode);$('#authModal').classList.remove('hidden');$('#authModal').setAttribute('aria-hidden','false');setTimeout(()=>$('#authEmail')?.focus(),80);
 }
 function closeAuthModal(){$('#authModal').classList.add('hidden');$('#authModal').setAttribute('aria-hidden','true');setAuthMessage('');}
-function enterAppCore(){if(projectCatalog.length)showProjectHome();else showProjectCreate(null,'splash');refreshAccountUi();}
+function enterAppCore(){
+ const route=window.GeoCauceProjectAccess?.routeFromLocation(window.location);
+ if(route){
+  showProjectHome({skipHistory:true});
+  const p=projectCatalog.find(p=>p.id===route.id||p.cloudProjectId===route.id);
+  if(p){openProject(p.id,{mode:route.mode,fromRoute:true}).catch(e=>toast(e.message));return;}
+  toast('No se encontró el proyecto o tu cuenta no tiene acceso',5500);
+  return;
+ }
+ if(projectCatalog.length)showProjectHome();else showProjectCreate(null,'splash');
+ refreshAccountUi();
+}
 async function enterApp(){
   const session=loadCloudSession(),choice=authEntryChoice();
   if(session?.access_token){setAuthEntryChoice('account');try{if(sessionExpired(session)&&navigator.onLine)await refreshCloudSession();if(navigator.onLine)await cloudRefreshProjectCatalog();}catch(e){console.warn('Cloud entry',e);}enterAppCore();refreshAccountUi();scheduleCloudSync(500);return;}
@@ -863,6 +1004,7 @@ function cloudResolveFieldConflicts(conflicts){
 }
 
 async function cloudBidirectionalSync({manual=false}={}){
+ if(!canEditCurrentProject()){if(manual)toast('Proyecto de solo lectura: no se pueden sincronizar cambios de edición');return false;}
  if(cloudDeltaRunning||cloudSyncRunning||cloudRestoreRunning||!state.projectId||!state.project)return false;
  if(!window.GeoCauceDeltaSync){if(manual)toast('Actualiza GeoCauce para activar la sincronización incremental');return false;}
  if(!loadCloudSession()?.access_token||!cloudConfigured()){if(manual)toast('Inicia sesión para sincronizar');return false;}
@@ -1085,6 +1227,7 @@ async function cloudStructuredSnapshot(assetMetadata=null){
   return {...base,cloudSchema:4,appVersion:'0.16.39-android-alpha',sectionPalette:cloneAny(sectionPalette||[]),appSettings:cloneAny(appSettings),assetMetadata};
 }
 async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={}){
+  if(!canEditCurrentProject()){if(manual)toast('No tienes permiso de edición');return false;}
   if(cloudSyncRunning||cloudRestoreRunning||!state.projectId||!state.project)return false;
   const session=loadCloudSession();if(!session?.access_token){if(manual)toast('Inicia sesión para sincronizar');return false;}
   if(!cloudConfigured()){if(manual)toast('Supabase todavía no está configurado');return false;}
@@ -1095,6 +1238,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
     if(!uid)throw new Error('Sesión sin identificador de usuario');
     const p=state.project,cloudId=ensureCloudProjectId(p);if(!cloudId)throw new Error('No se pudo asignar ID cloud al proyecto');
     const schema=await cloudSchema();if(p._cloudOnly)throw new Error('Descarga primero el proyecto cloud');
+    if(p.ownerUserId&&!['editor','owner'].includes(await cloudProjectRole(p)))throw new Error('Tu cuenta ya no tiene permiso para editar este proyecto');
     const uploadingProjectId=state.projectId;
     persistStateLocalOnly();
     const startingPayload=localStorage.getItem(projectStateKey(uploadingProjectId));
@@ -1102,7 +1246,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
     const previousRows=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=updated_at,state&limit=1`);
     const previous=previousRows?.[0]||null;
     if((previous?.updated_at||null)!==expectedUpdatedAt)throw new Error('Otro dispositivo cambió la nube. Descarga sus cambios antes de subir.');
-    const assets=await cloudUploadProjectAssets(uid,cloudId,{manual,remoteAssets:previous?.state?.assetMetadata});
+    const assets=await cloudUploadProjectAssets(p.ownerUserId||uid,cloudId,{manual,remoteAssets:previous?.state?.assetMetadata});
     cloudLastAssetManifest=assets.metadata;
     if(state.projectId!==uploadingProjectId)throw new Error('El proyecto cambió durante la subida');
     const current=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=updated_at&limit=1`);
@@ -1110,17 +1254,17 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
     if(actual!==expectedUpdatedAt)throw new Error('Otro dispositivo ha actualizado la nube. No se ha sobrescrito su proyecto.');
     const payload=await cloudStructuredSnapshot(assets.metadata),now=new Date().toISOString();
     if(localStorage.getItem(projectStateKey(uploadingProjectId))!==startingPayload)throw new Error('Se han modificado datos durante la subida. Repite la sincronización cuando termines de editar.');
-    if(p.ownerUserId!==uid){p.ownerUserId=uid;p.updatedAt=Date.now();saveProjectCatalog();state.project=p;nativeSyncProject(payload);}
+    if(!p.ownerUserId){p.ownerUserId=uid;p._sharedRole='owner';p._roleUser=uid;p.updatedAt=Date.now();saveProjectCatalog();state.project=p;nativeSyncProject(payload);}
     const row=schema==='legacy'
-      ? {id_project:cloudId,owner_user_id:uid,name:p.name||'Proyecto',zona:p.zone||null,torrent:p.torrent||null,institution:p.institution||null,autor:p.author||null,start_date:p.startDate||new Date().toISOString().slice(0,10),crs:p.crs||'EPSG:25831',objective:p.objective||null,methodology:p.methodology||null,notes:p.notes||null,updated_at:now,deleted_at:null}
-      : {id:cloudId,owner_id:uid,name:p.name||'Proyecto',zone:p.zone||null,torrent:p.torrent||null,crs:p.crs||'EPSG:25831',metadata:{author:p.author||'',institution:p.institution||'',startDate:p.startDate||'',objective:p.objective||'',methodology:p.methodology||'',notes:p.notes||''},updated_at:now};
+      ? {id_project:cloudId,owner_user_id:p.ownerUserId,name:p.name||'Proyecto',zona:p.zone||null,torrent:p.torrent||null,institution:p.institution||null,autor:p.author||null,start_date:p.startDate||new Date().toISOString().slice(0,10),crs:p.crs||'EPSG:25831',objective:p.objective||null,methodology:p.methodology||null,notes:p.notes||null,updated_at:now,deleted_at:null}
+      : {id:cloudId,owner_id:p.ownerUserId,name:p.name||'Proyecto',zone:p.zone||null,torrent:p.torrent||null,crs:p.crs||'EPSG:25831',metadata:{author:p.author||'',institution:p.institution||'',startDate:p.startDate||'',objective:p.objective||'',methodology:p.methodology||'',notes:p.notes||''},updated_at:now};
     if(previous?.state&&cloudStableJson(previous.state)===cloudStableJson(payload)){
       const table=schema==='legacy'?'project':'projects',idCol=schema==='legacy'?'id_project':'id';
       const rows=await cloudFetch(`/rest/v1/${table}?${idCol}=eq.${encodeURIComponent(cloudId)}&select=*&limit=1`),remoteRow=rows?.[0];
       if(remoteRow&&Object.entries(row).every(([k,v])=>k==='updated_at'||cloudStableJson(remoteRow[k]??null)===cloudStableJson(v??null))){
         cloudLastSyncAt=Date.now();cloudLastError='';p._cloudSyncedAt=cloudLastSyncAt;p._cloudUpdatedAt=Date.parse(actual||0)||cloudLastSyncAt;saveProjectCatalog();
         if(manual){cloudProgressFinish(true,'Sin cambios pendientes');toast('Todo actualizado ✓ · 0 archivos transferidos',4500);}
-        cloudCollectObsoleteAssets(uid,cloudId,previous?.state?.assetMetadata,assets.metadata).catch(e=>console.warn('Cloud asset cleanup',e));
+        cloudCollectObsoleteAssets(p.ownerUserId||uid,cloudId,previous?.state?.assetMetadata,assets.metadata).catch(e=>console.warn('Cloud asset cleanup',e));
         refreshAccountUi();return true;
       }
     }
@@ -1134,21 +1278,21 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
       });
     }else{
       saved=await cloudFetch(schema==='legacy'?'/rest/v1/project_snapshots?on_conflict=id_project&select=updated_at':'/rest/v1/project_snapshots?on_conflict=project_id&select=updated_at',{
-        method:'POST',body:[schema==='legacy'?{id_project:cloudId,schema_version:4,state:payload,updated_at:now}:{project_id:cloudId,owner_id:uid,state:payload,palette:cloneAny(sectionPalette||[]),updated_at:now}],
+        method:'POST',body:[schema==='legacy'?{id_project:cloudId,schema_version:4,state:payload,updated_at:now}:{project_id:cloudId,owner_id:p.ownerUserId,state:payload,palette:cloneAny(sectionPalette||[]),updated_at:now}],
         headers:{Prefer:'resolution=ignore-duplicates,return=representation'}
       });
     }
     if(!Array.isArray(saved)||saved.length!==1)throw new Error('Conflicto al guardar: el proyecto remoto cambió. No se ha sobrescrito su snapshot.');
     cloudLastSyncAt=Date.now();cloudLastError='';p.cloudProjectId=cloudId;p._cloudOnly=false;p._cloudSyncedAt=cloudLastSyncAt;p._cloudUpdatedAt=Date.parse(saved[0].updated_at||now)||cloudLastSyncAt;saveProjectCatalog();
     if(manual){cloudProgressUpdate('Sincronización completada',assets.total,assets.total);cloudProgressFinish(true,'Subida completada');toast(`Proyecto sincronizado ✓ · ${assets.uploaded} archivos subidos, ${assets.reused} reutilizados`,6000);}
-    cloudCollectObsoleteAssets(uid,cloudId,previous?.state?.assetMetadata,assets.metadata).catch(e=>console.warn('Cloud asset cleanup',e));
+    cloudCollectObsoleteAssets(p.ownerUserId||uid,cloudId,previous?.state?.assetMetadata,assets.metadata).catch(e=>console.warn('Cloud asset cleanup',e));
     refreshAccountUi();return true;
   }catch(e){cloudLastError=`Pendiente: ${e.message||e}`;console.warn('Cloud sync',e);if(manual){cloudProgressFinish(false,'Error al subir');toast(`No se pudo sincronizar: ${e.message||e}`,6500);}refreshAccountUi();return false;}
   finally{cloudSyncRunning=false;refreshAccountUi();}
 }
-function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);if(!state.projectId||!cloudConfigured()||!loadCloudSession()?.access_token||!navigator.onLine||document.hidden)return;cloudSyncTimer=setTimeout(()=>{cloudBidirectionalSync({manual:false}).catch(e=>console.warn('Background sync',e));},Math.max(600,delay));}
+function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);if(state.project&&!canEditCurrentProject())return;if(!state.projectId||!cloudConfigured()||!loadCloudSession()?.access_token||!navigator.onLine||document.hidden)return;cloudSyncTimer=setTimeout(()=>{cloudBidirectionalSync({manual:false}).catch(e=>console.warn('Background sync',e));},Math.max(600,delay));}
 function persistStateLocalOnly(){
-  if(!state.projectId)return;const previousCloudPayload=localStorage.getItem(projectStateKey(state.projectId));syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));cloudQueueStateDiff(state.projectId,previousCloudPayload,payload);touchProject();nativeSyncProject(payload);return payload;
+  if(!state.projectId||!canEditCurrentProject())return;const previousCloudPayload=localStorage.getItem(projectStateKey(state.projectId));syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));cloudQueueStateDiff(state.projectId,previousCloudPayload,payload);touchProject();nativeSyncProject(payload);return payload;
 }
 window.addEventListener('online',()=>{refreshAccountUi();cloudRefreshProjectCatalog().catch(()=>{});scheduleCloudSync(800);});window.addEventListener('offline',()=>{clearTimeout(cloudSyncTimer);refreshAccountUi();});document.addEventListener('visibilitychange',()=>{if(!document.hidden)scheduleCloudSync(700);});setInterval(()=>{if(!document.hidden&&navigator.onLine&&state.projectId)scheduleCloudSync(1000);},90000);
 
@@ -1458,8 +1602,14 @@ function renderProjectHome(){
     card.innerHTML=`<div class="project-card-head">${iconImg('icons/proyecto.png')}<div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(where)}${cloudTag}</p></div></div>
       <div class="project-card-meta"><span><b>${st.campaigns}</b> campañas</span><span><b>${st.elements}</b> elementos</span><span>Autor: <b>${escapeHtml(p.author||'—')}</b></span><span>CRS: <b>${escapeHtml(p.crs||'EPSG:25831')}</b></span></div>
       <div class="project-card-desc">${escapeHtml(desc)}</div>
-      <div class="project-card-actions"><button class="open-project icon-text">${iconImg('icons/proyecto.png')}<span>Abrir</span></button><button class="edit-project icon-text">${iconImg('icons/editar_propiedad.png')}<span>Información</span></button><button class="delete-project icon-only" title="Eliminar proyecto">${iconImg('icons/eliminar.svg')}</button></div>`;
-    card.querySelector('.open-project').onclick=()=>openProject(p.id);
+      <div class="project-card-actions"><button class="open-project icon-text">${iconImg('icons/proyecto.png')}<span>Abrir</span></button><button class="share-project icon-text" title="Compartir proyecto">Compartir</button><button class="edit-project icon-text">${iconImg('icons/editar_propiedad.png')}<span>Información</span></button><button class="delete-project icon-only" title="Eliminar proyecto">${iconImg('icons/eliminar.svg')}</button></div>`;
+    const editable=canEditProjectInUi(p);
+    card.querySelector('.open-project span').textContent=editable?'Editar':'Visualizar';
+    if(!isCurrentProjectOwner(p))card.querySelector('.share-project').hidden=true;
+    card.querySelector('.open-project').onclick=()=>openProject(p.id,{mode:editable?'edit':'view'});
+    card.querySelector('.share-project').onclick=()=>openProjectShare(p.id);
+    card.querySelector('.edit-project').hidden=!editable;
+    card.querySelector('.delete-project').hidden=!isCurrentProjectOwner(p);
     card.querySelector('.edit-project').onclick=()=>showProjectCreate(p.id,'projects');
     card.querySelector('.delete-project').onclick=()=>deleteProject(p.id);
     root.appendChild(card);
@@ -1467,13 +1617,19 @@ function renderProjectHome(){
 }
 function hideMainScreens(){['splash','projectScreen','projectCreateScreen','settingsScreen','mapScreen'].forEach(id=>$('#'+id)?.classList.add('hidden'));}
 let projectCreateReturn='splash';
-function showProjectHome(){
+function showProjectHome({skipHistory=false}={}){
+  document.body.classList.remove('geocauce-read-only');
+  if(!skipHistory&&window.GeoCauceProjectAccess){
+   const url=window.GeoCauceProjectAccess.projectsUrl(window.location);
+   if(url!==window.location.pathname+window.location.search+window.location.hash)window.history.pushState({screen:'projects'},'',url);
+  }
   if(state.view3d?.active)exit3DMode({quiet:true});
   hideMainScreens();$('#projectScreen').classList.remove('hidden');state.screen='projects';renderProjectHome();refreshAccountUi();
 }
 function showProjectCreate(id=null,returnTo=null){
   if(state.view3d?.active)exit3DMode({quiet:true});
   editingProjectId=id;const p=id?projectById(id):null;
+  if(p&&(!canEditProjectInUi(p)||(p.id===state.projectId&&!canEditCurrentProject()))){toast('Abre el modo edición para modificar este proyecto');return;}
   projectCreateReturn=returnTo||(state.screen==='map'?'map':projectCatalog.length?'projects':'splash');
   $('#projectCreateHeader').textContent=p?'Información del proyecto':'Crear nuevo proyecto';
   $('#projectCreateSub').textContent=p?'Edita los metadatos generales del estudio':'Datos generales del estudio';
@@ -1491,7 +1647,7 @@ function leaveProjectCreate(){
 function readProjectForm(){return{name:$('#projectName').value.trim(),zone:$('#projectZone').value.trim(),torrent:$('#projectTorrent').value.trim(),author:$('#projectAuthor').value.trim(),institution:$('#projectInstitution').value.trim(),startDate:$('#projectStartDate').value||isoToday(),crs:$('#projectCrs').value||'EPSG:25831',objective:$('#projectObjective').value.trim(),methodology:$('#projectMethodology').value.trim(),notes:$('#projectNotes').value.trim()};}
 async function saveProjectForm(){
   const v=readProjectForm();if(!v.name){toast('Escribe un nombre para el proyecto');return;}
-  if(editingProjectId){const p=projectById(editingProjectId);if(!p)return;Object.assign(p,v,{updatedAt:Date.now()});saveProjectCatalog();if(state.projectId===p.id){state.project=p;updateProjectUi();}editingProjectId=null;if(projectCreateReturn==='map'){hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';updateProjectUi();resize();}else showProjectHome();toast('Información del proyecto actualizada');return;}
+  if(editingProjectId){const p=projectById(editingProjectId);if(!p||!canEditProjectInUi(p)||(p.id===state.projectId&&!canEditCurrentProject()))return;Object.assign(p,v,{updatedAt:Date.now()});saveProjectCatalog();if(state.projectId===p.id){state.project=p;updateProjectUi();}editingProjectId=null;if(projectCreateReturn==='map'){hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';updateProjectUi();resize();}else showProjectHome();toast('Información del proyecto actualizada');return;}
   if(state.projectId)persistState();
   const id='P'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);const meta={id,...v,createdAt:Date.now(),updatedAt:Date.now(),dbName:`GeoCauceDB_${id}`};projectCatalog.push(meta);saveProjectCatalog();localStorage.setItem(ACTIVE_PROJECT_KEY,id);editingProjectId=null;
   state.projectId=id;state.project=meta;resetStateForProject(meta);persistState();await openProject(id,{skipSave:true});toast(`Proyecto “${meta.name}” creado`);
@@ -1508,12 +1664,19 @@ async function openProject(id,opt={}){
   if((cloudRestoreRunning||cloudSyncRunning||cloudDeltaRunning)&&state.projectId&&id!==state.projectId){toast('Espera a que termine la sincronización antes de cambiar de proyecto');return;}
   if(state.view3d?.active)exit3DMode({quiet:true});
   const p=projectById(id);if(!p)return;
+  let role;
+  try{role=await cloudProjectRole(p);}catch(e){toast('Acceso denegado: '+(e.message||String(e)),6000);return;}
+  if(!window.GeoCauceProjectAccess.canView(role)){toast('No tienes acceso a este proyecto',5500);return;}
+  const desiredMode=opt.mode||(role==='viewer'?'view':'edit');
+  const openingAccessMode=desiredMode==='edit'&&window.GeoCauceProjectAccess.canEdit(role)?'edit':'view';
+  if(desiredMode==='edit'&&openingAccessMode==='view')toast('Este proyecto solo permite visualización');
   const needsCloudRestore=!localStorage.getItem(projectStateKey(id))||p._cloudOnly===true;
   if(needsCloudRestore&&(!loadCloudSession()?.access_token||!navigator.onLine)){
     toast('Proyecto en la nube: inicia sesión y conecta Internet para descargarlo.',6000);return;
   }
   const previousId=state.projectId,previousProject=state.project,previousActive=localStorage.getItem(ACTIVE_PROJECT_KEY);
   if(state.projectId&&!opt.skipSave)persistState();
+  p._accessMode=openingAccessMode;
   if(dbp){try{const old=await dbp;old.close();}catch{}dbp=null;dbpName=null;}
   state.projectId=id;state.project=p;localStorage.setItem(ACTIVE_PROJECT_KEY,id);
   if(needsCloudRestore&&!await restoreProjectFromCloud(id,{manual:true})){
@@ -1526,15 +1689,20 @@ async function openProject(id,opt={}){
   restoreState(id);state.rasters=[];
   hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';
   updateProjectUi();scheduleCloudSync(1200);renderMaterials();updateMaterialButton();updateCampaignUi();$('#eraserSize').value=state.eraseSize;$$('[data-erase-mode]').forEach(b=>b.classList.toggle('active',b.dataset.eraseMode===state.eraseMode));setTool(state.tool,{quiet:true});renderSectionList();updateCompass();updateGnssUi();setTimeout(resize,20);await loadRasters();await hydrateReferenceLayersAfterOpen();touchProject();
+  if(window.GeoCauceProjectAccess){
+   const path=window.GeoCauceProjectAccess.routeUrl(p.cloudProjectId||p.id,p._accessMode);
+   window.history[opt.fromRoute?'replaceState':'pushState']({projectId:id},'',path);
+  }
   }finally{projectOpenInProgress=false;}
 }
 function updateProjectUi(){
   refreshAccountUi();
+  document.body.classList.toggle('geocauce-read-only',!!state.project&&!canEditCurrentProject());
   const p=state.project;const label=$('#projectBtnLabel');if(label)label.textContent=p?.name||'Proyecto';
   const root=$('#projectSummary');if(!root||!p)return;const st=projectStats(p.id);root.innerHTML=`<h3>${escapeHtml(p.name)}</h3><dl><dt>Zona</dt><dd>${escapeHtml([p.torrent,p.zone].filter(Boolean).join(' · ')||'—')}</dd><dt>Autor</dt><dd>${escapeHtml(p.author||'—')}</dd><dt>Institución</dt><dd>${escapeHtml(p.institution||'—')}</dd><dt>Inicio</dt><dd>${escapeHtml(displayDate(p.startDate)||'—')}</dd><dt>CRS</dt><dd>${escapeHtml(p.crs||'EPSG:25831')}</dd><dt>Campañas</dt><dd>${st.campaigns}</dd></dl>${p.objective?`<div class="project-summary-desc"><b>Objetivo</b><br>${escapeHtml(p.objective)}</div>`:''}`;
 }
 async function deleteProject(id){
-  const p=projectById(id);if(!p||!confirm(`¿Eliminar el proyecto “${p.name}”? Se borrarán sus mapas, fotos, campañas y cartografía local.`))return;
+  const p=projectById(id);if(!p||!isCurrentProjectOwner(p)||!confirm(`¿Eliminar el proyecto “${p.name}”? Se borrarán sus mapas, fotos, campañas y cartografía local.`))return;
   if(state.projectId===id&&dbp){try{const d=await dbp;d.close();}catch{}dbp=null;dbpName=null;}
   localStorage.removeItem(projectStateKey(id));projectCatalog=projectCatalog.filter(x=>x.id!==id);saveProjectCatalog();if(localStorage.getItem(ACTIVE_PROJECT_KEY)===id)localStorage.removeItem(ACTIVE_PROJECT_KEY);
   if(ANDROID_NATIVE)nativeCall('deleteProject',id);
@@ -1550,8 +1718,9 @@ function undoLast(){if(!requireEditable('deshacer cambios'))return;if(!state.his
 function currentCampaign(){return (state.campaigns||[]).find(c=>c.id===state.campaign)||null;}
 function campaignById(id){return (state.campaigns||[]).find(c=>c.id===id)||null;}
 function campaignLabel(id){const c=campaignById(id);return c?c.name:id;}
-function isEditableCampaign(id=state.campaign){return !!id&&id===state.editableCampaign;}
+function isEditableCampaign(id=state.campaign){return !!id&&id===state.editableCampaign&&canEditCurrentProject();}
 function requireEditable(action='editar'){
+  if(!canEditCurrentProject()){toast('Proyecto de solo lectura: no tienes permiso para '+action);return false;}
   if(isEditableCampaign())return true;
   const c=currentCampaign();toast(`${c?.name||'Este día'} está bloqueado. Crea un Nuevo día para ${action}.`,3600);
   return false;
@@ -1924,6 +2093,16 @@ function rasterParseFiniteNumber(value){
  if(!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text))return null;
  const n=Number(text);return Number.isFinite(n)?n:null;
 }
+// Infinity cannot be stored directly in the project JSON: represent an open
+// DISCRETE final class with a finite bound and an explicit unbounded marker.
+// Discrete lookup falls through to the final color for every greater value.
+function rasterQgisOpenUpper(previous){
+ const step=Math.max(1,Math.abs(previous)*1e-6);
+ const value=previous+step;
+ if(!Number.isFinite(value)||!(value>previous))
+  throw new Error('El límit anterior és massa gran per representar la classe QGIS oberta');
+ return value;
+}
 function rasterParseQgisColorMap(source){
  const lines=String(source||'').replace(/^\uFEFF/,'').split(/\r?\n/),stops=[];let mode=null;
  for(let i=0;i<lines.length;i++){
@@ -1936,13 +2115,17 @@ function rasterParseQgisColorMap(source){
   }
   const parts=line.split(',');
   if(parts.length<6)throw new Error('Línia '+(i+1)+': s’esperen valor, R, G, B, A i etiqueta');
-  const value=rasterParseFiniteNumber(parts[0]);
+  const openUpper=/^(?:\+?inf(?:inity)?|∞)$/i.test(parts[0].trim());
+  if(openUpper&&(mode!=='discrete'||!stops.length||
+    lines.slice(i+1).some(nextLine=>nextLine.trim()&&!nextLine.trim().startsWith('#'))))
+   throw new Error('Línia '+(i+1)+': inf només es permet a la darrera classe QGIS DISCRETE');
+  const value=openUpper?rasterQgisOpenUpper(stops[stops.length-1].value):rasterParseFiniteNumber(parts[0]);
   const rgba=parts.slice(1,5).map(v=>rasterParseFiniteNumber(v));
   if(value===null||rgba.some(n=>n===null||n<0||n>255||!Number.isInteger(n)))
     throw new Error('Línia '+(i+1)+': valor o components RGBA incorrectes');
   if(stops.length&&value<=stops[stops.length-1].value)
     throw new Error('Línia '+(i+1)+': els punts han d’estar ordenats sense duplicats');
-  stops.push({value,color:rgbHex(rgba[0],rgba[1],rgba[2]),alpha:rgba[3],label:parts.slice(5).join(',').trim(),visible:true});
+  stops.push({value,color:rgbHex(rgba[0],rgba[1],rgba[2]),alpha:rgba[3],label:parts.slice(5).join(',').trim(),visible:true,...(openUpper?{unbounded:true}:{})});
  }
  if(stops.length<2)throw new Error('Calen com a mínim dos punts de color al fitxer QGIS');
  if(stops.length>1024)throw new Error('La paleta supera 1024 punts; redueix-la abans d’importar');
@@ -1985,7 +2168,7 @@ function rampColor(name,t,invert=false){const arr=RASTER_STYLE_RAMPS[name]||RAST
 function rasterRampCss(name,invert=false){let arr=name==='random'?RASTER_STYLE_VARIETY.slice(0,12):(RASTER_STYLE_RAMPS[name]||RASTER_STYLE_RAMPS.viridis).slice();if(invert)arr.reverse();return`linear-gradient(90deg,${arr.join(',')})`;}
 function updateRasterRampVisuals(){const ramp=$('#rasterStyleRamp')?.value||'spectral',inv=!!$('#rasterStyleInvert')?.checked,sw=$('#rasterStyleRampSwatch');if(sw)sw.style.background=rasterRampCss(ramp,inv);const ur=$('#rasterStyleUniqueRamp')?.value||'spectral',us=$('#rasterStyleUniqueRampSwatch');if(us)us.style.background=rasterRampCss(ur,false);}
 function styleValueKey(v){if(!Number.isFinite(v))return'';const n=Math.round(v);return Math.abs(v-n)<1e-8?String(n):String(+v.toFixed(6));}
-function rasterStyleDefault(r){const m=r?.meta||{},st=r?.rasterStyle||{},lo=Number.isFinite(+st.min)?+st.min:(m.range?.[0]??0),hi=Number.isFinite(+st.max)?+st.max:(m.range?.[1]??1);return{renderer:st.renderer||'original',ramp:st.ramp||'spectral',uniqueRamp:st.uniqueRamp||'spectral',invert:!!st.invert,min:lo,max:hi,interpolation:st.interpolation||'linear',classMode:st.classMode||'continuous',classCount:Math.max(2,Math.min(32,+st.classCount||5)),precision:Math.max(0,Math.min(8,+st.precision||4)),brightness:Number.isFinite(+st.brightness)?+st.brightness:0,contrast:Number.isFinite(+st.contrast)?+st.contrast:0,gamma:Number.isFinite(+st.gamma)?+st.gamma:1,saturation:Number.isFinite(+st.saturation)?+st.saturation:0,isDem:st.isDem!=null?!!st.isDem:(m.kind==='dem'),classes:cloneAny(st.classes||{}),breaks:Array.isArray(st.breaks)?cloneAny(st.breaks):[],colorStops:Array.isArray(st.colorStops)?cloneAny(st.colorStops):[]};}
+function rasterStyleDefault(r){const m=r?.meta||{},st=r?.rasterStyle||{},lo=Number.isFinite(+st.min)?+st.min:(m.range?.[0]??0),hi=Number.isFinite(+st.max)?+st.max:(m.range?.[1]??1);return{renderer:st.renderer||'original',ramp:st.ramp||'spectral',uniqueRamp:st.uniqueRamp||'spectral',invert:!!st.invert,min:lo,max:hi,interpolation:st.interpolation||'linear',classMode:st.classMode||'continuous',classCount:Math.max(2,Math.min(32,+st.classCount||5)),precision:Math.max(0,Math.min(8,+st.precision||4)),brightness:Number.isFinite(+st.brightness)?+st.brightness:0,contrast:Number.isFinite(+st.contrast)?+st.contrast:0,gamma:Number.isFinite(+st.gamma)?+st.gamma:1,saturation:Number.isFinite(+st.saturation)?+st.saturation:0,isDem:st.isDem!=null?!!st.isDem:(m.kind==='dem'),hillshadeAzimuth:Number.isFinite(+st.hillshadeAzimuth)?+st.hillshadeAzimuth:315,hillshadeAltitude:Number.isFinite(+st.hillshadeAltitude)?+st.hillshadeAltitude:45,hillshadeZFactor:Number.isFinite(+st.hillshadeZFactor)?+st.hillshadeZFactor:1,hillshadeInvert:!!st.hillshadeInvert,classes:cloneAny(st.classes||{}),breaks:Array.isArray(st.breaks)?cloneAny(st.breaks):[],colorStops:Array.isArray(st.colorStops)?cloneAny(st.colorStops):[]};}
 function adjustRasterRgb(rgb,style){let out=rgb.slice(),b=(+style.brightness||0)*2.55,c=Math.max(-100,Math.min(100,+style.contrast||0)),factor=(259*(c+255))/(255*(259-c||1)),gamma=Math.max(.2,+style.gamma||1),sat=Math.max(-100,Math.min(100,+style.saturation||0))/100;for(let i=0;i<3;i++){let v=factor*(out[i]-128)+128+b;v=255*Math.pow(Math.max(0,Math.min(255,v))/255,1/gamma);out[i]=Math.max(0,Math.min(255,v));}if(sat!==0){const lum=.2126*out[0]+.7152*out[1]+.0722*out[2],mul=sat<0?1+sat:1+sat*1.65;for(let i=0;i<3;i++)out[i]=Math.max(0,Math.min(255,lum+(out[i]-lum)*mul));}return out.map(v=>Math.round(v));}
 function adjustRasterRgba(rgba,style){const out=new Uint8ClampedArray(rgba.length);for(let i=0;i<rgba.length;i+=4){const c=adjustRasterRgb([rgba[i],rgba[i+1],rgba[i+2]],style);out[i]=c[0];out[i+1]=c[1];out[i+2]=c[2];out[i+3]=rgba[i+3];}return out;}
 function rasterFmt(v,p=4){if(!Number.isFinite(+v))return'—';const n=+(+v).toFixed(Math.max(0,Math.min(8,p)));return String(n);}
@@ -1995,7 +2178,37 @@ function makeRasterBreaks(lo,hi,n,ramp='spectral',invert=false,bounds=null){n=Ma
 function rasterDiscreteClassIndex(v,breaks){for(let i=0;i<breaks.length;i++){const u=breaks[i].upper;if(u==null||v<=u)return i;}return Math.max(0,breaks.length-1);}
 function pseudocolorRgb(v,style){if(Array.isArray(style.colorStops)&&style.colorStops.length>=2)return rasterQgisStopColor(v,style.colorStops,style.interpolation||'linear');const breaks=Array.isArray(style.breaks)?style.breaks:[];if(!breaks.length)return hexRgb(rampColor(style.ramp||'spectral',Math.max(0,Math.min(1,(v-style.min)/((style.max-style.min)||1))),!!style.invert));const mode=style.interpolation||'linear';if(mode==='discrete'||mode==='exact'){const i=rasterDiscreteClassIndex(v,breaks),rec=breaks[i];if(!rec||rec.visible===false)return null;if(mode==='exact'){const tol=Math.max(1e-9,Math.abs(style.max-style.min)*1e-8),target=rec.upper==null?style.max:rec.upper;if(Math.abs(v-target)>tol)return null;}return hexRgb(rec.color||'#888888');}
   const lo=Number.isFinite(+style.min)?+style.min:0,hi=Number.isFinite(+style.max)?+style.max:1,bounds=[lo,...breaks.slice(0,-1).map(b=>+b.upper),hi],centers=[];for(let i=0;i<breaks.length;i++)centers.push((bounds[i]+bounds[i+1])/2);if(v<=centers[0])return breaks[0].visible===false?null:hexRgb(breaks[0].color);if(v>=centers[centers.length-1])return breaks[breaks.length-1].visible===false?null:hexRgb(breaks[breaks.length-1].color);for(let i=0;i<centers.length-1;i++){if(v<=centers[i+1]){const a=breaks[i],b=breaks[i+1];if(a.visible===false||b.visible===false)return null;const t=(v-centers[i])/((centers[i+1]-centers[i])||1);return hexRgb(mixHex(a.color,b.color,Math.max(0,Math.min(1,t))));}}return hexRgb(breaks[breaks.length-1].color);}
-function renderStyledValues(values,w,h,style,noData){const rgba=new Uint8ClampedArray(w*h*4),renderer=style.renderer||'gray',lo=Number.isFinite(+style.min)?+style.min:0,hi=Number.isFinite(+style.max)?+style.max:1,classes=style.classes||{};for(let i=0;i<values.length;i++){const v=values[i],o=i*4;if(!Number.isFinite(v)||(noData!=null&&Math.abs(v-noData)<=1e-8)){rgba[o+3]=0;continue;}let col=null,alpha=255;if(renderer==='unique'){const rec=classes[styleValueKey(v)];if(!rec||rec.visible===false){alpha=0;col=[0,0,0];}else col=hexRgb(rec.color||'#888888');}else if(renderer==='gray'){const t=Math.max(0,Math.min(1,(v-lo)/(hi-lo||1))),g=Math.round(t*255);col=[g,g,g];}else if(renderer==='pseudocolor'){col=pseudocolorRgb(v,style);if(!col){alpha=0;col=[0,0,0];}}else{const t=Math.max(0,Math.min(1,(v-lo)/(hi-lo||1))),g=Math.round(t*255);col=[g,g,g];}if(alpha){col=adjustRasterRgb(col,style);rgba[o]=col[0];rgba[o+1]=col[1];rgba[o+2]=col[2];}rgba[o+3]=Math.round(alpha*(col?.length===4?col[3]/255:1));}return rgba;}
+// QGIS-like Horn hillshade, with real-world pixel spacing so 0.5 m MDT
+// pixels and downsampled previews have consistent light and shadow.
+function rasterHillshade(values,w,h,style,noData,pixelSizeX=1,pixelSizeY=1){
+ const out=new Uint8ClampedArray(w*h*4);
+ const alt=Math.min(90,Math.max(0,+style.hillshadeAltitude||0))*Math.PI/180;
+ const az=((+style.hillshadeAzimuth||0)%360+360)%360*Math.PI/180;
+ const z=Math.max(0,Number.isFinite(+style.hillshadeZFactor)?+style.hillshadeZFactor:1)*(style.hillshadeInvert?-1:1);
+ const dx=Math.max(1e-9,Math.abs(pixelSizeX)),dy=Math.max(1e-9,Math.abs(pixelSizeY));
+ const lx=Math.sin(az)*Math.cos(alt),ly=Math.cos(az)*Math.cos(alt),lz=Math.sin(alt);
+ const valid=v=>Number.isFinite(v)&&(noData==null||Math.abs(v-noData)>1e-8);
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+  const idx=y*w+x,o=idx*4,mid=values[idx];if(!valid(mid))continue;
+  const at=(xx,yy)=>{
+   const v=values[Math.max(0,Math.min(h-1,yy))*w+Math.max(0,Math.min(w-1,xx))];
+   return valid(v)?v:mid;
+  };
+  const a=at(x-1,y-1),b=at(x,y-1),c=at(x+1,y-1),
+        d=at(x-1,y),f=at(x+1,y),
+        g=at(x-1,y+1),h0=at(x,y+1),i=at(x+1,y+1);
+  const gradX=z*((c+2*f+i)-(a+2*d+g))/(8*dx);
+  // Raster rows run southward; geographic north has the opposite sign.
+  const gradNorth=z*((a+2*b+c)-(g+2*h0+i))/(8*dy);
+  const norm=Math.hypot(gradX,gradNorth,1);
+  const light=Math.max(0,(-gradX*lx-gradNorth*ly+lz)/norm);
+  const gray=Math.round(light*255);
+  const rgb=adjustRasterRgb([gray,gray,gray],style);
+  out[o]=rgb[0];out[o+1]=rgb[1];out[o+2]=rgb[2];out[o+3]=255;
+ }
+ return out;
+}
+function renderStyledValues(values,w,h,style,noData,pixelSizeX=1,pixelSizeY=1){if(style.renderer==='hillshade')return rasterHillshade(values,w,h,style,noData,pixelSizeX,pixelSizeY);const rgba=new Uint8ClampedArray(w*h*4),renderer=style.renderer||'gray',lo=Number.isFinite(+style.min)?+style.min:0,hi=Number.isFinite(+style.max)?+style.max:1,classes=style.classes||{};for(let i=0;i<values.length;i++){const v=values[i],o=i*4;if(!Number.isFinite(v)||(noData!=null&&Math.abs(v-noData)<=1e-8)){rgba[o+3]=0;continue;}let col=null,alpha=255;if(renderer==='unique'){const rec=classes[styleValueKey(v)];if(!rec||rec.visible===false){alpha=0;col=[0,0,0];}else col=hexRgb(rec.color||'#888888');}else if(renderer==='gray'){const t=Math.max(0,Math.min(1,(v-lo)/(hi-lo||1))),g=Math.round(t*255);col=[g,g,g];}else if(renderer==='pseudocolor'){col=pseudocolorRgb(v,style);if(!col){alpha=0;col=[0,0,0];}}else{const t=Math.max(0,Math.min(1,(v-lo)/(hi-lo||1))),g=Math.round(t*255);col=[g,g,g];}if(alpha){col=adjustRasterRgb(col,style);rgba[o]=col[0];rgba[o+1]=col[1];rgba[o+2]=col[2];}rgba[o+3]=Math.round(alpha*(col?.length===4?col[3]/255:1));}return rgba;}
 function drawStyledRasterDetail(r){const m=r.meta||{},cacheMeta=r.styleCache;if(!cacheMeta?.ready||!m.sourceWidth||!m.sourceHeight)return;const sa=sourceAffine(r),res=Math.max(Math.hypot(sa.A,sa.D),Math.hypot(sa.B,sa.E)),sourcePixelScreen=res*state.view.scale;if(chooseDetailStep(sourcePixelScreen,m.downsample||1)==null)return;let vb=visibleSourceBounds(sa,m.sourceWidth,m.sourceHeight);if(!vb)return;if(!isDemRaster(r)){const wb=demWorkingBounds();if(wb){if(!boundsOverlap(rasterBounds(r),wb))return;const dp=[{x:wb.minX,y:wb.minY},{x:wb.maxX,y:wb.minY},{x:wb.maxX,y:wb.maxY},{x:wb.minX,y:wb.maxY}].map(q=>invertAffine(sa,q)).filter(Boolean);if(dp.length){const db={minX:Math.max(0,Math.min(...dp.map(q=>q.x))),maxX:Math.min(m.sourceWidth,Math.max(...dp.map(q=>q.x))),minY:Math.max(0,Math.min(...dp.map(q=>q.y))),maxY:Math.min(m.sourceHeight,Math.max(...dp.map(q=>q.y)))};vb={minX:Math.max(vb.minX,db.minX),maxX:Math.min(vb.maxX,db.maxX),minY:Math.max(vb.minY,db.minY),maxY:Math.min(vb.maxY,db.maxY)};}}}if(vb.maxX<=vb.minX||vb.maxY<=vb.minY)return;const ts=cacheMeta.tileSize||512,tx0=Math.floor(vb.minX/ts),tx1=Math.floor((vb.maxX-1)/ts),ty0=Math.floor(vb.minY/ts),ty1=Math.floor((vb.maxY-1)/ts),center=invertAffine(sa,{x:state.view.cx,y:state.view.cy})||{x:(vb.minX+vb.maxX)/2,y:(vb.minY+vb.maxY)/2},wanted=[];for(let ty=ty0;ty<=ty1;ty++)for(let tx=tx0;tx<=tx1;tx++)wanted.push({tx,ty,d:Math.hypot((tx+.5)*ts-center.x,(ty+.5)*ts-center.y)});wanted.sort((a,b)=>a.d-b.d);r._styleTileCache=r._styleTileCache||new Map();r._styleTilePending=r._styleTilePending||0;let req=0;for(const t of wanted){const key=`${t.tx}/${t.ty}`,rec=r._styleTileCache.get(key);if(rec?.bitmap){rec.last=performance.now();const x=t.tx*ts,y=t.ty*ts,a={A:sa.A,D:sa.D,B:sa.B,E:sa.E,C:sa.A*x+sa.B*y+sa.C,F:sa.D*x+sa.E*y+sa.F},ppx=res*state.view.scale;drawBitmapAffine(rec.bitmap,a,r.opacity,ppx,r);}else if(!rec&&req<4&&r._styleTilePending<4){req++;requestStyledRasterTile(r,t.tx,t.ty,key);}}evictStyledRasterTiles(r);}
 async function requestStyledRasterTile(r,tx,ty,key){const c=r._styleTileCache||(r._styleTileCache=new Map());c.set(key,{loading:true,last:performance.now()});r._styleTilePending=(r._styleTilePending||0)+1;try{const rec=await dbGet('rasterStyleTiles',`${r.id}:${tx}:${ty}`);if(!rec?.blob){c.set(key,{missing:true,last:performance.now()});return;}const bmp=await createImageBitmap(rec.blob);c.set(key,{bitmap:bmp,last:performance.now()});requestAnimationFrame(drawAll);}catch(e){console.warn('No s’ha pogut llegir la tesela raster estilitzada',e);c.set(key,{error:true,last:performance.now()});}finally{r._styleTilePending=Math.max(0,(r._styleTilePending||1)-1);}}
 function evictStyledRasterTiles(r){const c=r._styleTileCache;if(!c||c.size<=16)return;const items=[...c.entries()].filter(([,v])=>v.bitmap).sort((a,b)=>(a[1].last||0)-(b[1].last||0));while(c.size>10&&items.length){const[k,v]=items.shift();try{v.bitmap.close?.()}catch{}c.delete(k);}}
@@ -2003,8 +2216,8 @@ async function rasterStyleSourceInfo(r){if(!r?.sourceBlob||!window.GeoCauceGeoTI
 function rasterStyleIsSingleBandMeta(meta){return !(meta?.spp>=3&&meta?.photometric===2);}
 function rasterStyleClassColor(index,total,ramp='spectral',value=null,invert=false){if(ramp==='random')return RASTER_STYLE_VARIETY[index%RASTER_STYLE_VARIETY.length];return rampColor(ramp,total<=1?.5:index/(total-1),invert);}
 async function ensureRasterStyleSample(r){if(rasterStyleSample?.rasterId===r.id)return rasterStyleSample;if(rasterStyleSamplePromise?.rasterId===r.id)return rasterStyleSamplePromise.promise;const info=$('#rasterStylePreviewInfo');if(info)info.textContent='Llegint una mostra del GeoTIFF…';const promise=(async()=>{const {meta}=await rasterStyleSourceInfo(r),maxW=560,maxH=430,sc=Math.min(1,maxW/meta.width,maxH/meta.height),ow=Math.max(1,Math.round(meta.width*sc)),oh=Math.max(1,Math.round(meta.height*sc));if(rasterStyleIsSingleBandMeta(meta)){const dec=await GeoCauceGeoTIFF.decodeValuesRegion(meta,{x:0,y:0,width:meta.width,height:meta.height,outWidth:ow,outHeight:oh});rasterStyleSample={rasterId:r.id,kind:'single',width:ow,height:oh,values:dec.values,noData:dec.noData,min:dec.min,max:dec.max};}else{const dec=await GeoCauceGeoTIFF.decodeRegion(meta,{x:0,y:0,width:meta.width,height:meta.height,outWidth:ow,outHeight:oh});rasterStyleSample={rasterId:r.id,kind:'rgb',width:ow,height:oh,rgba:dec.rgba,noData:null,min:null,max:null};}if(info&&rasterStyleEditingId===r.id)info.textContent=`Mostra ${ow} × ${oh} · el render final processarà ${meta.width.toLocaleString()} × ${meta.height.toLocaleString()} píxels.`;return rasterStyleSample;})();rasterStyleSamplePromise={rasterId:r.id,promise};try{return await promise;}finally{if(rasterStyleSamplePromise?.promise===promise)rasterStyleSamplePromise=null;}}
-function currentRasterStyleFromUi(r){const base=rasterStyleDefault(r),renderer=$('#rasterStyleRenderer')?.value||base.renderer,isGray=renderer==='gray',style={...base,renderer,ramp:$('#rasterStyleRamp')?.value||base.ramp,uniqueRamp:$('#rasterStyleUniqueRamp')?.value||base.uniqueRamp,invert:!!$('#rasterStyleInvert')?.checked,min:parseFloat(isGray?$('#rasterStyleGrayMin')?.value:$('#rasterStyleMin')?.value),max:parseFloat(isGray?$('#rasterStyleGrayMax')?.value:$('#rasterStyleMax')?.value),interpolation:$('#rasterStyleInterpolation')?.value||base.interpolation,classMode:$('#rasterStyleClassMode')?.value||base.classMode,classCount:Math.max(2,Math.min(32,Math.round(+($('#rasterStyleClassCount')?.value||base.classCount)))),precision:Math.max(0,Math.min(8,Math.round(+($('#rasterStylePrecision')?.value||base.precision)))),brightness:+($('#rasterStyleBrightness')?.value||0),contrast:+($('#rasterStyleContrast')?.value||0),gamma:+($('#rasterStyleGamma')?.value||1),saturation:+($('#rasterStyleSaturation')?.value||0),isDem:!!$('#rasterStyleIsDem')?.checked,classes:{},breaks:cloneAny(rasterStyleBreaks),colorStops:rasterStyleQgisStops?cloneAny(rasterStyleQgisStops):[]};if(!Number.isFinite(style.min))style.min=base.min;if(!Number.isFinite(style.max))style.max=base.max;for(const rec of rasterStyleClasses){style.classes[styleValueKey(rec.value)]={color:rec.color,label:rec.label||styleValueKey(rec.value),visible:rec.visible!==false};}return style;}
-function updateRasterStylePanels(){const v=$('#rasterStyleRenderer')?.value||'original',adjust=v!=='original';$('#rasterStyleUniquePanel')?.classList.toggle('hidden',v!=='unique');$('#rasterStyleGrayPanel')?.classList.toggle('hidden',v!=='gray');$('#rasterStylePseudoPanel')?.classList.toggle('hidden',v!=='pseudocolor');$('#rasterStyleAdjustPanel')?.classList.toggle('hidden',!adjust);const isRgb=v==='rgb';if($('#rasterStyleIsDem')){$('#rasterStyleIsDem').disabled=isRgb;if(isRgb)$('#rasterStyleIsDem').checked=false;}updateRasterRampVisuals();updateRasterStylePreview();}
+function currentRasterStyleFromUi(r){const base=rasterStyleDefault(r),renderer=$('#rasterStyleRenderer')?.value||base.renderer,isGray=renderer==='gray',style={...base,renderer,ramp:$('#rasterStyleRamp')?.value||base.ramp,uniqueRamp:$('#rasterStyleUniqueRamp')?.value||base.uniqueRamp,invert:!!$('#rasterStyleInvert')?.checked,min:parseFloat(isGray?$('#rasterStyleGrayMin')?.value:$('#rasterStyleMin')?.value),max:parseFloat(isGray?$('#rasterStyleGrayMax')?.value:$('#rasterStyleMax')?.value),interpolation:$('#rasterStyleInterpolation')?.value||base.interpolation,classMode:$('#rasterStyleClassMode')?.value||base.classMode,classCount:Math.max(2,Math.min(32,Math.round(+($('#rasterStyleClassCount')?.value||base.classCount)))),precision:Math.max(0,Math.min(8,Math.round(+($('#rasterStylePrecision')?.value||base.precision)))),brightness:+($('#rasterStyleBrightness')?.value||0),contrast:+($('#rasterStyleContrast')?.value||0),gamma:+($('#rasterStyleGamma')?.value||1),saturation:+($('#rasterStyleSaturation')?.value||0),isDem:renderer==='hillshade'||!!$('#rasterStyleIsDem')?.checked,hillshadeAzimuth:+($('#rasterStyleHillshadeAzimuth')?.value||315),hillshadeAltitude:+($('#rasterStyleHillshadeAltitude')?.value||45),hillshadeZFactor:+($('#rasterStyleHillshadeZFactor')?.value||1),hillshadeInvert:!!$('#rasterStyleHillshadeInvert')?.checked,classes:{},breaks:cloneAny(rasterStyleBreaks),colorStops:rasterStyleQgisStops?cloneAny(rasterStyleQgisStops):[]};if(!Number.isFinite(style.min))style.min=base.min;if(!Number.isFinite(style.max))style.max=base.max;for(const rec of rasterStyleClasses){style.classes[styleValueKey(rec.value)]={color:rec.color,label:rec.label||styleValueKey(rec.value),visible:rec.visible!==false};}return style;}
+function updateRasterStylePanels(){const v=$('#rasterStyleRenderer')?.value||'original',adjust=v!=='original';$('#rasterStyleUniquePanel')?.classList.toggle('hidden',v!=='unique');$('#rasterStyleGrayPanel')?.classList.toggle('hidden',v!=='gray');$('#rasterStylePseudoPanel')?.classList.toggle('hidden',v!=='pseudocolor');$('#rasterStyleHillshadePanel')?.classList.toggle('hidden',v!=='hillshade');$('#rasterStyleAdjustPanel')?.classList.toggle('hidden',!adjust);if(v==='hillshade'&&$('#rasterStyleIsDem'))$('#rasterStyleIsDem').checked=true;const isRgb=v==='rgb';if($('#rasterStyleIsDem')){$('#rasterStyleIsDem').disabled=isRgb;if(isRgb)$('#rasterStyleIsDem').checked=false;}updateRasterRampVisuals();updateRasterStylePreview();}
 function renderRasterStyleClasses(){const root=$('#rasterStyleClasses');if(!root)return;root.innerHTML='';for(const rec of rasterStyleClasses){const row=document.createElement('div');row.className='raster-class-row';row.innerHTML=`<code title="${escapeHtml(styleValueKey(rec.value))}">${escapeHtml(styleValueKey(rec.value))}</code><input type="color" value="${rec.color}"><input type="text" value="${escapeHtml(rec.label||styleValueKey(rec.value))}" aria-label="Etiqueta"><input type="checkbox" ${rec.visible!==false?'checked':''} aria-label="Visible">`;const [col,label,vis]=[row.querySelector('input[type=color]'),row.querySelector('input[type=text]'),row.querySelector('input[type=checkbox]')];col.oninput=()=>{rec.color=col.value;updateRasterStylePreview();};label.oninput=()=>rec.label=label.value;vis.onchange=()=>{rec.visible=vis.checked;updateRasterStylePreview();};root.appendChild(row);}}
 function renderRasterStyleBreaks(){
   if(rasterStyleQgisStops?.length){renderRasterQgisStops();return;}const root=$('#rasterStyleBreaks');if(!root)return;refreshRasterBreakLabels();root.innerHTML='';const p=Math.max(0,Math.min(8,+($('#rasterStylePrecision')?.value||4)));for(let i=0;i<rasterStyleBreaks.length;i++){const rec=rasterStyleBreaks[i],last=i===rasterStyleBreaks.length-1,prev=i?rasterStyleBreaks[i-1].upper:null,row=document.createElement('div');row.className='raster-break-row';const rule=last?`<div class="raster-break-rule readonly">&gt; ${escapeHtml(rasterFmt(prev,p))}</div>`:`<div class="raster-break-rule"><span>${i===0?'≤':'fins a'}</span><input class="raster-break-limit" type="text" inputmode="decimal" value="${Number(rec.upper)}"><span>${i===0?'':' '}</span></div>`;row.innerHTML=`${rule}<input class="raster-break-color" type="color" value="${rec.color||'#888888'}"><input class="raster-break-label" type="text" value="${escapeHtml(rec.label||'')}"><input class="raster-break-visible" type="checkbox" ${rec.visible!==false?'checked':''}>`;const limit=row.querySelector('.raster-break-limit');if(limit)limit.onchange=()=>{const nv=rasterParseFiniteNumber(limit.value),lo=rasterParseFiniteNumber($('#rasterStyleMin')?.value),hi=rasterParseFiniteNumber($('#rasterStyleMax')?.value),prevV=i===0?lo:rasterStyleBreaks[i-1].upper,nextV=i===rasterStyleBreaks.length-2?hi:rasterStyleBreaks[i+1].upper;if(!Number.isFinite(nv)||!(nv>prevV&&nv<nextV)){toast(`El límit ha d’estar entre ${rasterFmt(prevV,p)} i ${rasterFmt(nextV,p)}`);limit.value=String(rec.upper);return;}rec.upper=nv;refreshRasterBreakLabels();limit.value=String(nv);root.querySelectorAll('.raster-break-label').forEach((el,index)=>{if(rasterStyleBreaks[index]?.autoLabel!==false)el.value=rasterStyleBreaks[index].label||'';});const lastRule=root.querySelector('.raster-break-rule.readonly');if(lastRule)lastRule.textContent='> '+rasterFmt(rasterStyleBreaks[rasterStyleBreaks.length-2].upper,p);updateRasterStylePreview();};const color=row.querySelector('.raster-break-color');color.oninput=()=>{rec.color=color.value;updateRasterStylePreview();};const label=row.querySelector('.raster-break-label');label.oninput=()=>{rec.label=label.value;rec.autoLabel=false;};row.querySelector('.raster-break-visible').onchange=e=>{rec.visible=e.target.checked;updateRasterStylePreview();};root.appendChild(row);}}
@@ -2021,15 +2234,22 @@ function renderRasterQgisStops(){
     '<input type="checkbox" class="raster-break-visible" aria-label="Visible">';
   const num=row.querySelector('.raster-break-limit'),color=row.querySelector('.raster-break-color'),
         label=row.querySelector('.raster-break-label'),visible=row.querySelector('.raster-break-visible');
-  num.value=String(rec.value);color.value=rec.color;label.value=rec.label||'';visible.checked=rec.visible!==false;
-  num.onchange=()=>{
+  num.value=rec.unbounded?'∞':String(rec.value);color.value=rec.color;label.value=rec.label||'';visible.checked=rec.visible!==false;
+  if(rec.unbounded){num.readOnly=true;num.title='Límit superior obert (QGIS: inf)';}
+  else num.onchange=()=>{
    const value=rasterParseFiniteNumber(num.value),
      previous=i?rasterStyleQgisStops[i-1].value:-Infinity,
-     next=i===stops.length-1?Infinity:rasterStyleQgisStops[i+1].value;
+     next=i===stops.length-1||(i===stops.length-2&&stops[stops.length-1].unbounded)?Infinity:rasterStyleQgisStops[i+1].value;
    if(value===null||!(value>previous&&value<next)){
     toast('Valor invàlid: els punts han d’estar en ordre ascendent');num.value=String(rec.value);return;
    }
+   let openValue=null;
+   if(i===stops.length-2&&stops[stops.length-1].unbounded){
+    try{openValue=rasterQgisOpenUpper(value);}
+    catch(e){toast(e.message);num.value=String(rec.value);return;}
+   }
    rec.value=value;num.value=String(value);
+   if(openValue!==null)stops[stops.length-1].value=openValue;
    $('#rasterStyleMin').value=String(stops[0].value);
    $('#rasterStyleMax').value=String(stops[stops.length-1].value);
    updateRasterStylePreview();
@@ -2040,7 +2260,7 @@ function renderRasterQgisStops(){
   root.appendChild(row);
  });
  const help=$('#rasterStyleQgisStatus');if(help)help.textContent=
-  'Paleta QGIS · '+stops.length+' punts editables. Només «Classificar» recrearà els límits.';
+  'Paleta QGIS · '+stops.length+' punts (el límit ∞ és obert i no es pot editar). Només «Classificar» recrearà els límits.';
 }
 async function importRasterQgisPalette(file){
  if(!file)return;
@@ -2069,8 +2289,8 @@ function recolorRasterStyleBreaks(){if(rasterStyleQgisStops?.length){const n=ras
 async function classifyRasterValues(){const r=state.rasters.find(x=>x.id===rasterStyleEditingId);if(!r||rasterStyleBusy)return;rasterStyleBusy=true;const btn=$('#rasterStyleClassify'),status=$('#rasterStyleClassStatus');if(btn)btn.disabled=true;try{showImportProgress(r.name,.01,'Llegint tots els valors de la banda…');const {meta}=await rasterStyleSourceInfo(r);if(!rasterStyleIsSingleBandMeta(meta))throw Error('La capa és RGB/multibanda');const tile=768,uniq=new Map(),cols=Math.ceil(meta.width/tile),rows=Math.ceil(meta.height/tile),total=cols*rows;let done=0,tooMany=false;for(let ty=0;ty<rows&&!tooMany;ty++)for(let tx=0;tx<cols;tx++){const x=tx*tile,y=ty*tile,w=Math.min(tile,meta.width-x),h=Math.min(tile,meta.height-y),dec=await GeoCauceGeoTIFF.decodeValuesRegion(meta,{x,y,width:w,height:h,outWidth:w,outHeight:h});for(let i=0;i<dec.values.length;i++){const v=dec.values[i];if(!Number.isFinite(v)||(dec.noData!=null&&Math.abs(v-dec.noData)<=1e-8))continue;const key=styleValueKey(v);if(!uniq.has(key)){uniq.set(key,v);if(uniq.size>512){tooMany=true;break;}}}done++;showImportProgress(r.name,Math.min(.98,done/total),tooMany?'Més de 512 valors: millor pseudocolor':`Classificant valors · ${done}/${total}`);if(done%4===0)await new Promise(q=>setTimeout(q,0));if(tooMany)break;}if(tooMany){rasterStyleClasses=[];renderRasterStyleClasses();if(status)status.textContent='Hi ha més de 512 valors diferents. Usa Pseudocolor monobanda per a dades contínues.';toast('Més de 512 valors diferents · millor usar pseudocolor',5200);return;}const vals=[...uniq.values()].sort((a,b)=>a-b),ramp=$('#rasterStyleUniqueRamp')?.value||'spectral',cm=meta.photometric===3?meta.tags.get(320):null,bits=meta.bits?.[0]||8,palN=2**Math.min(16,bits);rasterStyleClasses=vals.map((v,i)=>{let color;if(cm&&Array.isArray(cm)&&v>=0&&Number.isInteger(v)&&v<palN&&cm.length>=palN*3)color=rgbHex((cm[v]||0)/257,(cm[v+palN]||0)/257,(cm[v+palN*2]||0)/257);else color=rasterStyleClassColor(i,vals.length,ramp,v);return{value:v,color,label:styleValueKey(v),visible:true};});renderRasterStyleClasses();if(status)status.textContent=`${vals.length} valors únics detectats llegint el raster complet.`;updateRasterStylePreview();}catch(e){console.error(e);if(status)status.textContent=e?.message||String(e);toast('No s’ha pogut classificar: '+(e?.message||e),5200);}finally{hideImportProgress();if(btn)btn.disabled=false;rasterStyleBusy=false;}}
 async function rasterQuantileBounds(meta,lo,hi,n,name){const bins=8192,hist=new Float64Array(bins),tile=768,cols=Math.ceil(meta.width/tile),rows=Math.ceil(meta.height/tile),total=cols*rows;let count=0,done=0;for(let ty=0;ty<rows;ty++)for(let tx=0;tx<cols;tx++){const x=tx*tile,y=ty*tile,w=Math.min(tile,meta.width-x),h=Math.min(tile,meta.height-y),dec=await GeoCauceGeoTIFF.decodeValuesRegion(meta,{x,y,width:w,height:h,outWidth:w,outHeight:h});for(const v of dec.values){if(!Number.isFinite(v)||(dec.noData!=null&&Math.abs(v-dec.noData)<=1e-8)||v<lo||v>hi)continue;const bi=Math.max(0,Math.min(bins-1,Math.floor((v-lo)/((hi-lo)||1)*(bins-1))));hist[bi]++;count++;}done++;showImportProgress(name,.03+.9*(done/total),`Quantils · llegint tots els píxels ${done}/${total}`);if(done%3===0)await new Promise(q=>setTimeout(q,0));}if(!count)throw Error('No hi ha valors vàlids dins del rang seleccionat');const targets=[];for(let i=1;i<n;i++)targets.push(count*i/n);const out=[],step=(hi-lo)/(bins-1);let cum=0,ti=0;for(let b=0;b<bins&&ti<targets.length;b++){cum+=hist[b];while(ti<targets.length&&cum>=targets[ti]){out.push(lo+b*step);ti++;}}while(out.length<n-1)out.push(hi-(n-1-out.length)*step);const eps=Math.max(1e-12,Math.abs(hi-lo)*1e-9);for(let i=0;i<out.length;i++){const mn=i?out[i-1]+eps:lo+eps,mx=hi-eps*(out.length-i);out[i]=Math.max(mn,Math.min(mx,out[i]));}return out;}
 async function classifyRasterPseudocolor(){const r=state.rasters.find(x=>x.id===rasterStyleEditingId);if(!r||rasterStyleBusy)return;const lo=+$('#rasterStyleMin').value,hi=+$('#rasterStyleMax').value,n=Math.max(2,Math.min(32,Math.round(+$('#rasterStyleClassCount').value||5))),mode=$('#rasterStyleClassMode').value||'continuous',status=$('#rasterStylePseudoStatus'),btn=$('#rasterStylePseudoClassify');if(!(Number.isFinite(lo)&&Number.isFinite(hi)&&hi>lo)){toast('Revisa el mínim i el màxim');return;}rasterStyleBusy=true;if(btn)btn.disabled=true;try{let bounds=null;if(mode==='quantile'){showImportProgress(r.name,.01,'Preparant classificació per quantils…');const {meta}=await rasterStyleSourceInfo(r);bounds=await rasterQuantileBounds(meta,lo,hi,n,r.name);}else if(mode==='continuous'){const step=(hi-lo)/(n-1);bounds=Array.from({length:n-1},(_,i)=>lo+(i+.5)*step);}else{bounds=Array.from({length:n-1},(_,i)=>lo+(hi-lo)*(i+1)/n);}rasterStyleBreaks=makeRasterBreaks(lo,hi,n,$('#rasterStyleRamp').value||'spectral',!!$('#rasterStyleInvert').checked,bounds);rasterStyleQgisStops=null;renderRasterStyleBreaks();updateRasterRampVisuals();updateRasterStylePreview();if(status)status.textContent=mode==='quantile'?`${n} classes per quantils, calculades recorrent el raster complet.`:mode==='equal'?`${n} intervals d’amplada igual. Pots editar qualsevol límit.`:`${n} punts de classificació continus. Pots editar qualsevol límit.`;}catch(e){console.error(e);if(status)status.textContent=e?.message||String(e);toast('No s’ha pogut classificar: '+(e?.message||e),6000);}finally{hideImportProgress();if(btn)btn.disabled=false;rasterStyleBusy=false;}}
-async function updateRasterStylePreview(){const r=state.rasters.find(x=>x.id===rasterStyleEditingId),canvas=$('#rasterStylePreview');if(!r||!canvas)return;const g=canvas.getContext('2d');g.clearRect(0,0,canvas.width,canvas.height);const renderer=$('#rasterStyleRenderer')?.value||'original';try{if(renderer==='original'){const bmp=r.image;if(!bmp)return;const sc=Math.min(canvas.width/bmp.width,canvas.height/bmp.height),w=bmp.width*sc,h=bmp.height*sc;g.imageSmoothingEnabled=true;g.drawImage(bmp,(canvas.width-w)/2,(canvas.height-h)/2,w,h);return;}const sample=await ensureRasterStyleSample(r);if(rasterStyleEditingId!==r.id)return;const style=currentRasterStyleFromUi(r);let rgba;if(sample.kind==='rgb'){if(renderer!=='rgb')throw Error('Aquest GeoTIFF és multibanda: usa “Color multibanda”');rgba=adjustRasterRgba(sample.rgba,style);}else{if(renderer==='rgb')throw Error('Aquesta capa és monobanda');rgba=renderStyledValues(sample.values,sample.width,sample.height,style,sample.noData);}const ic=document.createElement('canvas');ic.width=sample.width;ic.height=sample.height;ic.getContext('2d').putImageData(new ImageData(rgba,sample.width,sample.height),0,0);g.imageSmoothingEnabled=renderer==='rgb';const sc=Math.min(canvas.width/sample.width,canvas.height/sample.height),w=sample.width*sc,h=sample.height*sc;g.drawImage(ic,(canvas.width-w)/2,(canvas.height-h)/2,w,h);}catch(e){g.fillStyle='#555';g.font='14px system-ui';g.fillText(e?.message||String(e),12,28);}}
-async function openRasterStyleEditor(r){if(!r?.sourceBlob||r.meta?.sourceType!=='geotiff'){toast('L’editor de simbologia necessita el GeoTIFF original');return;}rasterStyleEditingId=r.id;rasterStyleSample=null;rasterStyleSamplePromise=null;const st=rasterStyleDefault(r);rasterStyleClasses=Object.entries(st.classes||{}).map(([key,v])=>({value:Number(key),color:v.color||'#888888',label:v.label||key,visible:v.visible!==false})).filter(x=>Number.isFinite(x.value)).sort((a,b)=>a.value-b.value);rasterStyleBreaks=Array.isArray(st.breaks)&&st.breaks.length?cloneAny(st.breaks):makeRasterBreaks(st.min,st.max,st.classCount,st.ramp,st.invert);rasterStyleQgisStops=Array.isArray(st.colorStops)&&rasterValidateStops(st.colorStops)?cloneAny(st.colorStops):null;$('#rasterStyleSubtitle').textContent=r.name;const m=r.meta||{},isRgb=(m.kind==='rgb'||(m.samplesPerPixel>=3&&m.photometric===2));const renderer=$('#rasterStyleRenderer');if(renderer){for(const o of renderer.options){if(o.value==='rgb')o.disabled=!isRgb;else if(['unique','gray','pseudocolor'].includes(o.value))o.disabled=isRgb;}renderer.value=st.renderer;if(renderer.selectedOptions[0]?.disabled)renderer.value=isRgb?'rgb':'original';}$('#rasterStyleRamp').value=st.ramp||'spectral';$('#rasterStyleUniqueRamp').value=st.uniqueRamp||'spectral';$('#rasterStyleInvert').checked=!!st.invert;$('#rasterStyleMin').value=String(st.min);$('#rasterStyleMax').value=String(st.max);$('#rasterStyleGrayMin').value=String(st.min);$('#rasterStyleGrayMax').value=String(st.max);$('#rasterStyleInterpolation').value=st.interpolation||'linear';$('#rasterStyleClassMode').value=st.classMode||'continuous';$('#rasterStyleClassCount').value=String(st.classCount||5);$('#rasterStylePrecision').value=String(st.precision??4);$('#rasterStyleBrightness').value=String(st.brightness||0);$('#rasterStyleContrast').value=String(st.contrast||0);$('#rasterStyleGamma').value=String(st.gamma||1);$('#rasterStyleSaturation').value=String(st.saturation||0);$('#rasterStyleBrightnessOut').value=String(st.brightness||0);$('#rasterStyleContrastOut').value=String(st.contrast||0);$('#rasterStyleGammaOut').value=(+st.gamma||1).toFixed(2);$('#rasterStyleSaturationOut').value=String(st.saturation||0);$('#rasterStyleIsDem').checked=!!st.isDem&&!isRgb;$('#rasterStyleIsDem').disabled=isRgb;const bits=(m.bitsPerSample||[]).join('/')||'—',spp=m.samplesPerPixel||'—',photo=m.photometric??'—';$('#rasterStyleBandInfo').textContent=`Mostres: ${spp} · Bits: ${bits} · Photometric: ${photo} · NoData: ${m.noData??'—'} · ${m.sourceWidth||'?'} × ${m.sourceHeight||'?'} px`;$('#rasterStyleClassStatus').textContent=rasterStyleClasses.length?`${rasterStyleClasses.length} classes guardades.`:'Prem “Llegir valors” per detectar les classes.';$('#rasterStylePseudoStatus').textContent=rasterStyleQgisStops?.length?'Paleta QGIS importada · colors i punts preservats.':rasterStyleBreaks.length?`${rasterStyleBreaks.length} classes preparades. Pots editar els límits, colors i etiquetes.`:'Defineix el mode i prem “Classificar”.';renderRasterStyleClasses();renderRasterStyleBreaks();updateRasterRampVisuals();$('#rasterStyleSaveStatus').textContent=r.styleCache?.ready?'Mapa visual generat':'Sense render visual desat';$('#rasterStyleModal').classList.remove('hidden');updateRasterStylePanels();}
+async function updateRasterStylePreview(){const r=state.rasters.find(x=>x.id===rasterStyleEditingId),canvas=$('#rasterStylePreview');if(!r||!canvas)return;const g=canvas.getContext('2d');g.clearRect(0,0,canvas.width,canvas.height);const renderer=$('#rasterStyleRenderer')?.value||'original';try{if(renderer==='original'){const bmp=r.image;if(!bmp)return;const sc=Math.min(canvas.width/bmp.width,canvas.height/bmp.height),w=bmp.width*sc,h=bmp.height*sc;g.imageSmoothingEnabled=true;g.drawImage(bmp,(canvas.width-w)/2,(canvas.height-h)/2,w,h);return;}const sample=await ensureRasterStyleSample(r);if(rasterStyleEditingId!==r.id)return;const style=currentRasterStyleFromUi(r);let rgba;if(sample.kind==='rgb'){if(renderer!=='rgb')throw Error('Aquest GeoTIFF és multibanda: usa “Color multibanda”');rgba=adjustRasterRgba(sample.rgba,style);}else{if(renderer==='rgb')throw Error('Aquesta capa és monobanda');const affine=r.meta?.sourceAffine||sourceAffine(r);const pw=Math.hypot(affine?.A||1,affine?.D||0)*(r.meta?.sourceWidth||sample.width)/sample.width,ph=Math.hypot(affine?.B||0,affine?.E||1)*(r.meta?.sourceHeight||sample.height)/sample.height;rgba=renderStyledValues(sample.values,sample.width,sample.height,style,sample.noData,pw,ph);}const ic=document.createElement('canvas');ic.width=sample.width;ic.height=sample.height;ic.getContext('2d').putImageData(new ImageData(rgba,sample.width,sample.height),0,0);g.imageSmoothingEnabled=renderer==='rgb';const sc=Math.min(canvas.width/sample.width,canvas.height/sample.height),w=sample.width*sc,h=sample.height*sc;g.drawImage(ic,(canvas.width-w)/2,(canvas.height-h)/2,w,h);}catch(e){g.fillStyle='#555';g.font='14px system-ui';g.fillText(e?.message||String(e),12,28);}}
+async function openRasterStyleEditor(r){if(!r?.sourceBlob||r.meta?.sourceType!=='geotiff'){toast('L’editor de simbologia necessita el GeoTIFF original');return;}rasterStyleEditingId=r.id;rasterStyleSample=null;rasterStyleSamplePromise=null;const st=rasterStyleDefault(r);rasterStyleClasses=Object.entries(st.classes||{}).map(([key,v])=>({value:Number(key),color:v.color||'#888888',label:v.label||key,visible:v.visible!==false})).filter(x=>Number.isFinite(x.value)).sort((a,b)=>a.value-b.value);rasterStyleBreaks=Array.isArray(st.breaks)&&st.breaks.length?cloneAny(st.breaks):makeRasterBreaks(st.min,st.max,st.classCount,st.ramp,st.invert);rasterStyleQgisStops=Array.isArray(st.colorStops)&&rasterValidateStops(st.colorStops)?cloneAny(st.colorStops):null;$('#rasterStyleSubtitle').textContent=r.name;const m=r.meta||{},isRgb=(m.kind==='rgb'||(m.samplesPerPixel>=3&&m.photometric===2));const renderer=$('#rasterStyleRenderer');if(renderer){for(const o of renderer.options){if(o.value==='rgb')o.disabled=!isRgb;else if(['unique','gray','pseudocolor','hillshade'].includes(o.value))o.disabled=isRgb;}renderer.value=st.renderer;if(renderer.selectedOptions[0]?.disabled)renderer.value=isRgb?'rgb':'original';}$('#rasterStyleRamp').value=st.ramp||'spectral';$('#rasterStyleUniqueRamp').value=st.uniqueRamp||'spectral';$('#rasterStyleInvert').checked=!!st.invert;$('#rasterStyleHillshadeAzimuth').value=String(st.hillshadeAzimuth);$('#rasterStyleHillshadeAltitude').value=String(st.hillshadeAltitude);$('#rasterStyleHillshadeZFactor').value=String(st.hillshadeZFactor);$('#rasterStyleHillshadeInvert').checked=!!st.hillshadeInvert;$('#rasterStyleMin').value=String(st.min);$('#rasterStyleMax').value=String(st.max);$('#rasterStyleGrayMin').value=String(st.min);$('#rasterStyleGrayMax').value=String(st.max);$('#rasterStyleInterpolation').value=st.interpolation||'linear';$('#rasterStyleClassMode').value=st.classMode||'continuous';$('#rasterStyleClassCount').value=String(st.classCount||5);$('#rasterStylePrecision').value=String(st.precision??4);$('#rasterStyleBrightness').value=String(st.brightness||0);$('#rasterStyleContrast').value=String(st.contrast||0);$('#rasterStyleGamma').value=String(st.gamma||1);$('#rasterStyleSaturation').value=String(st.saturation||0);$('#rasterStyleBrightnessOut').value=String(st.brightness||0);$('#rasterStyleContrastOut').value=String(st.contrast||0);$('#rasterStyleGammaOut').value=(+st.gamma||1).toFixed(2);$('#rasterStyleSaturationOut').value=String(st.saturation||0);$('#rasterStyleIsDem').checked=!!st.isDem&&!isRgb;$('#rasterStyleIsDem').disabled=isRgb;const bits=(m.bitsPerSample||[]).join('/')||'—',spp=m.samplesPerPixel||'—',photo=m.photometric??'—';$('#rasterStyleBandInfo').textContent=`Mostres: ${spp} · Bits: ${bits} · Photometric: ${photo} · NoData: ${m.noData??'—'} · ${m.sourceWidth||'?'} × ${m.sourceHeight||'?'} px`;$('#rasterStyleClassStatus').textContent=rasterStyleClasses.length?`${rasterStyleClasses.length} classes guardades.`:'Prem “Llegir valors” per detectar les classes.';$('#rasterStylePseudoStatus').textContent=rasterStyleQgisStops?.length?'Paleta QGIS importada · colors i punts preservats.':rasterStyleBreaks.length?`${rasterStyleBreaks.length} classes preparades. Pots editar els límits, colors i etiquetes.`:'Defineix el mode i prem “Classificar”.';renderRasterStyleClasses();renderRasterStyleBreaks();updateRasterRampVisuals();$('#rasterStyleSaveStatus').textContent=r.styleCache?.ready?'Mapa visual generat':'Sense render visual desat';$('#rasterStyleModal').classList.remove('hidden');updateRasterStylePanels();}
 function closeRasterStyleEditor(){if(rasterStyleBusy)return;$('#rasterStyleModal')?.classList.add('hidden');rasterStyleEditingId=null;rasterStyleSample=null;rasterStyleSamplePromise=null;rasterStyleClasses=[];rasterStyleBreaks=[];rasterStyleQgisStops=null;}
 async function restoreRasterOriginalStyle(r){if(!r?.sourceBlob)return;showImportProgress(r.name,.03,'Restablint el GeoTIFF original…');try{releaseRasterHeavyMemory(r);const ab=await r.sourceBlob.arrayBuffer(),dec=await GeoCauceGeoTIFF.decode(ab,{maxDimension:3072,onProgress:p=>showImportProgress(r.name,.08+p*.78,`Regenerant vista original · ${Math.round(p*100)}%`)}),blob=await rgbaToPngBlob(dec.width,dec.height,dec.rgba),image=await createImageBitmap(blob);await dbDeleteRasterStyleTiles(r.id);try{r.image?.close?.()}catch{}r.blob=blob;r.image=image;r.affine=dec.affine;r.georef=dec.georef;r.rasterStyle=null;r.styleCache=null;r.meta={...(r.meta||{}),kind:r.meta?.originalKind||dec.kind,styleRenderer:null,displayWidth:dec.width,displayHeight:dec.height,downsample:dec.downsample,range:dec.range,validPercent:dec.validPercent,validCount:dec.validCount};normalizeRasterOrientation(r);await dbPut('rasters',stripRaster(r));nativeSyncRasterMeta(r);renderLayers();drawAll();toast('Simbologia original restablerta');}finally{hideImportProgress();}}
 async function saveRasterStyle(){
@@ -2088,7 +2308,7 @@ async function saveRasterStyle(){
   try{
     showImportProgress(r.name,.01,'Preparant render visual…');
     const rawSa=sourceAffine(r),{meta}=await rasterStyleSourceInfo(r),isSingle=rasterStyleIsSingleBandMeta(meta);
-    if(isSingle&&style.renderer==='rgb')throw Error('Aquesta capa és monobanda; usa valors únics, gris o pseudocolor');
+    if(isSingle&&style.renderer==='rgb')throw Error('Aquesta capa és monobanda; usa valors únics, gris, pseudocolor o ombrejat');
     if(!isSingle&&style.renderer!=='rgb')throw Error('Aquest GeoTIFF és multibanda; usa “Color multibanda”');
     r.meta.originalKind=r.meta.originalKind||r.meta.kind||(isSingle?'dem':'rgb');
     r.styleCache={...(r.styleCache||{}),ready:false,generating:true,version:2};await dbPut('rasters',stripRaster(r));
@@ -2096,13 +2316,27 @@ async function saveRasterStyle(){
     const tileSize=512,cols=Math.ceil(meta.width/tileSize),rows=Math.ceil(meta.height/tileSize),total=cols*rows;let done=0;
     for(let ty=0;ty<rows;ty++)for(let tx=0;tx<cols;tx++){
       const x=tx*tileSize,y=ty*tileSize,w=Math.min(tileSize,meta.width-x),h=Math.min(tileSize,meta.height-y);let rgba;
-      if(isSingle){const dec=await GeoCauceGeoTIFF.decodeValuesRegion(meta,{x,y,width:w,height:h,outWidth:w,outHeight:h});rgba=renderStyledValues(dec.values,w,h,style,dec.noData);}
+      if(isSingle){
+        const px=Math.hypot(rawSa?.A||1,rawSa?.D||0),py=Math.hypot(rawSa?.B||0,rawSa?.E||1);
+        if(style.renderer==='hillshade'){
+          // Include a one-pixel halo to avoid visible seams between adjacent tiles.
+          const x0=Math.max(0,x-1),y0=Math.max(0,y-1),x1=Math.min(meta.width,x+w+1),y1=Math.min(meta.height,y+h+1);
+          const tw=x1-x0,th=y1-y0;
+          const dec=await GeoCauceGeoTIFF.decodeValuesRegion(meta,{x:x0,y:y0,width:tw,height:th,outWidth:tw,outHeight:th});
+          const shaded=renderStyledValues(dec.values,tw,th,style,dec.noData,px,py);
+          rgba=new Uint8ClampedArray(w*h*4);
+          for(let row=0;row<h;row++)rgba.set(shaded.subarray(((row+y-y0)*tw+x-x0)*4,((row+y-y0)*tw+x-x0+w)*4),row*w*4);
+        }else{
+          const dec=await GeoCauceGeoTIFF.decodeValuesRegion(meta,{x,y,width:w,height:h,outWidth:w,outHeight:h});
+          rgba=renderStyledValues(dec.values,w,h,style,dec.noData,px,py);
+        }
+      }
       else{const dec=await GeoCauceGeoTIFF.decodeRegion(meta,{x,y,width:w,height:h,outWidth:w,outHeight:h});rgba=adjustRasterRgba(dec.rgba,style);}
       const blob=await rgbaToPngBlob(w,h,rgba);await dbPut('rasterStyleTiles',{key:`${r.id}:${tx}:${ty}`,rasterId:r.id,tx,ty,x,y,w,h,blob});done++;
       showImportProgress(r.name,.03+.82*(done/total),`Generant mapa visual · ${done}/${total} teseles`);if(done%3===0)await new Promise(q=>setTimeout(q,0));
     }
     const maxDim=3072,sc=Math.min(1,maxDim/meta.width,maxDim/meta.height),pw=Math.max(1,Math.round(meta.width*sc)),ph=Math.max(1,Math.round(meta.height*sc));showImportProgress(r.name,.88,'Creant vista general estilitzada…');let prgba,validPercent=100;
-    if(isSingle){const prev=await GeoCauceGeoTIFF.decodeValuesRegion(meta,{x:0,y:0,width:meta.width,height:meta.height,outWidth:pw,outHeight:ph});prgba=renderStyledValues(prev.values,pw,ph,style,prev.noData);validPercent=prev.validCount?100*prev.validCount/(pw*ph):0;}
+    if(isSingle){const prev=await GeoCauceGeoTIFF.decodeValuesRegion(meta,{x:0,y:0,width:meta.width,height:meta.height,outWidth:pw,outHeight:ph});prgba=renderStyledValues(prev.values,pw,ph,style,prev.noData,Math.hypot(rawSa?.A||1,rawSa?.D||0)*meta.width/pw,Math.hypot(rawSa?.B||0,rawSa?.E||1)*meta.height/ph);validPercent=prev.validCount?100*prev.validCount/(pw*ph):0;}
     else{const prev=await GeoCauceGeoTIFF.decodeRegion(meta,{x:0,y:0,width:meta.width,height:meta.height,outWidth:pw,outHeight:ph});prgba=adjustRasterRgba(prev.rgba,style);}
     const pblob=await rgbaToPngBlob(pw,ph,prgba),pimg=await createImageBitmap(pblob);try{r.image?.close?.()}catch{}
     r.blob=pblob;r.image=pimg;r.affine={A:rawSa.A*(meta.width/pw),D:rawSa.D*(meta.width/pw),B:rawSa.B*(meta.height/ph),E:rawSa.E*(meta.height/ph),C:rawSa.C,F:rawSa.F};r.rasterStyle=style;r.styleCache={ready:true,version:2,tileSize,cols,rows,generatedAt:Date.now(),sourceWidth:meta.width,sourceHeight:meta.height};
@@ -2211,9 +2445,26 @@ function installTerrain3DInteractions(){
 }
 // ---------- fin vista 3D ----------
 
-function makePattern(id,ctx,anchor={x:0,y:0}) {
-  // Annotations are screen-space tiles, anchored to the element, independent of map zoom.
-  // Existing materials retain their exact legacy drawing until their style is edited.
+// World-anchored pattern transform: a material has one continuous grid shared
+// by polygons and brush strokes. The grid stays on the terrain when the map
+// pans, zooms or rotates; only the geometry clips what is visible.
+// For projected CRSs the pattern repeat is in metres. Geographic CRSs use a
+// small degree equivalent to avoid gigantic tile sizes.
+function materialMapPatternTransform(tile){
+  const epsg=projectCrsEpsg(),worldPerPixel=(epsg===4326||epsg===4258)?1e-5:1;
+  const interval=tile*worldPerPixel;
+  const originX=Math.floor(state.view.cx/interval)*interval;
+  const originY=Math.floor(state.view.cy/interval)*interval;
+  const pt=worldToScreen({x:originX,y:originY});
+  const angle=state.view.rotation||0,c=Math.cos(angle),sn=Math.sin(angle);
+  const scale=state.view.scale*worldPerPixel;
+  // Local tile x goes east, local tile y goes south (map coordinates go north).
+  return [scale*c,scale*sn,-scale*sn,scale*c,pt.x,pt.y];
+}
+function makePattern(id,ctx,anchor={x:0,y:0},worldFixed=false) {
+  // Material tiles use a common projected coordinate grid when drawn on the
+  // map. Legend / material-editor previews keep a compact screen-space scale.
+  // Existing materials retain their exact legacy drawing until style edited.
   const style=materialStyleConfig(id),legacy=!style||style.pattern==='legacy';
   const tile=legacy?28:Math.max(8,Math.round(style.spacing));
   const c=document.createElement('canvas');c.width=c.height=tile;
@@ -2249,8 +2500,11 @@ function makePattern(id,ctx,anchor={x:0,y:0}) {
   }
   const pattern=ctx.createPattern(c,'repeat');
   if(pattern?.setTransform&&typeof DOMMatrix!=='undefined'){
-    const tx=((anchor.x%tile)+tile)%tile,ty=((anchor.y%tile)+tile)%tile;
-    pattern.setTransform(new DOMMatrix().translate(tx,ty));
+    if(worldFixed)pattern.setTransform(new DOMMatrix(materialMapPatternTransform(tile)));
+    else{
+      const tx=((anchor.x%tile)+tile)%tile,ty=((anchor.y%tile)+tile)%tile;
+      pattern.setTransform(new DOMMatrix().translate(tx,ty));
+    }
   }
   return pattern;
 }
@@ -2290,7 +2544,7 @@ function drawFeatureBase(ctx,f,{ghost=false}={}) {
   if(f.closed) ctx.closePath();
 
   if(f.paint){
-    ctx.strokeStyle=makePattern(f.material,ctx,pts[0]);
+    ctx.strokeStyle=makePattern(f.material,ctx,pts[0],true);
     const style=materialStyleConfig(f.material);
     ctx.lineWidth=style?.brushWidth||18;
     ctx.stroke();
@@ -2300,7 +2554,7 @@ function drawFeatureBase(ctx,f,{ghost=false}={}) {
     }
   } else {
     if(f.closed&&f.filled){
-      ctx.fillStyle=makePattern(f.material,ctx,pts[0]);ctx.fill();
+      ctx.fillStyle=makePattern(f.material,ctx,pts[0],true);ctx.fill();
       const style=materialStyleConfig(f.material);
       if(style){
         if(style.outline){ctx.strokeStyle=style.outlineColor;ctx.lineWidth=style.outlineWidth;ctx.setLineDash(materialOutlineDash(style));ctx.stroke();ctx.setLineDash([]);}
@@ -2355,7 +2609,7 @@ function featureVisibleInBounds(f,vb){const b=quickFeatureBounds(f);return !!b&&
 function drawFeature(f,{ghost=false,opacity=1}={}){
   if(!(f.erasures?.length)){mapCtx.save();mapCtx.globalAlpha=ghost?opacity:1;drawFeatureBase(mapCtx,f,{ghost});mapCtx.restore();}
   else{clearCtx(featureCtx,featureCanvas);drawFeatureBase(featureCtx,f,{ghost});applyFeatureErasures(featureCtx,f);mapCtx.save();mapCtx.setTransform(1,0,0,1,0,0);mapCtx.globalAlpha=ghost?opacity:1;mapCtx.drawImage(featureCanvas,0,0);mapCtx.restore();applyDpr(mapCtx,mapCanvas);}
-  if(!ghost && f.closed && !f.paint && f.type!=='basin'){
+  if(!ghost && f.closed && !f.paint && f.type!=='basin' && f.type!=='deposit'){
     const c=polygonCentroid(f.points);if(pointErased(f,c))return;
     const s=worldToScreen(c);mapCtx.font='600 15px "Segoe Print",cursive';mapCtx.fillStyle='#252a26';mapCtx.fillText(f.id,s.x-26,s.y);
   }
@@ -2768,7 +3022,7 @@ function onMapPointerUp(e){
   } else if(st.tool==='editContour'){
     const f=state.features.find(x=>x.id===state.editContourFeatureId&&x.closed);const endSnap=st.snapEnd||nearestPointOnClosedRing(st.points[st.points.length-1],f);
     if(!f||!st.snapStart||!endSnap||endSnap.d>28){toast('Termina cerca del borde para cerrar con el imán');drawAll();return;}
-    pushHistory();const pts=[st.snapStart.world,...worldPts.slice(1,-1),endSnap.world];replaceContourSegment(f,st.snapStart,endSnap,pts);state.selectedId=f.id;showFeatureCard(f);toast(`${f.id}: contorno actualizado`);returnToPan=shouldReturnToPan();
+    pushHistory();const pts=[st.snapStart.world,...worldPts.slice(1,-1),endSnap.world];replaceContourSegment(f,st.snapStart,endSnap,pts);state.selectedId=f.id;showFeatureCard(f);toast(f.type==='deposit'?'Contorno del material actualizado':`${f.id}: contorno actualizado`);returnToPan=shouldReturnToPan();
   } else if(st.tool==='boundary'){
     pushHistory();const f={id:uid('deposit'),type:'deposit',points:worldPts,closed:true,filled:false,material:state.material,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[]};state.features.push(f);state.selectedId=f.id;showFeatureCard(f);toast('Límite creado. Usa Rellenar para aplicar el material.');returnToPan=shouldReturnToPan();
   } else if(st.tool==='paint'){
@@ -2808,7 +3062,7 @@ function deleteFeature(id,ask=true){
   if(!requireEditable('eliminar elementos'))return;
   const f=state.features.find(x=>x.id===id);if(!f)return;
   const related=f.type==='watercourse'?courseReaches(f.id).length:0;
-  const label=f.type==='watercourse'?`${f.abbr||f.id} i els seus ${related} trams`:f.reachCode||f.id;
+  const label=f.type==='watercourse'?`${f.abbr||f.id} i els seus ${related} trams`:f.type==='deposit'?depositMaterialLabel(f):(f.reachCode||f.id);
   if(ask && !confirm(`¿Eliminar ${label} completo?`))return;
   pushHistory();
   if(f.type==='watercourse'){state.features=state.features.filter(x=>x.id!==id&&x.courseId!==id);if(state.activeCourseId===id)state.activeCourseId=null;}
@@ -2826,6 +3080,11 @@ function eventPoint(e,el){
   return{x:local.x*(size.w/(r.width||size.w||1)),y:local.y*(size.h/(r.height||size.h||1))};
 }
 
+function depositMaterialLabel(f){
+ const selected=materials.find(m=>m.id===f?.material);
+ return selected?.name||'Material sin asignar';
+}
+
 function featureCardPresentation(f){
   const material=f.material?materialById(f.material):null;
   const course=f.type==='reach'?state.features.find(x=>x.id===f.courseId&&x.type==='watercourse'):null;
@@ -2839,7 +3098,7 @@ function featureCardPresentation(f){
   };
   const cfg=map[f.type]||{type:'Element',icon:'icons/ficha.png'};
   let title=f.id||'Element';
-  if(f.type==='deposit') title=`${f.id}${material?' · '+material.name:''}`;
+  if(f.type==='deposit') title=depositMaterialLabel(f);
   else if(f.type==='basin') title=`Conca · ${f.name||state.project?.torrent||state.project?.name||f.id}`;
   else if(f.type==='watercourse') title=`${f.abbr||f.id} · ${f.name||'Curs d’aigua'}`;
   else if(f.type==='reach') title=`${f.reachCode||f.id} · ${course?.name||'Tram'}`;
@@ -2858,10 +3117,27 @@ function featureCardDateText(v){
 }
 async function showFeatureCard(f){
   if(!f)return;
+  if(f.type==='deposit'){
+    // Deposits are a map legend item, not a full field sheet. Keep their
+    // persistent DEP identifier and any old ink/photos untouched in project data.
+    const card=$('#featureCard'),label=depositMaterialLabel(f);
+    card.dataset.featureId=f.id;card.dataset.manualPosition='0';
+    card._renderToken=null;
+    if(card._photoUrl){URL.revokeObjectURL(card._photoUrl);card._photoUrl=null;}
+    card.className='feature-card feature-card-rich feature-card-universal feature-card-material-only feature-type-deposit';
+    card.setAttribute('role','status');
+    card.setAttribute('aria-label','Material seleccionado: '+label);
+    $('#featureCardTitle').textContent=label;
+    $('#featureCardType').textContent='';
+    $('#featureMoreMenu')?.classList.add('hidden');
+    positionFeatureCard(f);
+    return;
+  }
   const card=$('#featureCard'),view=featureCardPresentation(f),wasHidden=card.classList.contains('hidden'),changed=card.dataset.featureId!==f.id;
   if(wasHidden||changed)card.dataset.manualPosition='0';
   card.dataset.featureId=f.id;
   card.className=`feature-card feature-card-rich feature-card-universal feature-type-${f.type}`;
+  card.setAttribute('role','dialog');card.setAttribute('aria-label','Elemento seleccionado');
   card.classList.add('hidden');
   $('#featureCardTitle').textContent=view.title;
   $('#featureCardType').textContent=view.type;
@@ -2913,7 +3189,15 @@ async function showFeatureCard(f){
 function positionFeatureCard(f){
   const card=$('#featureCard');if(!f?.points?.length||card.classList.contains('hidden')||card.dataset.manualPosition==='1')return;
   const wp=f.closed?polygonCentroid(f.points):f.points[Math.floor(f.points.length/2)],sp=worldToScreen(wp),vw=inkCanvas.clientWidth||innerWidth,vh=inkCanvas.clientHeight||innerHeight;
-  requestAnimationFrame(()=>{const r=card.getBoundingClientRect(),cw=r.width||450,ch=r.height||360,margin=14;let x=sp.x+28,y=sp.y-ch*.45;if(x+cw>vw-margin)x=sp.x-cw-28;if(x<margin)x=margin;y=Math.max(70,Math.min(vh-ch-72,y));card.style.left=`${x}px`;card.style.top=`${y}px`;});
+  requestAnimationFrame(()=>{
+    if(card.dataset.featureId!==f.id||card.classList.contains('hidden'))return;
+    const r=card.getBoundingClientRect(),isMaterial=f.type==='deposit',cw=r.width||(isMaterial?205:450),ch=r.height||(isMaterial?56:360),margin=14;
+    let x=sp.x+(isMaterial?16:28),y=isMaterial?sp.y-ch-12:sp.y-ch*.45;
+    if(x+cw>vw-margin)x=sp.x-cw-(isMaterial?16:28);
+    if(x<margin)x=margin;
+    y=Math.max(isMaterial?68:70,Math.min(vh-ch-(isMaterial?16:72),y));
+    card.style.left=`${x}px`;card.style.top=`${y}px`;
+  });
 }
 function hideFeatureCard(){const card=$('#featureCard');card.classList.add('hidden');$('#featureMoreMenu')?.classList.add('hidden');if(card._photoUrl){URL.revokeObjectURL(card._photoUrl);card._photoUrl=null;}}
 function installFeatureCardDrag(){
@@ -2924,11 +3208,11 @@ function installFeatureCardDrag(){
 }
 
 function openSelectedPrimary(){
-  const f=state.features.find(x=>x.id===state.selectedId);if(!f)return;
+  const f=state.features.find(x=>x.id===state.selectedId);if(!f||f.type==='deposit')return;
   if(f.type==='section')openSection(f); else if(f.type==='watercourse')openProfileSheet(f.id); else if(f.type==='reach')openReachSheet(f.id); else openSheet(f);
 }
 function openSheet(f){
-  if(!f)return;
+  if(!f||f.type==='deposit')return;
   const readOnly=!isEditableCampaign();
   $('#sheetId').textContent=f.id;$('#sheetMaterial').textContent=f.material?materialById(f.material).name.toUpperCase():f.type.toUpperCase();$('#sheetDate').textContent=currentCampaign()?.date||f.date;$('#sheetCamp').textContent=campaignLabel(state.campaign);
   const a=featureArea(f);$('#sheetArea').textContent=a!==null?`${f.erasures?.length?'≈ ':''}${formatAreaUnit(a)}`:'—';
@@ -3496,6 +3780,11 @@ function parsePrjEpsg(txt=''){
 function lonLatToUtm31(lon,lat){return lonLatToUtmZone(lon,lat,31,false);}
 function transformVectorPoint(p,src,dst){
   if(!src||src===dst)return{x:p.x,y:p.y};
+  if(src===3857&&supportedGpsEpsg(dst)){
+    const lon=p.x/6378137*180/Math.PI;
+    const lat=(2*Math.atan(Math.exp(p.y/6378137))-Math.PI/2)*180/Math.PI;
+    return transformVectorPoint({x:lon,y:lat},4326,dst);
+  }
   if((src===4326||src===4258)&&supportedGpsEpsg(dst)){const q=lonLatToMapCoords(p.x,p.y,dst);return{x:q.x,y:q.y};}
   if((src===32630&&dst===25830)||(src===32631&&dst===25831))return{x:p.x,y:p.y};
   throw Error(`CRS SHP EPSG:${src} no compatible automàticament amb EPSG:${dst}`);
@@ -3887,13 +4176,13 @@ function importQueueId(){return 'iq'+Date.now().toString(36)+Math.random().toStr
 function queueStatusLabel(item){return item.status==='queued'?'Esperant':item.status==='processing'?'Processant':item.status==='ready'?'Preparat':item.status==='loading'?'Carregant':item.status==='loaded'?'Carregat':item.status==='error'?'Error':item.status==='cancelled'?'Cancel·lat':'Pendent';}
 function updateImportQueueBadge(){const n=importQueue.filter(x=>!['loaded','cancelled'].includes(x.status)).length,b=$('#layersQueueBadge');if(!b)return;b.textContent=String(n);b.classList.toggle('hidden',n===0);}
 function queueSet(item,{status=item.status,progress=item.progress,message=item.message,error=item.error}={}){item.status=status;if(progress!=null)item.progress=Math.max(0,Math.min(1,+progress||0));if(message!=null)item.message=message;if(error!==undefined)item.error=error;renderImportQueue();}
-function importItemKindLabel(item){return item.kind==='raster'?(item.geoKind||'MAPA'):item.kind==='vector'?'SHP / ZIP':'FITXER';}
+function importItemKindLabel(item){return item.kind==='raster'?(item.geoKind||'MAPA'):item.kind==='vector'?'SHP / ZIP':item.kind==='gpkg'?'GeoPackage (GPKG)':'FITXER';}
 function renderImportQueue(){
   const sec=$('#importQueueSection'),root=$('#importQueueList'),loadAll=$('#loadReadyImportsBtn');if(!sec||!root)return;
   const shown=importQueue.filter(x=>!['loaded','cancelled'].includes(x.status));sec.classList.toggle('hidden',shown.length===0);root.innerHTML='';
   for(const item of shown){const row=document.createElement('div');row.className=`import-queue-item ${item.status==='ready'?'ready':''} ${item.status==='error'?'error':''}`;const pct=Math.round((item.progress||0)*100);row.innerHTML=`<div class="import-queue-row"><span class="import-kind">${escapeHtml(importItemKindLabel(item))}</span><span class="import-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span><span class="import-state">${escapeHtml(queueStatusLabel(item))}${item.status==='processing'?` · ${pct}%`:''}</span></div><div class="import-queue-progress"><span style="width:${pct}%"></span></div><div class="import-queue-meta">${escapeHtml(item.message||'')}</div>${item.error?`<div class="import-queue-error">${escapeHtml(item.error)}</div>`:''}<div class="import-queue-config"></div><div class="import-queue-actions"></div>`;
     const cfg=row.querySelector('.import-queue-config'),actions=row.querySelector('.import-queue-actions');
-    if(item.kind==='vector'&&['queued','processing','ready','error'].includes(item.status)){
+    if(['vector','gpkg'].includes(item.kind)&&['queued','processing','ready','error'].includes(item.status)){
       cfg.innerHTML=`<input class="iq-name" type="text" value="${escapeHtml(item.config?.displayName||'')}" placeholder="Nom de la capa"><select class="iq-role"><option value="reference">Referència</option><option value="watercourse">Riu / cauce</option><option value="basin">Conca</option><option value="limit">Límit</option><option value="path">Camí / traçat</option><option value="other">Altres…</option></select><input class="iq-custom ${item.config?.role==='other'?'':'hidden'}" type="text" value="${escapeHtml(item.config?.customRole||'')}" placeholder="Tipus personalitzat"><input class="iq-color" type="color" value="${normalizeVectorColor(item.config?.color)}">`;
       const rs=cfg.querySelector('.iq-role'),custom=cfg.querySelector('.iq-custom');rs.value=item.config?.role||'reference';cfg.querySelector('.iq-name').onchange=e=>item.config.displayName=e.target.value.trim();rs.onchange=e=>{item.config.role=e.target.value;custom.classList.toggle('hidden',item.config.role!=='other');};custom.onchange=e=>item.config.customRole=e.target.value.trim();cfg.querySelector('.iq-color').oninput=e=>item.config.color=normalizeVectorColor(e.target.value);
     }
@@ -3903,22 +4192,25 @@ function renderImportQueue(){
   }
   if(loadAll)loadAll.disabled=!shown.some(x=>x.status==='ready');updateImportQueueBadge();
 }
-function disposePreparedImport(item){if(item?.prepared?.kind==='raster'){try{item.prepared.raster?.image?.close?.()}catch{}}item.prepared=null;}
+function disposePreparedImport(item){if(item?.prepared?.kind==='raster'){try{item.prepared.raster?.image?.close?.()}catch{}}for(const raster of item?.prepared?.rasters||[])try{raster.image?.close?.()}catch{}item.prepared=null;}
 function enqueueMapImports(fileList){
   const files=[...fileList||[]],imgs=files.filter(f=>/\.(png|jpe?g|webp|svg|tiff?|cog)$/i.test(f.name)),worlds=files.filter(f=>/\.(pgw|jgw|tfw|wld)$/i.test(f.name));
-  if(!imgs.length){toast('Selecciona almenys un mapa compatible');return;}
+  const gpkg=files.filter(f=>/\.gpkg$/i.test(f.name));
+  if(!imgs.length&&!gpkg.length){toast('Selecciona almenys un mapa o GeoPackage compatible');return;}
+  for(const file of gpkg)importQueue.push({id:importQueueId(),kind:'gpkg',name:file.name,files:[file],file,status:'queued',progress:0,message:'GeoPackage a la cua',error:'',prepared:null,cancelled:false,config:{color:normalizeVectorColor(appSettings.vectorImportColor),role:'reference',customRole:'',displayName:''}});
   for(const file of imgs){const stem=file.name.replace(/\.[^.]+$/,'').toLowerCase(),wf=worlds.find(w=>w.name.replace(/\.[^.]+$/,'').toLowerCase()===stem)||((imgs.length===1&&worlds.length===1)?worlds[0]:null);importQueue.push({id:importQueueId(),kind:'raster',name:file.name,files:[file],file,wf,status:'queued',progress:0,message:'A la cua',error:'',prepared:null,cancelled:false,geoKind:/\.(tiff?|cog)$/i.test(file.name)?'GeoTIFF / COG':'MAPA'});}
   renderImportQueue();processImportQueue();
 }
 function enqueueVectorImports(fileList){
-  const files=[...fileList||[]];if(!files.length)return;const zips=files.filter(f=>/\.zip$/i.test(f.name)),direct=files.filter(f=>!/\.zip$/i.test(f.name));const baseCfg={color:normalizeVectorColor($('#vectorImportColor')?.value||appSettings.vectorImportColor),role:$('#vectorImportRole')?.value||'reference',customRole:($('#vectorImportCustomRole')?.value||'').trim(),displayName:($('#vectorImportName')?.value||'').trim()};
+  const files=[...fileList||[]];if(!files.length)return;const zips=files.filter(f=>/\.zip$/i.test(f.name)),gpkg=files.filter(f=>/\.gpkg$/i.test(f.name)),direct=files.filter(f=>!/\.(zip|gpkg)$/i.test(f.name));const baseCfg={color:normalizeVectorColor($('#vectorImportColor')?.value||appSettings.vectorImportColor),role:$('#vectorImportRole')?.value||'reference',customRole:($('#vectorImportCustomRole')?.value||'').trim(),displayName:($('#vectorImportName')?.value||'').trim()};
+  for(const file of gpkg)importQueue.push({id:importQueueId(),kind:'gpkg',name:file.name,files:[file],file,status:'queued',progress:0,message:'GeoPackage a la cua',error:'',prepared:null,cancelled:false,config:{...baseCfg}});
   for(const z of zips)importQueue.push({id:importQueueId(),kind:'vector',name:z.name,files:[z],zip:z,status:'queued',progress:0,message:'ZIP a la cua',error:'',prepared:null,cancelled:false,config:{...baseCfg}});
   if(direct.some(f=>/\.shp$/i.test(f.name)))importQueue.push({id:importQueueId(),kind:'vector',name:direct.filter(f=>/\.shp$/i.test(f.name)).map(f=>f.name).join(', '),files:direct,status:'queued',progress:0,message:'Paquet SHP a la cua',error:'',prepared:null,cancelled:false,config:{...baseCfg}});
-  if(!zips.length&&!direct.some(f=>/\.shp$/i.test(f.name))){toast('Selecciona un ZIP amb SHP o els fitxers .shp + auxiliars');return;}
+  if(!zips.length&&!gpkg.length&&!direct.some(f=>/\.shp$/i.test(f.name))){toast('Selecciona un .gpkg, un ZIP amb SHP o els fitxers .shp + auxiliars');return;}
   renderImportQueue();processImportQueue();
 }
 async function processImportQueue(){if(importQueueRunning)return;const item=importQueue.find(x=>x.status==='queued'&&!x.cancelled);if(!item)return;importQueueRunning=true;queueSet(item,{status:'processing',progress:.02,message:'Preparant…',error:''});
-  try{if(item.kind==='raster')item.prepared=await prepareQueuedRaster(item);else item.prepared=await prepareQueuedVector(item);if(item.cancelled){disposePreparedImport(item);item.status='cancelled';}else queueSet(item,{status:'ready',progress:1,message:item.kind==='raster'?'Mapa preparat · encara no visible':'Capa preparada · encara no visible'});}catch(e){console.error('Import queue',e);if(!item.cancelled)queueSet(item,{status:'error',progress:0,message:'No s’ha pogut preparar',error:e?.message||String(e)});}finally{importQueueRunning=false;renderImportQueue();setTimeout(processImportQueue,0);}}
+  try{if(item.kind==='raster')item.prepared=await prepareQueuedRaster(item);else if(item.kind==='gpkg')item.prepared=await prepareQueuedGeoPackage(item);else item.prepared=await prepareQueuedVector(item);if(item.cancelled){disposePreparedImport(item);item.status='cancelled';}else queueSet(item,{status:'ready',progress:1,message:item.prepared?.kind==='geopackage'?('GPKG · '+item.prepared.layers.length+' vectors · '+item.prepared.rasters.length+' mapes'+(item.prepared.warnings.length?' · avisos: '+item.prepared.warnings.join('; '):'')):item.kind==='raster'?'Mapa preparat · encara no visible':'Capa preparada · encara no visible'});}catch(e){console.error('Import queue',e);if(!item.cancelled)queueSet(item,{status:'error',progress:0,message:'No s’ha pogut preparar',error:e?.message||String(e)});}finally{importQueueRunning=false;renderImportQueue();setTimeout(processImportQueue,0);}}
 async function prepareQueuedRaster(item){
   const file=item.file,wf=item.wf;let bitmap,blob,sourceBlob=null,affine,georef=false,meta={sourceType:'image'};const progress=(p,msg)=>{if(item.cancelled)throw Error('Importació cancel·lada');item.progress=p;item.message=msg;renderImportQueue();};progress(.05,'Llegint fitxer…');
   if(/\.(tiff?|cog)$/i.test(file.name)){
@@ -3930,9 +4222,41 @@ async function prepareVectorLayersFromComponentFiles(files,{sourceZip='',color=n
   const byName=new Map(files.map(f=>[f.name.toLowerCase(),f])),shps=files.filter(f=>/\.shp$/i.test(f.name));if(!shps.length)return[];const projectBounds=projectRasterBounds(),layers=[];
   for(const shp of shps){const base=shp.name.replace(/\.shp$/i,''),find=ext=>byName.get((base+ext).toLowerCase()),prj=find('.prj'),dbf=find('.dbf'),cpg=find('.cpg'),prjText=prj?await prj.text():'',srcEpsg=parsePrjEpsg(prjText)||projectCrsEpsg(),dstEpsg=projectCrsEpsg(),cpgText=cpg?await cpg.text():'',attrs=dbf?parseDbfBuffer(await dbf.arrayBuffer(),cpgText):[],records=parseShpBuffer(await shp.arrayBuffer()),features=[];for(const rec of records){let paths=[];for(const path of rec.paths){const t=[];for(const q of path)t.push(transformVectorPoint(q,srcEpsg,dstEpsg));if(t.length)paths.push(t);}const bounds=pointsBounds(paths);if(!bounds)continue;if(projectBounds&&!boundsIntersect(bounds,projectBounds))continue;features.push({paths,shapeType:rec.shapeType,attrs:attrs[rec.recordIndex]||{},label:vectorFeatureLabel(attrs[rec.recordIndex]||{}),bounds});}const shapeTypes=[...new Set(records.map(r=>+r.shapeType).filter(Boolean))],geometryType=shapeTypes.some(t=>[5,15].includes(t))?'polygon':shapeTypes.some(t=>[1,8,11,18].includes(t))&&!shapeTypes.some(t=>[3,5,13,15].includes(t))?'point':'line',layerName=(displayName||'').trim()||base,baseColor=normalizeVectorColor(color||appSettings.vectorImportColor);layers.push({id:'v'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),name:layerName,sourceName:base,role:role||'reference',customRole:(customRole||'').trim(),sourceType:'shapefile',sourcePackage:sourceZip||'',sourceEpsg:srcEpsg,projectEpsg:dstEpsg,geometryType,visible:true,opacity:.85,color:baseColor,strokeWidth:2.5,vectorStyle:{kind:geometryType,strokeColor:baseColor,strokeWidth:2.5,strokeUnit:'px',strokeOpacity:1,strokeDash:'dash',strokeOffset:0,offsetUnit:'px',lineCap:'round',lineJoin:'round',fillColor:baseColor,fillStyle:'none',fillOpacity:0,pointColor:baseColor,pointOpacity:1,pointSize:6,pointUnit:'px',pointShape:'circle'},features,importedAt:Date.now(),clippedToRasterExtent:!!projectBounds});}return layers;
 }
+async function prepareQueuedGeoPackage(item){
+ if(!window.GeoCauceGpkgImporter)throw Error('Falta el lector GPKG. Actualitza la versió de GeoCauce.');
+ return window.GeoCauceGpkgImporter.prepare(item.file,item.config,{
+  projectEpsg:projectCrsEpsg,rasterBounds:projectRasterBounds,transform:transformVectorPoint,
+  pointsBounds,intersects:boundsIntersect,featureLabel:vectorFeatureLabel,color:normalizeVectorColor,
+  id:prefix=>prefix+Date.now().toString(36)+Math.random().toString(36).slice(2,7)
+ },(fraction,label)=>{if(item.cancelled)throw Error('Importació cancel·lada');item.progress=fraction;item.message=label;renderImportQueue();});
+}
 async function prepareQueuedVector(item){const cfg=item.config||{},layers=[];if(item.zip){item.progress=.12;item.message='Obrint ZIP…';renderImportQueue();const packs=await shapefilePackagesFromZip(item.zip);for(let i=0;i<packs.length;i++){item.progress=.25+.65*(i/Math.max(1,packs.length));item.message=`Processant SHP ${i+1}/${packs.length}`;renderImportQueue();const name=packs.length>1&&cfg.displayName?`${cfg.displayName} · ${i+1}`:cfg.displayName;layers.push(...await prepareVectorLayersFromComponentFiles(packs[i],{sourceZip:item.zip.name,...cfg,displayName:name}));}}else{item.progress=.30;item.message='Llegint SHP…';renderImportQueue();layers.push(...await prepareVectorLayersFromComponentFiles(item.files,cfg));}if(!layers.length)throw Error('No s’ha trobat cap geometria SHP compatible');return{kind:'vector',layers};}
-async function loadPreparedImport(item,{silent=false}={}){if(item.status!=='ready'||!item.prepared)return false;item.status='loading';renderImportQueue();try{if(item.prepared.kind==='raster'){const r=item.prepared.raster,previous=state.rasters.find(x=>x.name===r.name);if(previous){state.rasters=state.rasters.filter(x=>x.id!==previous.id);await dbDelete('rasters',previous.id);await dbDeleteRasterStyleTiles(previous.id);try{previous.image?.close?.()}catch{}}state.rasters.push(r);await dbPut('rasters',stripRaster(r));nativeSyncRasterMeta(r);}else{for(const layer of item.prepared.layers||[]){const cfg=item.config||{};if(cfg.displayName&&item.prepared.layers.length===1)layer.name=cfg.displayName;layer.role=cfg.role||layer.role;layer.customRole=cfg.customRole||'';layer.color=normalizeVectorColor(cfg.color||layer.color);const vst=vectorStyleDefault(layer);layer.vectorStyle={...vst,strokeColor:layer.color,pointColor:layer.color,fillColor:vst.fillStyle==='none'?layer.color:vst.fillColor};await replaceReferenceLayerInState(layer);await optimizeImportedReferenceLayer(layer);}}item.status='loaded';item.progress=1;persistState();renderLayers();drawAll();if(!silent)toast(`${item.name} carregat al mapa`);return true;}catch(e){item.status='error';item.error=e?.message||String(e);renderImportQueue();return false;}}
-async function loadReadyImports(){const ready=importQueue.filter(x=>x.status==='ready');let lastRaster=null,count=0;for(const item of ready){if(await loadPreparedImport(item,{silent:true})){count++;if(item.prepared?.kind==='raster')lastRaster=item.prepared.raster;}}renderImportQueue();if(lastRaster)fitRaster(lastRaster);if(count)toast(`${count} element${count===1?'':'s'} carregat${count===1?'':'s'} al mapa`);}
+async function loadPreparedImport(item,{silent=false}={}){
+ if(item.status!=='ready'||!item.prepared)return false;
+ item.status='loading';renderImportQueue();
+ try{
+  const prepared=item.prepared;
+  const rasters=prepared.kind==='raster'?[prepared.raster]:(prepared.rasters||[]);
+  for(const r of rasters){
+   const previous=state.rasters.find(x=>x.name===r.name);
+   if(previous){state.rasters=state.rasters.filter(x=>x.id!==previous.id);await dbDelete('rasters',previous.id);await dbDeleteRasterStyleTiles(previous.id);try{previous.image?.close?.()}catch{}}
+   state.rasters.push(r);await dbPut('rasters',stripRaster(r));nativeSyncRasterMeta(r);
+  }
+  for(const layer of prepared.layers||[]){
+   const cfg=item.config||{};
+   if(cfg.displayName&&prepared.layers.length===1)layer.name=cfg.displayName;
+   layer.role=cfg.role||layer.role;layer.customRole=cfg.customRole||'';
+   layer.color=normalizeVectorColor(cfg.color||layer.color);
+   const vst=vectorStyleDefault(layer);
+   layer.vectorStyle={...vst,strokeColor:layer.color,pointColor:layer.color,fillColor:vst.fillStyle==='none'?layer.color:vst.fillColor};
+   await replaceReferenceLayerInState(layer);await optimizeImportedReferenceLayer(layer);
+  }
+  item.status='loaded';item.progress=1;persistState();renderLayers();drawAll();
+  if(!silent)toast(item.name+' carregat al mapa');
+  return true;
+ }catch(e){item.status='error';item.error=e?.message||String(e);renderImportQueue();return false;}
+}
+async function loadReadyImports(){const ready=importQueue.filter(x=>x.status==='ready');let lastRaster=null,count=0;for(const item of ready){if(await loadPreparedImport(item,{silent:true})){count++;if(item.prepared?.kind==='raster')lastRaster=item.prepared.raster;else if(item.prepared?.rasters?.length)lastRaster=item.prepared.rasters.at(-1);}}renderImportQueue();if(lastRaster)fitRaster(lastRaster);if(count)toast(`${count} element${count===1?'':'s'} carregat${count===1?'':'s'} al mapa`);}
 
 function showImportProgress(name,p=0,text='Preparando…'){$('#importProgressTitle').textContent=`Importando ${name}`;$('#importProgressBar').style.width=`${Math.max(2,Math.round(p*100))}%`;$('#importProgressText').textContent=text;$('#importProgress').classList.remove('hidden');}
 function hideImportProgress(){setTimeout(()=>$('#importProgress').classList.add('hidden'),180);}
@@ -5623,6 +5947,14 @@ async function exportSelectedContents(){
 
 
 function initUi(){
+  window.addEventListener('popstate',()=>{
+   const route=window.GeoCauceProjectAccess?.routeFromLocation(window.location);
+   if(route){
+    const p=projectCatalog.find(p=>p.id===route.id||p.cloudProjectId===route.id);
+    if(p)openProject(p.id,{mode:route.mode,fromRoute:true});
+    else showProjectHome({skipHistory:true});
+   }else showProjectHome({skipHistory:true});
+  });
   $('#enterBtn').onclick=$('#openCampaignBtn').onclick=enterApp;
   $('#authCloseBtn').onclick=closeAuthModal;$('#authOfflineBtn').onclick=chooseOfflineEntry;$('#authSwitchMode').onclick=()=>setAuthMode(authUiMode==='signin'?'signup':'signin');$('#authTogglePassword').onclick=()=>{const i=$('#authPassword');i.type=i.type==='password'?'text':'password';};$('#authForm').onsubmit=e=>{e.preventDefault();submitAuth();};
   $('#projectAccountBtn').onclick=openAccountManage;if($('#projectCreateAccountBtn'))$('#projectCreateAccountBtn').onclick=openAccountManage;$('#projectSettingsBtn').onclick=()=>showSettings('projects');$('#settingsFromMapBtn').onclick=()=>{closeFloatingPanels();showSettings('map');};$('#accountManageClose').onclick=closeAccountManage;
@@ -5847,6 +6179,7 @@ if($('#sectionTableZoomReset'))$('#sectionTableZoomReset').onclick=()=>setSectio
 if($('#rasterStyleClose'))$('#rasterStyleClose').onclick=closeRasterStyleEditor;
 if($('#rasterStyleCancel'))$('#rasterStyleCancel').onclick=closeRasterStyleEditor;
 if($('#rasterStyleRenderer'))$('#rasterStyleRenderer').onchange=updateRasterStylePanels;
+for(const id of ['rasterStyleHillshadeAzimuth','rasterStyleHillshadeAltitude','rasterStyleHillshadeZFactor','rasterStyleHillshadeInvert'])if($('#'+id))$('#'+id).oninput=updateRasterStylePreview;
 if($('#rasterStyleClassify'))$('#rasterStyleClassify').onclick=classifyRasterValues;
 if($('#rasterStylePseudoClassify'))$('#rasterStylePseudoClassify').onclick=classifyRasterPseudocolor;
 if($('#rasterStyleImportQgisFile'))$('#rasterStyleImportQgisFile').onchange=async e=>{const file=e.target.files?.[0];await importRasterQgisPalette(file);e.target.value='';};

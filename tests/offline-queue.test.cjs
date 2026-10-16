@@ -78,9 +78,9 @@ test('remote cloud-only asset pointers are preserved unless explicitly deleted',
  assert.match(block,/result\[kind\]\.push\(remote\)/);
 });
 test('PWA loads delta engine before app, caches it and keeps offline DB upgrade',()=>{
- assert.ok(html.indexOf('<script src="cloud-delta-sync.js?v=20261016-generalmap-r27"')<html.indexOf('<script src="app.js?v=20261016-generalmap-r27"'));
+ assert.ok(html.indexOf('<script src="cloud-delta-sync.js?v=20261016-sharing-r28"')<html.indexOf('<script src="app.js?v=20261016-sharing-r28"'));
  assert.match(sw,/"cloud-delta-sync\.js"/);
- assert.match(sw,/mobile-pwa-r27/);
+ assert.match(sw,/mobile-pwa-r28/);
  assert.match(app,/indexedDB\.open\(name,5\)/);
  assert.match(app,/createObjectStore\('cloudSyncBase'/);
  assert.doesNotThrow(()=>new vm.Script(app));
