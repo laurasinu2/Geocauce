@@ -2445,9 +2445,26 @@ function installTerrain3DInteractions(){
 }
 // ---------- fin vista 3D ----------
 
-function makePattern(id,ctx,anchor={x:0,y:0}) {
-  // Annotations are screen-space tiles, anchored to the element, independent of map zoom.
-  // Existing materials retain their exact legacy drawing until their style is edited.
+// World-anchored pattern transform: a material has one continuous grid shared
+// by polygons and brush strokes. The grid stays on the terrain when the map
+// pans, zooms or rotates; only the geometry clips what is visible.
+// For projected CRSs the pattern repeat is in metres. Geographic CRSs use a
+// small degree equivalent to avoid gigantic tile sizes.
+function materialMapPatternTransform(tile){
+  const epsg=projectCrsEpsg(),worldPerPixel=(epsg===4326||epsg===4258)?1e-5:1;
+  const interval=tile*worldPerPixel;
+  const originX=Math.floor(state.view.cx/interval)*interval;
+  const originY=Math.floor(state.view.cy/interval)*interval;
+  const pt=worldToScreen({x:originX,y:originY});
+  const angle=state.view.rotation||0,c=Math.cos(angle),sn=Math.sin(angle);
+  const scale=state.view.scale*worldPerPixel;
+  // Local tile x goes east, local tile y goes south (map coordinates go north).
+  return [scale*c,scale*sn,-scale*sn,scale*c,pt.x,pt.y];
+}
+function makePattern(id,ctx,anchor={x:0,y:0},worldFixed=false) {
+  // Material tiles use a common projected coordinate grid when drawn on the
+  // map. Legend / material-editor previews keep a compact screen-space scale.
+  // Existing materials retain their exact legacy drawing until style edited.
   const style=materialStyleConfig(id),legacy=!style||style.pattern==='legacy';
   const tile=legacy?28:Math.max(8,Math.round(style.spacing));
   const c=document.createElement('canvas');c.width=c.height=tile;
@@ -2483,8 +2500,11 @@ function makePattern(id,ctx,anchor={x:0,y:0}) {
   }
   const pattern=ctx.createPattern(c,'repeat');
   if(pattern?.setTransform&&typeof DOMMatrix!=='undefined'){
-    const tx=((anchor.x%tile)+tile)%tile,ty=((anchor.y%tile)+tile)%tile;
-    pattern.setTransform(new DOMMatrix().translate(tx,ty));
+    if(worldFixed)pattern.setTransform(new DOMMatrix(materialMapPatternTransform(tile)));
+    else{
+      const tx=((anchor.x%tile)+tile)%tile,ty=((anchor.y%tile)+tile)%tile;
+      pattern.setTransform(new DOMMatrix().translate(tx,ty));
+    }
   }
   return pattern;
 }
@@ -2524,7 +2544,7 @@ function drawFeatureBase(ctx,f,{ghost=false}={}) {
   if(f.closed) ctx.closePath();
 
   if(f.paint){
-    ctx.strokeStyle=makePattern(f.material,ctx,pts[0]);
+    ctx.strokeStyle=makePattern(f.material,ctx,pts[0],true);
     const style=materialStyleConfig(f.material);
     ctx.lineWidth=style?.brushWidth||18;
     ctx.stroke();
@@ -2534,7 +2554,7 @@ function drawFeatureBase(ctx,f,{ghost=false}={}) {
     }
   } else {
     if(f.closed&&f.filled){
-      ctx.fillStyle=makePattern(f.material,ctx,pts[0]);ctx.fill();
+      ctx.fillStyle=makePattern(f.material,ctx,pts[0],true);ctx.fill();
       const style=materialStyleConfig(f.material);
       if(style){
         if(style.outline){ctx.strokeStyle=style.outlineColor;ctx.lineWidth=style.outlineWidth;ctx.setLineDash(materialOutlineDash(style));ctx.stroke();ctx.setLineDash([]);}
