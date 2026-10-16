@@ -3730,6 +3730,11 @@ function parsePrjEpsg(txt=''){
 function lonLatToUtm31(lon,lat){return lonLatToUtmZone(lon,lat,31,false);}
 function transformVectorPoint(p,src,dst){
   if(!src||src===dst)return{x:p.x,y:p.y};
+  if(src===3857&&supportedGpsEpsg(dst)){
+    const lon=p.x/6378137*180/Math.PI;
+    const lat=(2*Math.atan(Math.exp(p.y/6378137))-Math.PI/2)*180/Math.PI;
+    return transformVectorPoint({x:lon,y:lat},4326,dst);
+  }
   if((src===4326||src===4258)&&supportedGpsEpsg(dst)){const q=lonLatToMapCoords(p.x,p.y,dst);return{x:q.x,y:q.y};}
   if((src===32630&&dst===25830)||(src===32631&&dst===25831))return{x:p.x,y:p.y};
   throw Error(`CRS SHP EPSG:${src} no compatible automàticament amb EPSG:${dst}`);
@@ -4201,7 +4206,7 @@ async function loadPreparedImport(item,{silent=false}={}){
   return true;
  }catch(e){item.status='error';item.error=e?.message||String(e);renderImportQueue();return false;}
 }
-async function loadReadyImports(){const ready=importQueue.filter(x=>x.status==='ready');let lastRaster=null,count=0;for(const item of ready){if(await loadPreparedImport(item,{silent:true})){count++;if(item.prepared?.kind==='raster')lastRaster=item.prepared.raster;}}renderImportQueue();if(lastRaster)fitRaster(lastRaster);if(count)toast(`${count} element${count===1?'':'s'} carregat${count===1?'':'s'} al mapa`);}
+async function loadReadyImports(){const ready=importQueue.filter(x=>x.status==='ready');let lastRaster=null,count=0;for(const item of ready){if(await loadPreparedImport(item,{silent:true})){count++;if(item.prepared?.kind==='raster')lastRaster=item.prepared.raster;else if(item.prepared?.rasters?.length)lastRaster=item.prepared.rasters.at(-1);}}renderImportQueue();if(lastRaster)fitRaster(lastRaster);if(count)toast(`${count} element${count===1?'':'s'} carregat${count===1?'':'s'} al mapa`);}
 
 function showImportProgress(name,p=0,text='Preparando…'){$('#importProgressTitle').textContent=`Importando ${name}`;$('#importProgressBar').style.width=`${Math.max(2,Math.round(p*100))}%`;$('#importProgressText').textContent=text;$('#importProgress').classList.remove('hidden');}
 function hideImportProgress(){setTimeout(()=>$('#importProgress').classList.add('hidden'),180);}
