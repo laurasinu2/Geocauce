@@ -699,39 +699,43 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
       lists.vectorLayers.reduce((n,x)=>n+(x.cloudFeaturesPath?1:0)+(x.cloudRenderPath?1:0),0);
     let done=0;cloudProgressStart('Descargando archivos del proyecto',total);started=true;
     await dbClear('cloudStaging');
-    const get=async(path,label,expectedSize=null,reusable=null,parts=null,type='application/octet-stream')=>{
+    const get=async(path,label,expectedSize=null,reusable=null,parts=null,type='application/octet-stream',expectedHash=null)=>{
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       const blob=reusable||await cloudDownloadBlob(path,parts,type);
       if(!(blob instanceof Blob))throw new Error('Falta el archivo '+label);
       if(Number(expectedSize)>0&&blob.size!==Number(expectedSize))throw new Error('Archivo incompleto o corrupto: '+label);
+      if(!reusable&&expectedHash){
+       const actual=`sha256-chunks-v1:${blob.size}:${type||''}:${await cloudAssetDigest(blob)}`;
+       if(actual!==expectedHash)throw new Error('El archivo cloud no coincide con su huella digital: '+label);
+      }
       done++;cloudProgressUpdate((reusable?'Reutilizado':'Descargado')+' · '+label,done,total);return blob;
     };
     for(const ph of lists.photos){
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       if(!ph.id||!ph.cloudBlobPath)throw new Error('Falta el archivo de la fotografía '+(ph.name||ph.id||''));
-      const rec={...ph};delete rec.cloudBlobPath;delete rec.cloudBlobType;delete rec.cloudBlobSize;
-      rec.blob=await get(ph.cloudBlobPath,ph.name||'fotografía',ph.cloudBlobSize,await cloudReuseBlob(oldPhotos.get(ph.id)?.blob,ph.cloudBlobSize,ph.cloudBlobHash),ph.cloudBlobParts,ph.cloudBlobType);
+      const rec={...ph};delete rec.cloudBlobPath;delete rec.cloudBlobType;delete rec.cloudBlobSize;delete rec.cloudBlobParts;delete rec.cloudBlobHash;
+      rec.blob=await get(ph.cloudBlobPath,ph.name||'fotografía',ph.cloudBlobSize,await cloudReuseBlob(oldPhotos.get(ph.id)?.blob,ph.cloudBlobSize,ph.cloudBlobHash),ph.cloudBlobParts,ph.cloudBlobType,ph.cloudBlobHash);
       await dbPut('cloudStaging',{key:'photos:'+ph.id,record:rec});
     }
     for(const r of lists.rasters){
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       if(!r.id||!r.cloudPreviewPath)throw new Error('Falta la imagen del mapa '+(r.name||r.id||''));
-      const rec={...r};for(const k of ['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize'])delete rec[k];
+      const rec={...r};for(const k of ['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize','cloudPreviewParts','cloudSourceParts','cloudPreviewHash','cloudSourceHash'])delete rec[k];
       const localRaster=oldRasters.get(r.id);
-      if(r.cloudPreviewPath)rec.blob=await get(r.cloudPreviewPath,r.name||'mapa',r.cloudPreviewSize,await cloudReuseBlob(localRaster?.blob,r.cloudPreviewSize,r.cloudPreviewHash),r.cloudPreviewParts,r.cloudPreviewType);
-      if(r.cloudSourcePath)rec.sourceBlob=await get(r.cloudSourcePath,(r.name||'mapa')+' · original',r.cloudSourceSize,await cloudReuseBlob(localRaster?.sourceBlob,r.cloudSourceSize,r.cloudSourceHash),r.cloudSourceParts,r.cloudSourceType);
+      if(r.cloudPreviewPath)rec.blob=await get(r.cloudPreviewPath,r.name||'mapa',r.cloudPreviewSize,await cloudReuseBlob(localRaster?.blob,r.cloudPreviewSize,r.cloudPreviewHash),r.cloudPreviewParts,r.cloudPreviewType,r.cloudPreviewHash);
+      if(r.cloudSourcePath)rec.sourceBlob=await get(r.cloudSourcePath,(r.name||'mapa')+' · original',r.cloudSourceSize,await cloudReuseBlob(localRaster?.sourceBlob,r.cloudSourceSize,r.cloudSourceHash),r.cloudSourceParts,r.cloudSourceType,r.cloudSourceHash);
       if(rec.styleCache)rec.styleCache={...rec.styleCache,ready:false,missing:true};
       await dbPut('cloudStaging',{key:'rasters:'+r.id,record:rec});
     }
     for(const vl of lists.vectorLayers){
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       if(!vl.id||(!vl.cloudFeaturesPath&&Number(vl.featureCount)>0))throw new Error('Falta la geometría de '+(vl.name||vl.id||'capa'));
-      const rec={...vl};for(const k of ['cloudFeaturesPath','cloudRenderPath','cloudFeaturesSize','cloudRenderType','cloudRenderSize'])delete rec[k];
+      const rec={...vl};for(const k of ['cloudFeaturesPath','cloudRenderPath','cloudFeaturesSize','cloudRenderType','cloudRenderSize','cloudFeaturesParts','cloudRenderParts','cloudFeaturesHash','cloudRenderHash'])delete rec[k];
       const localVector=oldVectors.get(vl.id),sameFeatures=vl.cloudFeaturesPath?await cloudReuseFeatures(localVector?.features,vl.cloudFeaturesSize,vl.cloudFeaturesHash):null;
       if(sameFeatures){rec.features=sameFeatures;done++;cloudProgressUpdate('Reutilizado · geometría de '+(vl.name||'capa'),done,total);}
-      else rec.features=vl.cloudFeaturesPath?JSON.parse(await (await get(vl.cloudFeaturesPath,vl.name||'capa',vl.cloudFeaturesSize,null,vl.cloudFeaturesParts,'application/json')).text()):[];
+      else rec.features=vl.cloudFeaturesPath?JSON.parse(await (await get(vl.cloudFeaturesPath,vl.name||'capa',vl.cloudFeaturesSize,null,vl.cloudFeaturesParts,'application/json',vl.cloudFeaturesHash)).text()):[];
       if(!Array.isArray(rec.features))throw new Error('Geometría de capa inválida: '+(vl.name||vl.id));
-      if(vl.cloudRenderPath)rec.renderBlob=await get(vl.cloudRenderPath,(vl.name||'capa')+' · render',vl.cloudRenderSize,await cloudReuseBlob(localVector?.renderBlob,vl.cloudRenderSize,vl.cloudRenderHash),vl.cloudRenderParts,vl.cloudRenderType);
+      if(vl.cloudRenderPath)rec.renderBlob=await get(vl.cloudRenderPath,(vl.name||'capa')+' · render',vl.cloudRenderSize,await cloudReuseBlob(localVector?.renderBlob,vl.cloudRenderSize,vl.cloudRenderHash),vl.cloudRenderParts,vl.cloudRenderType,vl.cloudRenderHash);
       await dbPut('cloudStaging',{key:'vectorLayers:'+vl.id,record:rec});
     }
     if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
