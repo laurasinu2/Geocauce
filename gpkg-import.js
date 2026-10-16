@@ -62,6 +62,7 @@
    const nat=dimensions(selected);
    const scale=Math.min(1,4096/nat.width,4096/nat.height,Math.sqrt(16000000/(nat.width*nat.height)));
    const w=Math.max(1,Math.round(nat.width*scale)),h=Math.max(1,Math.round(nat.height*scale));
+   if(scale<1)warnings.push(entry.table_name+': vista de teseles reduïda a '+w+' × '+h+' px per protegir la memòria. Per editar el raster a resolució completa, exporta un GeoTIFF des de QGIS.');
    const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
    const ctx=canvas.getContext('2d');if(!ctx)fail('el navegador no permet dibuixar el mapa');ctx.imageSmoothingEnabled=true;
    let count=0;
