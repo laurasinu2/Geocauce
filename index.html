@@ -342,7 +342,7 @@ CON | Confluencia"></textarea></div>
         </section>
         <div id="layersList" class="layers-list"></div>
         <label class="import-btn icon-text"><img src="icons/importar.png" alt=""> Importar mapa
-          <input id="mapFileInput" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.svg,.tif,.tiff,.cog,.pgw,.jgw,.tfw,.wld" hidden>
+          <input id="mapFileInput" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.svg,.tif,.tiff,.cog,.gpkg,.pgw,.jgw,.tfw,.wld" hidden>
         </label>
         <div class="vector-import-options">
           <label><span>Nom de la capa</span><input id="vectorImportName" type="text" placeholder="Opcional · usa el nom del SHP"></label>
@@ -351,7 +351,7 @@ CON | Confluencia"></textarea></div>
           <label for="vectorImportColor"><span>Color de la nova capa SHP / ZIP</span><input id="vectorImportColor" type="color" value="#6b5d82" aria-label="Color de la nova capa vectorial"></label>
         </div>
         <label class="import-btn icon-text"><img src="icons/importar.png" alt=""> Importar capa vectorial SHP / ZIP
-          <input id="vectorFileInput" type="file" multiple accept=".zip,.shp,.shx,.dbf,.prj,.cpg,.qmd" hidden>
+          <input id="vectorFileInput" type="file" multiple accept=".gpkg,.zip,.shp,.shx,.dbf,.prj,.cpg,.qmd" hidden>
         </label>
         <p class="panel-help"><b>GeoTIFF:</b> define la extensión cartográfica del proyecto. <b>SHP:</b> selecciona un ZIP que contenga .shp + .dbf + .prj + .shx (también puede estar dentro de una carpeta del ZIP), o selecciona los archivos sueltos. Las capas vectoriales son solo de referencia y no cambian el zoom general.</p>
         <div class="subsection-title"><img src="icons/seccion.svg" alt=""> Secciones</div>
@@ -1296,6 +1296,8 @@ CON | Confluencia"></textarea></div>
 <script src="cloud-delta-sync.js?v=20261016-sharing-r28"></script>
 <script src="project-access.js?v=20261016-sharing-r28"></script>
   <script src="project-sharing-ui.js?v=20261016-sharing-r28"></script>
+  <script src="gpkg-lite.js?v=20261016-gpkg-r28"></script>
+  <script src="gpkg-import.js?v=20261016-gpkg-r28"></script>
   <script src="app.js?v=20261016-sharing-r28"></script>
   <script src="mobile-pwa.js?v=20261016-sharing-r28"></script>
 </body>
