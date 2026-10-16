@@ -11,7 +11,7 @@ const cardCode=app.slice(app.indexOf('async function showFeatureCard('),app.inde
 const materialList=app.slice(app.indexOf('const materials = ['),app.indexOf('const materialById',app.indexOf('const materials = [')));
 test('deposit label returns selected material, never database identifier',()=>{
  const sandbox={state:{features:[]},featureArea:()=>100,featureLength:()=>10,formatAreaUnit:()=> '100 m²',formatLengthUnit:()=> '10 m'};
- vm.runInNewContext(materialList+scripts+';this.label=depositMaterialLabel;this.present=featureCardPresentation;',sandbox);
+ vm.runInNewContext(materialList+'const materialById=id=>materials.find(m=>m.id===id);'+scripts+';this.label=depositMaterialLabel;this.present=featureCardPresentation;',sandbox);
  const selected={id:'DEP-017',type:'deposit',material:'conglomerate',closed:true,points:[{x:0,y:0},{x:1,y:0},{x:0,y:1}]};
  assert.equal(sandbox.label(selected),'Conglomerado consolidado');
  assert.equal(sandbox.present(selected).title,'Conglomerado consolidado');
