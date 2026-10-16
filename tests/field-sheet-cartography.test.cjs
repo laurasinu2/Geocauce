@@ -95,5 +95,5 @@ test('separate PDF downloads and hierarchical ZIP reuse the same map-inclusive r
  assert.match(block,/nativeExportProfileSheetPdf\(payload\)/);
  assert.match(block,/nativeExportReachSheetPdf\(payload\)/);
  assert.match(block,/nativeExportSectionSheetPdf\(payload\)/);
- assert.match(block,/async function exportSelectedContentsZip\(/);
+ assert.match(app,/async function exportSelectedContentsZip\(/);
 });
