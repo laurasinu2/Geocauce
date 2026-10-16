@@ -249,12 +249,29 @@ USING (public.geocauce_is_project_owner(id_project));
 -- Protect project-owned private files even when a previous permissive
 -- "owner of the uploaded file" policy exists. Revocation takes effect server-side.
 -- RESTRICTIVE policies only narrow access and leave other buckets unaffected.
+
+-- 24 legacy objects have no resolvable project record (15 with local IDs,
+-- 9 referencing a removed/unknown cloud UUID). Keep the CURRENT UPLOADER'S
+-- access only, never grant viewer/editor access based on a missing project.
+-- An uploader qualifies only if both Storage owner_id and first folder equal
+-- the current verified auth.uid(); this branch does NOT grant new orphan uploads.
+-- A revoked collaborator cannot use this fallback for ordinary project paths.
+
 DROP POLICY IF EXISTS geocauce_assets_read_gate ON storage.objects;
 CREATE POLICY geocauce_assets_read_gate ON storage.objects
 AS RESTRICTIVE FOR SELECT TO authenticated
 USING (
-  bucket_id <> 'geocauce-files'
-  OR public.geocauce_can_view_project(public.geocauce_storage_project_id(name))
+ bucket_id <> 'geocauce-files'
+ OR public.geocauce_can_view_project(public.geocauce_storage_project_id(name))
+ OR (
+    (SELECT auth.uid()) IS NOT NULL
+    AND split_part(name,'/',1)=(SELECT auth.uid())::text
+    AND owner_id=(SELECT auth.uid())::text
+    AND NOT EXISTS (
+      SELECT 1 FROM public.project p
+      WHERE p.id_project=public.geocauce_storage_project_id(name)
+    )
+ )
 );
 
 DROP POLICY IF EXISTS geocauce_assets_insert_gate ON storage.objects;
@@ -271,10 +288,28 @@ AS RESTRICTIVE FOR UPDATE TO authenticated
 USING (
   bucket_id <> 'geocauce-files'
   OR public.geocauce_can_edit_project(public.geocauce_storage_project_id(name))
+  OR (
+    (SELECT auth.uid()) IS NOT NULL
+    AND split_part(name,'/',1)=(SELECT auth.uid())::text
+    AND owner_id=(SELECT auth.uid())::text
+    AND NOT EXISTS (
+      SELECT 1 FROM public.project p
+      WHERE p.id_project=public.geocauce_storage_project_id(name)
+    )
+  )
 )
 WITH CHECK (
   bucket_id <> 'geocauce-files'
   OR public.geocauce_can_edit_project(public.geocauce_storage_project_id(name))
+  OR (
+    (SELECT auth.uid()) IS NOT NULL
+    AND split_part(name,'/',1)=(SELECT auth.uid())::text
+    AND owner_id=(SELECT auth.uid())::text
+    AND NOT EXISTS (
+      SELECT 1 FROM public.project p
+      WHERE p.id_project=public.geocauce_storage_project_id(name)
+    )
+  )
 );
 
 DROP POLICY IF EXISTS geocauce_assets_delete_gate ON storage.objects;
@@ -283,6 +318,15 @@ AS RESTRICTIVE FOR DELETE TO authenticated
 USING (
   bucket_id <> 'geocauce-files'
   OR public.geocauce_can_edit_project(public.geocauce_storage_project_id(name))
+  OR (
+    (SELECT auth.uid()) IS NOT NULL
+    AND split_part(name,'/',1)=(SELECT auth.uid())::text
+    AND owner_id=(SELECT auth.uid())::text
+    AND NOT EXISTS (
+      SELECT 1 FROM public.project p
+      WHERE p.id_project=public.geocauce_storage_project_id(name)
+    )
+  )
 );
 
 -- PostgREST exposes only explicit RPC endpoints to authenticated users.
