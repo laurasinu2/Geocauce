@@ -2589,7 +2589,7 @@ function featureVisibleInBounds(f,vb){const b=quickFeatureBounds(f);return !!b&&
 function drawFeature(f,{ghost=false,opacity=1}={}){
   if(!(f.erasures?.length)){mapCtx.save();mapCtx.globalAlpha=ghost?opacity:1;drawFeatureBase(mapCtx,f,{ghost});mapCtx.restore();}
   else{clearCtx(featureCtx,featureCanvas);drawFeatureBase(featureCtx,f,{ghost});applyFeatureErasures(featureCtx,f);mapCtx.save();mapCtx.setTransform(1,0,0,1,0,0);mapCtx.globalAlpha=ghost?opacity:1;mapCtx.drawImage(featureCanvas,0,0);mapCtx.restore();applyDpr(mapCtx,mapCanvas);}
-  if(!ghost && f.closed && !f.paint && f.type!=='basin'){
+  if(!ghost && f.closed && !f.paint && f.type!=='basin' && f.type!=='deposit'){
     const c=polygonCentroid(f.points);if(pointErased(f,c))return;
     const s=worldToScreen(c);mapCtx.font='600 15px "Segoe Print",cursive';mapCtx.fillStyle='#252a26';mapCtx.fillText(f.id,s.x-26,s.y);
   }
@@ -3002,7 +3002,7 @@ function onMapPointerUp(e){
   } else if(st.tool==='editContour'){
     const f=state.features.find(x=>x.id===state.editContourFeatureId&&x.closed);const endSnap=st.snapEnd||nearestPointOnClosedRing(st.points[st.points.length-1],f);
     if(!f||!st.snapStart||!endSnap||endSnap.d>28){toast('Termina cerca del borde para cerrar con el imán');drawAll();return;}
-    pushHistory();const pts=[st.snapStart.world,...worldPts.slice(1,-1),endSnap.world];replaceContourSegment(f,st.snapStart,endSnap,pts);state.selectedId=f.id;showFeatureCard(f);toast(`${f.id}: contorno actualizado`);returnToPan=shouldReturnToPan();
+    pushHistory();const pts=[st.snapStart.world,...worldPts.slice(1,-1),endSnap.world];replaceContourSegment(f,st.snapStart,endSnap,pts);state.selectedId=f.id;showFeatureCard(f);toast(f.type==='deposit'?'Contorno del material actualizado':`${f.id}: contorno actualizado`);returnToPan=shouldReturnToPan();
   } else if(st.tool==='boundary'){
     pushHistory();const f={id:uid('deposit'),type:'deposit',points:worldPts,closed:true,filled:false,material:state.material,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[]};state.features.push(f);state.selectedId=f.id;showFeatureCard(f);toast('Límite creado. Usa Rellenar para aplicar el material.');returnToPan=shouldReturnToPan();
   } else if(st.tool==='paint'){
@@ -3042,7 +3042,7 @@ function deleteFeature(id,ask=true){
   if(!requireEditable('eliminar elementos'))return;
   const f=state.features.find(x=>x.id===id);if(!f)return;
   const related=f.type==='watercourse'?courseReaches(f.id).length:0;
-  const label=f.type==='watercourse'?`${f.abbr||f.id} i els seus ${related} trams`:f.reachCode||f.id;
+  const label=f.type==='watercourse'?`${f.abbr||f.id} i els seus ${related} trams`:f.type==='deposit'?depositMaterialLabel(f):(f.reachCode||f.id);
   if(ask && !confirm(`¿Eliminar ${label} completo?`))return;
   pushHistory();
   if(f.type==='watercourse'){state.features=state.features.filter(x=>x.id!==id&&x.courseId!==id);if(state.activeCourseId===id)state.activeCourseId=null;}
@@ -3060,6 +3060,10 @@ function eventPoint(e,el){
   return{x:local.x*(size.w/(r.width||size.w||1)),y:local.y*(size.h/(r.height||size.h||1))};
 }
 
+function depositMaterialLabel(f){
+ const selected=materials.find(m=>m.id===f?.material);
+ return selected?.name||'Material sin asignar';
+}
 function featureCardPresentation(f){
   const material=f.material?materialById(f.material):null;
   const course=f.type==='reach'?state.features.find(x=>x.id===f.courseId&&x.type==='watercourse'):null;
@@ -3073,7 +3077,7 @@ function featureCardPresentation(f){
   };
   const cfg=map[f.type]||{type:'Element',icon:'icons/ficha.png'};
   let title=f.id||'Element';
-  if(f.type==='deposit') title=`${f.id}${material?' · '+material.name:''}`;
+  if(f.type==='deposit') title=depositMaterialLabel(f);
   else if(f.type==='basin') title=`Conca · ${f.name||state.project?.torrent||state.project?.name||f.id}`;
   else if(f.type==='watercourse') title=`${f.abbr||f.id} · ${f.name||'Curs d’aigua'}`;
   else if(f.type==='reach') title=`${f.reachCode||f.id} · ${course?.name||'Tram'}`;
@@ -3092,10 +3096,27 @@ function featureCardDateText(v){
 }
 async function showFeatureCard(f){
   if(!f)return;
+  if(f.type==='deposit'){
+    // Deposits are a map legend item, not a full field sheet. Keep their
+    // persistent DEP identifier and any old ink/photos untouched in project data.
+    const card=$('#featureCard'),label=depositMaterialLabel(f);
+    card.dataset.featureId=f.id;card.dataset.manualPosition='0';
+    card._renderToken=null;
+    if(card._photoUrl){URL.revokeObjectURL(card._photoUrl);card._photoUrl=null;}
+    card.className='feature-card feature-card-rich feature-card-universal feature-card-material-only feature-type-deposit';
+    card.setAttribute('role','status');
+    card.setAttribute('aria-label','Material seleccionado: '+label);
+    $('#featureCardTitle').textContent=label;
+    $('#featureCardType').textContent='';
+    $('#featureMoreMenu')?.classList.add('hidden');
+    positionFeatureCard(f);
+    return;
+  }
   const card=$('#featureCard'),view=featureCardPresentation(f),wasHidden=card.classList.contains('hidden'),changed=card.dataset.featureId!==f.id;
   if(wasHidden||changed)card.dataset.manualPosition='0';
   card.dataset.featureId=f.id;
   card.className=`feature-card feature-card-rich feature-card-universal feature-type-${f.type}`;
+  card.setAttribute('role','dialog');card.setAttribute('aria-label','Elemento seleccionado');
   card.classList.add('hidden');
   $('#featureCardTitle').textContent=view.title;
   $('#featureCardType').textContent=view.type;
@@ -3147,7 +3168,15 @@ async function showFeatureCard(f){
 function positionFeatureCard(f){
   const card=$('#featureCard');if(!f?.points?.length||card.classList.contains('hidden')||card.dataset.manualPosition==='1')return;
   const wp=f.closed?polygonCentroid(f.points):f.points[Math.floor(f.points.length/2)],sp=worldToScreen(wp),vw=inkCanvas.clientWidth||innerWidth,vh=inkCanvas.clientHeight||innerHeight;
-  requestAnimationFrame(()=>{const r=card.getBoundingClientRect(),cw=r.width||450,ch=r.height||360,margin=14;let x=sp.x+28,y=sp.y-ch*.45;if(x+cw>vw-margin)x=sp.x-cw-28;if(x<margin)x=margin;y=Math.max(70,Math.min(vh-ch-72,y));card.style.left=`${x}px`;card.style.top=`${y}px`;});
+  requestAnimationFrame(()=>{
+    if(card.dataset.featureId!==f.id||card.classList.contains('hidden'))return;
+    const r=card.getBoundingClientRect(),isMaterial=f.type==='deposit',cw=r.width||(isMaterial?205:450),ch=r.height||(isMaterial?56:360),margin=14;
+    let x=sp.x+(isMaterial?16:28),y=isMaterial?sp.y-ch-12:sp.y-ch*.45;
+    if(x+cw>vw-margin)x=sp.x-cw-(isMaterial?16:28);
+    if(x<margin)x=margin;
+    y=Math.max(isMaterial?68:70,Math.min(vh-ch-(isMaterial?16:72),y));
+    card.style.left=`${x}px`;card.style.top=`${y}px`;
+  });
 }
 function hideFeatureCard(){const card=$('#featureCard');card.classList.add('hidden');$('#featureMoreMenu')?.classList.add('hidden');if(card._photoUrl){URL.revokeObjectURL(card._photoUrl);card._photoUrl=null;}}
 function installFeatureCardDrag(){
@@ -3158,11 +3187,11 @@ function installFeatureCardDrag(){
 }
 
 function openSelectedPrimary(){
-  const f=state.features.find(x=>x.id===state.selectedId);if(!f)return;
+  const f=state.features.find(x=>x.id===state.selectedId);if(!f||f.type==='deposit')return;
   if(f.type==='section')openSection(f); else if(f.type==='watercourse')openProfileSheet(f.id); else if(f.type==='reach')openReachSheet(f.id); else openSheet(f);
 }
 function openSheet(f){
-  if(!f)return;
+  if(!f||f.type==='deposit')return;
   const readOnly=!isEditableCampaign();
   $('#sheetId').textContent=f.id;$('#sheetMaterial').textContent=f.material?materialById(f.material).name.toUpperCase():f.type.toUpperCase();$('#sheetDate').textContent=currentCampaign()?.date||f.date;$('#sheetCamp').textContent=campaignLabel(state.campaign);
   const a=featureArea(f);$('#sheetArea').textContent=a!==null?`${f.erasures?.length?'≈ ':''}${formatAreaUnit(a)}`:'—';
