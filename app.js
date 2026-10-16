@@ -5115,7 +5115,8 @@ function localPdfMapTransform(bounds,w,h){
  const pad=52,bw=Math.max(.001,bounds.maxX-bounds.minX),bh=Math.max(.001,bounds.maxY-bounds.minY);
  const availW=w-2*pad,availH=h-2*pad,sc=Math.min(availW/bw,availH/bh);
  const offX=pad+(availW-bw*sc)/2,offY=pad+(availH-bh*sc)/2;
- return {tx:x=>offX+(x-bounds.minX)*sc,ty:y=>offY+(bounds.maxY-y)*sc};
+ // Match drawExportRasterStack exactly, including centring when the viewport letterboxes.
+ return {tx:x=>offX+(x-bounds.minX)*sc,ty:y=>offY+bh*sc-(y-bounds.minY)*sc};
 }
 function localPdfFocusMap(kind,feature){
  const course=kind==='section'?sectionCourse(feature):reachCourse(feature);
