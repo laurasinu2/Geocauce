@@ -4953,8 +4953,9 @@ function generalMapCourseColors(courses){
 }
 function generalMapRasterLayers(){
  const available=state.rasters.filter(r=>r?.image&&r.affine&&r.georef!==false);
- const isTerrain=r=>r.meta?.kind==='dem'||/(?:^|[^a-z])(?:mdt|mde|dem|hillshade|relleu)(?:[^a-z]|$)/i.test(r.name||'');
- const isTopo=r=>!isTerrain(r)&&/(topogr|topo|mapa(?:[-_\s]+)?top|(?:^|[^a-z])mt[nc](?:[^a-z]|$))/i.test(r.name||'');
+ const topoName=r=>/(topogr|topo|mapa(?:[-_\s]+)?top|(?:^|[^a-z])mt[nc](?:[^a-z]|$))/i.test(r.name||'');
+ const isTerrain=r=>!topoName(r)&&(r.meta?.kind==='dem'||/(?:^|[^a-z])(?:mdt|mde|dem|hillshade|relleu)(?:[^a-z]|$)/i.test(r.name||''));
+ const isTopo=r=>topoName(r);
  const rank=(a,b)=>Number(!!b.visible)-Number(!!a.visible)||(sourceResolution(a)||Infinity)-(sourceResolution(b)||Infinity)||String(a.id).localeCompare(String(b.id));
  const terrain=available.filter(isTerrain).sort(rank)[0]||null;
  const maps=available.filter(r=>r.id!==terrain?.id&&!isTerrain(r));
