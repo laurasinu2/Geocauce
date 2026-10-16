@@ -62,3 +62,28 @@ test('cloud download reassembles parts byte-perfectly in order',async()=>{
  assert.equal(reconstructed.size,11);
  assert.equal(reconstructed.type,'text/plain');
 });
+
+test('interrupted MDT upload resumes verified completed chunks without losing local files',async()=>{
+ const i=app.indexOf('  const put=async function('),j=app.indexOf("  if(manual)cloudProgressStart('Preparando archivos para subir'",i);
+ const size=17*1024*1024,blob=new Blob([new Uint8Array(size)],{type:'image/tiff'});
+ const saved=new Map(),attempts=[],infoChecks=[];
+ const env={manual:false,done:0,total:1,cache:{},globalCache:{},remoteFiles:new Map(),uid:'u',
+  cloudAssetDigest:async()=>'samehash',
+  cloudStorageObjectExists:async(path,bytes)=>{infoChecks.push(path);return saved.get(path)===bytes;},
+  cloudUploadBlob:async(path,part)=>{
+   attempts.push(path);
+   if(attempts.length===2)throw Error('network disconnected');
+   saved.set(path,part.size);
+  },
+  cloudProgressUpdate:()=>{},persist:()=>{},reused:0,uploaded:0};
+ const put=new Function('env','with(env){'+app.slice(i,j)+';return put;}')(env);
+ await assert.rejects(put('raster-source:r','u/p/rasters/r',blob,'sig','MDT.tif','.source'),/network disconnected/);
+ assert.equal(env.cache['raster-source:r'].pending.uploaded.length,1);
+ const resumed=await put('raster-source:r','u/p/rasters/r',blob,'sig','MDT.tif','.source');
+ assert.equal(infoChecks.length,1);
+ assert.equal(saved.size,3);
+ assert.equal(attempts.length,4);
+ assert.equal(env.cache['raster-source:r'].parts.length,3);
+ assert.equal(resumed,env.cache['raster-source:r'].parts[0]);
+ assert.equal(env.uploaded,1);
+});
