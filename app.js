@@ -333,9 +333,6 @@ async function cloudUploadBlob(objectPath,blob){
 // size limit is below the original GeoTIFF size. A chunked asset keeps the first
 // part in the legacy path field and all part paths in the extended manifest.
 const CLOUD_ASSET_PART_SIZE=8*1024*1024;
-function cloudAssetParts(path,parts){
- return Array.isArray(parts)&&parts.length?parts:[path].filter(Boolean);
-}
 async function cloudDownloadBlob(objectPath,parts=null,type='application/octet-stream'){
  const objectPaths=cloudAssetParts(objectPath,parts);
  if(!objectPaths.length)return null;
@@ -383,6 +380,7 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
   const tinyHash=str=>{let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return (h>>>0).toString(36);};
   let done=0,reused=0,uploaded=0;
   const put=async function(key,base,blob,legacySig,label,ext){
+ const CLOUD_ASSET_PART_SIZE=8*1024*1024;
  if(manual)cloudProgressUpdate('Analizando · '+label,done,total+2);
  const old=cache[key],remote=remoteFiles.get(key);
  const committed=!!(old?.hash&&old.path&&old.sig===legacySig&&remote?.path===old.path&&remote.hash===old.hash&&Number(remote.size)===blob.size);
@@ -460,6 +458,9 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
     }
   }
   return {metadata:result,steps:done,total:total+2,reused,uploaded};
+}
+function cloudAssetParts(path,parts){
+ return Array.isArray(parts)&&parts.length?parts:[path].filter(Boolean);
 }
 function cloudStableJson(v){if(Array.isArray(v))return '['+v.map(x=>cloudStableJson(x)).join(',')+']';if(v&&typeof v==='object')return '{'+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+cloudStableJson(v[k])).join(',')+'}';return JSON.stringify(v)??'null';}
 function cloudRemoteAssetIndex(m){
