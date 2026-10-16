@@ -142,11 +142,17 @@ BEGIN
  IF to_regclass('public.projects') IS NOT NULL THEN
    EXECUTE 'DROP TRIGGER IF EXISTS geocauce_owner_guard ON public.projects';
    EXECUTE 'CREATE TRIGGER geocauce_owner_guard BEFORE UPDATE ON public.projects FOR EACH ROW EXECUTE FUNCTION public.geocauce_guard_project_owner()';
+   EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.projects TO authenticated';
+   EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.project_snapshots TO authenticated';
    EXECUTE 'DROP POLICY IF EXISTS projects_select_own ON public.projects';
    EXECUTE 'DROP POLICY IF EXISTS projects_update_own ON public.projects';
    EXECUTE 'DROP POLICY IF EXISTS projects_delete_own ON public.projects';
    EXECUTE 'DROP POLICY IF EXISTS geocauce_project_read ON public.projects';
    EXECUTE 'CREATE POLICY geocauce_project_read ON public.projects FOR SELECT TO authenticated USING (public.geocauce_project_role(id) IN (''owner'',''editor'',''viewer''))';
+   EXECUTE 'DROP POLICY IF EXISTS geocauce_project_read_gate ON public.projects';
+   EXECUTE 'CREATE POLICY geocauce_project_read_gate ON public.projects AS RESTRICTIVE FOR SELECT TO authenticated USING (public.geocauce_project_role(id) IN (''owner'',''editor'',''viewer''))';
+   EXECUTE 'DROP POLICY IF EXISTS geocauce_project_insert_gate ON public.projects';
+   EXECUTE 'CREATE POLICY geocauce_project_insert_gate ON public.projects AS RESTRICTIVE FOR INSERT TO authenticated WITH CHECK (owner_id = (SELECT auth.uid()))';
    EXECUTE 'DROP POLICY IF EXISTS geocauce_project_write ON public.projects';
    EXECUTE 'CREATE POLICY geocauce_project_write ON public.projects FOR UPDATE TO authenticated USING (public.geocauce_project_role(id) IN (''owner'',''editor'')) WITH CHECK (public.geocauce_project_role(id) IN (''owner'',''editor''))';
    EXECUTE 'DROP POLICY IF EXISTS geocauce_project_delete ON public.projects';
@@ -161,6 +167,8 @@ BEGIN
    EXECUTE 'DROP POLICY IF EXISTS snapshots_delete_own ON public.project_snapshots';
    EXECUTE 'DROP POLICY IF EXISTS geocauce_snapshot_read ON public.project_snapshots';
    EXECUTE 'CREATE POLICY geocauce_snapshot_read ON public.project_snapshots FOR SELECT TO authenticated USING (public.geocauce_project_role(project_id) IN (''owner'',''editor'',''viewer''))';
+   EXECUTE 'DROP POLICY IF EXISTS geocauce_snapshot_read_gate ON public.project_snapshots';
+   EXECUTE 'CREATE POLICY geocauce_snapshot_read_gate ON public.project_snapshots AS RESTRICTIVE FOR SELECT TO authenticated USING (public.geocauce_project_role(project_id) IN (''owner'',''editor'',''viewer''))';
    EXECUTE 'DROP POLICY IF EXISTS geocauce_snapshot_insert ON public.project_snapshots';
    EXECUTE 'CREATE POLICY geocauce_snapshot_insert ON public.project_snapshots FOR INSERT TO authenticated WITH CHECK (public.geocauce_project_role(project_id) IN (''owner'',''editor'') AND owner_id = public.geocauce_project_owner(project_id))';
    EXECUTE 'DROP POLICY IF EXISTS geocauce_snapshot_update ON public.project_snapshots';
@@ -176,8 +184,14 @@ BEGIN
  ELSIF to_regclass('public.project') IS NOT NULL THEN
    EXECUTE 'DROP TRIGGER IF EXISTS geocauce_owner_guard ON public.project';
    EXECUTE 'CREATE TRIGGER geocauce_owner_guard BEFORE UPDATE ON public.project FOR EACH ROW EXECUTE FUNCTION public.geocauce_guard_project_owner()';
+   EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.project TO authenticated';
+   EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.project_snapshots TO authenticated';
    EXECUTE 'DROP POLICY IF EXISTS geocauce_project_read ON public.project';
    EXECUTE 'CREATE POLICY geocauce_project_read ON public.project FOR SELECT TO authenticated USING (public.geocauce_project_role(id_project::text) IN (''owner'',''editor'',''viewer''))';
+   EXECUTE 'DROP POLICY IF EXISTS geocauce_project_read_gate ON public.project';
+   EXECUTE 'CREATE POLICY geocauce_project_read_gate ON public.project AS RESTRICTIVE FOR SELECT TO authenticated USING (public.geocauce_project_role(id_project::text) IN (''owner'',''editor'',''viewer''))';
+   EXECUTE 'DROP POLICY IF EXISTS geocauce_project_insert_gate ON public.project';
+   EXECUTE 'CREATE POLICY geocauce_project_insert_gate ON public.project AS RESTRICTIVE FOR INSERT TO authenticated WITH CHECK (owner_user_id = (SELECT auth.uid()))';
    EXECUTE 'DROP POLICY IF EXISTS geocauce_project_write ON public.project';
    EXECUTE 'CREATE POLICY geocauce_project_write ON public.project FOR UPDATE TO authenticated USING (public.geocauce_project_role(id_project::text) IN (''owner'',''editor'')) WITH CHECK (public.geocauce_project_role(id_project::text) IN (''owner'',''editor''))';
    EXECUTE 'DROP POLICY IF EXISTS geocauce_project_write_gate ON public.project';
@@ -186,6 +200,8 @@ BEGIN
    EXECUTE 'CREATE POLICY geocauce_project_delete_gate ON public.project AS RESTRICTIVE FOR DELETE TO authenticated USING (public.geocauce_project_role(id_project::text) = ''owner'')';
    EXECUTE 'DROP POLICY IF EXISTS geocauce_snapshot_read ON public.project_snapshots';
    EXECUTE 'CREATE POLICY geocauce_snapshot_read ON public.project_snapshots FOR SELECT TO authenticated USING (public.geocauce_project_role(id_project::text) IN (''owner'',''editor'',''viewer''))';
+   EXECUTE 'DROP POLICY IF EXISTS geocauce_snapshot_read_gate ON public.project_snapshots';
+   EXECUTE 'CREATE POLICY geocauce_snapshot_read_gate ON public.project_snapshots AS RESTRICTIVE FOR SELECT TO authenticated USING (public.geocauce_project_role(id_project::text) IN (''owner'',''editor'',''viewer''))';
    EXECUTE 'DROP POLICY IF EXISTS geocauce_snapshot_insert ON public.project_snapshots';
    EXECUTE 'CREATE POLICY geocauce_snapshot_insert ON public.project_snapshots FOR INSERT TO authenticated WITH CHECK (public.geocauce_project_role(id_project::text) IN (''owner'',''editor''))';
    EXECUTE 'DROP POLICY IF EXISTS geocauce_snapshot_update ON public.project_snapshots';
@@ -211,7 +227,14 @@ CREATE POLICY geocauce_shared_assets_read ON storage.objects
   AND public.geocauce_project_role(split_part(name,'/',2)) IN ('owner','editor','viewer')
   AND split_part(name,'/',1) = public.geocauce_project_owner(split_part(name,'/',2))::text
  );
-DROP POLICY IF EXISTS geocauce_shared_assets_insert ON storage.objects;
+DROP POLICY IF EXISTS geocauce_shared_assets_insert ON storage.objects;DROP POLICY IF EXISTS geocauce_assets_read_gate ON storage.objects;
+CREATE POLICY geocauce_assets_read_gate ON storage.objects AS RESTRICTIVE
+ FOR SELECT TO authenticated USING (
+  bucket_id<>'geocauce-files' OR
+  (public.geocauce_project_role(split_part(name,'/',2)) IN ('owner','editor','viewer')
+   AND split_part(name,'/',1) = public.geocauce_project_owner(split_part(name,'/',2))::text)
+ );
+
 CREATE POLICY geocauce_shared_assets_insert ON storage.objects
  FOR INSERT TO authenticated WITH CHECK (
   bucket_id='geocauce-files'
