@@ -4916,7 +4916,7 @@ async function openCourseLongProfile(courseId=state.currentProfileCourseId||stat
 }
 
 function expandedBounds(raw,margin=.12,minSize=30){if(!raw)return null;const cx=(raw.minX+raw.maxX)/2,cy=(raw.minY+raw.maxY)/2,rx=Math.max(minSize,raw.maxX-raw.minX),ry=Math.max(minSize,raw.maxY-raw.minY);return{minX:cx-rx*(.5+margin),maxX:cx+rx*(.5+margin),minY:cy-ry*(.5+margin),maxY:cy+ry*(.5+margin)};}
-function drawExportRasterStack(g,bounds,cw,ch,pad){const bw=bounds.maxX-bounds.minX,bh=bounds.maxY-bounds.minY,availW=cw-pad*2,availH=ch-pad*2,sc=Math.min(availW/bw,availH/bh),drawW=bw*sc,drawH=bh*sc,offX=pad+(availW-drawW)/2,offY=pad+(availH-drawH)/2;g.save();g.beginPath();g.rect(pad,pad,availW,availH);g.clip();for(const r of state.rasters.filter(x=>x.visible&&x.image&&x.affine)){try{const a=r.affine;g.save();g.globalAlpha=Number.isFinite(+r.opacity)?+r.opacity:1;g.setTransform(sc*a.A,-sc*a.D,sc*a.B,-sc*a.E,offX+sc*(a.C-bounds.minX),offY+drawH+sc*(bounds.minY-a.F));g.drawImage(r.image,0,0);g.restore();}catch(e){console.warn('Mapa exportació',e);}}g.restore();return{sc,tx:x=>offX+(x-bounds.minX)*sc,ty:y=>offY+drawH-(y-bounds.minY)*sc};}
+function drawExportRasterStack(g,bounds,cw,ch,pad,{rasters=null,sharedOpacity=null}={}){const bw=bounds.maxX-bounds.minX,bh=bounds.maxY-bounds.minY,availW=cw-pad*2,availH=ch-pad*2,sc=Math.min(availW/bw,availH/bh),drawW=bw*sc,drawH=bh*sc,offX=pad+(availW-drawW)/2,offY=pad+(availH-drawH)/2;g.save();g.beginPath();g.rect(pad,pad,availW,availH);g.clip();for(const r of (rasters||state.rasters.filter(x=>x.visible&&x.image&&x.affine))){try{const a=r.affine;g.save();g.globalAlpha=sharedOpacity==null?(Number.isFinite(+r.opacity)?+r.opacity:1):Math.max(0,Math.min(1,+sharedOpacity));g.setTransform(sc*a.A,-sc*a.D,sc*a.B,-sc*a.E,offX+sc*(a.C-bounds.minX),offY+drawH+sc*(bounds.minY-a.F));g.drawImage(r.image,0,0);g.restore();}catch(e){console.warn('Mapa exportació',e);}}g.restore();return{sc,tx:x=>offX+(x-bounds.minX)*sc,ty:y=>offY+drawH-(y-bounds.minY)*sc};}
 function drawReferenceLayersExport(g,tx,ty,clipBounds){
   for(const layer of state.referenceLayers||[]){if(!layer.visible)continue;if(layer.lightMode&&layer._renderImage&&layer.renderCache?.bounds){const b=layer.renderCache.bounds;if(!clipBounds||boundsIntersect(b,clipBounds)){g.save();g.globalAlpha=Number.isFinite(+layer.opacity)?Math.max(0,Math.min(1,+layer.opacity)):.85;const x0=tx(b.minX),x1=tx(b.maxX),y0=ty(b.maxY),y1=ty(b.minY);g.drawImage(layer._renderImage,x0,y0,x1-x0,y1-y0);g.restore();}continue;}const st=vectorStyleDefault(layer),kind=st.kind,layerOpacity=Number.isFinite(+layer.opacity)?Math.max(0,Math.min(1,+layer.opacity)):.85,scale=1.8;
     for(const f of layer.features||[]){if(f.bounds&&clipBounds&&!boundsIntersect(f.bounds,clipBounds))continue;
@@ -4936,7 +4936,131 @@ function renderProjectMapImage(bounds,{width=1400,height=900,activeCourse=null,s
   if(activeCourse&&showReaches){for(const rr of orderedCourseReaches(activeCourse.id)){if(!rr.points?.length)continue;const rst=featureLineStyle(rr,{color:'#d58425',width:5.5,dash:'solid'});g.save();g.strokeStyle=rst.color;g.lineWidth=rst.width;g.setLineDash(rst.dash);g.beginPath();rr.points.forEach((p,i)=>i?g.lineTo(tx(p.x),ty(p.y)):g.moveTo(tx(p.x),ty(p.y)));g.stroke();g.restore();}for(const b of reachBoundaryRecords(activeCourse.id)){const frag=courseFragments(activeCourse)[b.fragmentIndex];if(!frag)continue;const q=b.point,eps=Math.max(.15,8/sc),a=pointAtAlong(frag,Math.max(0,b.along-eps)),z=pointAtAlong(frag,Math.min(polylineLength(frag),b.along+eps)),dx=(z.x-a.x)*sc,dy=-(z.y-a.y)*sc,L=Math.hypot(dx,dy)||1,nx=-dy/L,ny=dx/L,x=tx(q.x),y=ty(q.y);g.strokeStyle='#8d510f';g.lineWidth=2;g.beginPath();g.moveTo(x-nx*7,y-ny*7);g.lineTo(x+nx*7,y+ny*7);g.stroke();g.fillStyle='#f4a43b';g.beginPath();g.arc(x,y,3,0,Math.PI*2);g.fill();}const used=[];const reaches=orderedCourseReaches(activeCourse.id);g.font='700 12px system-ui,sans-serif';g.textBaseline='middle';for(let i=0;i<reaches.length;i++){const r=reaches[i],m=reachLabelPoint(r),label=r.reachCode||r.id,tw=g.measureText(label).width,side=i%2?1:-1;let x=tx(m.x)+7,y=ty(m.y)+side*11,box;for(let k=0;k<7;k++){box={x:x-3,y:y-8,w:tw+6,h:16};if(!used.some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y))break;y+=side*14;}used.push(box);g.lineWidth=3.5;g.strokeStyle='rgba(255,255,255,.94)';g.strokeText(label,x,y);g.fillStyle='#7b4612';g.fillText(label,x,y);}}
   if(showCourseNames)drawCourseNamesExport(g,courses,tx,ty,{activeId:activeCourse?.id||null});if(showTitle&&activeCourse){g.fillStyle='#20352a';g.font='700 18px system-ui,sans-serif';g.fillText(`${activeCourse.abbr} · ${activeCourse.name}`,54,31);}g.font='15px system-ui,sans-serif';g.fillStyle='#20352a';g.fillText('N',c.width-58,34);g.beginPath();g.moveTo(c.width-51,70);g.lineTo(c.width-51,42);g.lineTo(c.width-59,53);g.moveTo(c.width-51,42);g.lineTo(c.width-43,53);g.strokeStyle='#20352a';g.lineWidth=2;g.stroke();return c;}
 function basinMapDataUrl(course){const raw=featureBounds(course),bounds=expandedBounds(raw,.14,45),c=renderProjectMapImage(bounds,{width:1100,height:1450,activeCourse:course,showReaches:true,showCourseNames:false,showTitle:true});const g=c.getContext('2d'),dem=state.rasters.filter(r=>r.meta?.kind==='dem').sort((a,b)=>(sourceResolution(a)||Infinity)-(sourceResolution(b)||Infinity))[0];if(dem){const res=sourceResolution(dem);g.font='13px system-ui,sans-serif';g.fillStyle='rgba(42,52,46,.75)';g.fillText(`MDE: ${dem.name}${Number.isFinite(res)?` · ${formatNum(res,2)} m/píxel`:''}`,54,c.height-18);}return c.toDataURL('image/jpeg',.9);}
-function generalMapDataUrl(){const raw=projectRasterBounds();if(!raw)return'';const bounds=expandedBounds(raw,.015,1),c=renderProjectMapImage(bounds,{width:1800,height:1250,activeCourse:null,showReaches:false,showCourseNames:true,showTitle:false});const g=c.getContext('2d');g.fillStyle='rgba(250,249,244,.92)';g.fillRect(38,22,Math.min(620,c.width-76),42);g.fillStyle='#20352a';g.font='700 23px system-ui,sans-serif';g.fillText(`Mapa general · ${state.project?.name||'GeoCauce'}`,54,50);return c.toDataURL('image/jpeg',.92);}
+// General map only. Never edit raster visibility, opacity, feature styles or cloud state.
+const GENERAL_MAP_COURSE_PALETTE=[
+ '#12638a','#ad4c32','#467334','#684b9c','#9c6820','#007b77',
+ '#9b385e','#516eaa','#6a6b24','#974d9e','#2d775c','#a45240',
+ '#255e9a','#7e5934','#49748e','#875b77'
+];
+function generalMapCourseColors(courses){
+ const ordered=[...courses].sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+ const colors=new Map();
+ ordered.forEach((course,index)=>{
+  const base=GENERAL_MAP_COURSE_PALETTE[index];
+  colors.set(course.id,base||'hsl('+Math.round((index*137.508)%360)+' 60% 34%)');
+ });
+ return colors;
+}
+function generalMapRasterLayers(){
+ const available=state.rasters.filter(r=>r?.image&&r.affine&&r.georef!==false);
+ const isTerrain=r=>r.meta?.kind==='dem'||/(?:^|[^a-z])(?:mdt|mde|dem|hillshade|relleu)(?:[^a-z]|$)/i.test(r.name||'');
+ const isTopo=r=>!isTerrain(r)&&/(topogr|topo|mapa(?:[-_\s]+)?top|(?:^|[^a-z])mt[nc](?:[^a-z]|$))/i.test(r.name||'');
+ const rank=(a,b)=>Number(!!b.visible)-Number(!!a.visible)||(sourceResolution(a)||Infinity)-(sourceResolution(b)||Infinity)||String(a.id).localeCompare(String(b.id));
+ const terrain=available.filter(isTerrain).sort(rank)[0]||null;
+ const maps=available.filter(r=>r.id!==terrain?.id&&!isTerrain(r));
+ const topographic=maps.filter(isTopo).sort(rank)[0]||maps.sort(rank)[0]||null;
+ // The same opacity for both backgrounds lets the underlying relief remain visible.
+ const requested=Number(terrain?.opacity);
+ const opacity=Number.isFinite(requested)&&requested>0&&requested<1?requested:.62;
+ return {rasters:[terrain,topographic].filter(Boolean),terrain,topographic,opacity};
+}
+function generalMapBasinLayers(){
+ const layers=(state.referenceLayers||[]).filter(layer=>{
+  const label=[layer.name,layer.fileName,layer.customRole].filter(Boolean).join(' ');
+  return layer.role==='basin'||/(?:conca|cuenca|basin)/i.test(label);
+ });
+ // When a final basin file exists, avoid drawing duplicate preliminary outlines.
+ const definitive=layers.filter(layer=>/definit|final/i.test([layer.name,layer.fileName].join(' ')));
+ return definitive.length?definitive:layers;
+}
+function drawGeneralMapBasinBoundaries(g,bounds,tx,ty,layers){
+ g.save();g.lineCap='round';g.lineJoin='round';
+ const drawPaths=(paths)=>{
+  for(const path of paths||[]){
+   if(!Array.isArray(path)||path.length<2)continue;
+   g.beginPath();let valid=0;
+   for(const point of path){if(!Number.isFinite(point?.x)||!Number.isFinite(point?.y))continue;
+    if(valid++)g.lineTo(tx(point.x),ty(point.y));else g.moveTo(tx(point.x),ty(point.y));
+   }
+   if(valid>=2){g.strokeStyle='rgba(255,255,255,.95)';g.lineWidth=7;g.setLineDash([]);g.stroke();
+    g.strokeStyle='#315949';g.lineWidth=3.6;g.setLineDash([11,5]);g.stroke();}
+  }
+ };
+ for(const layer of layers){
+  if(Array.isArray(layer.features)&&layer.features.length){
+   for(const item of layer.features)if(!item.bounds||boundsIntersect(item.bounds,bounds))drawPaths(item.paths);
+  }else if(layer._renderImage&&layer.renderCache?.bounds){
+   const b=layer.renderCache.bounds;if(!boundsIntersect(b,bounds))continue;
+   g.save();g.globalAlpha=.82;g.drawImage(layer._renderImage,tx(b.minX),ty(b.maxY),tx(b.maxX)-tx(b.minX),ty(b.minY)-ty(b.maxY));g.restore();
+  }
+ }
+ // Basin boundaries drawn directly in the current campaign are also included.
+ for(const f of hydroBasins().filter(f=>f.points?.length>1&&boundsIntersect(featureBounds(f),bounds)))
+  drawPaths([[...f.points,...(f.closed?[f.points[0]]:[])]]);
+ g.restore();
+}
+function drawGeneralMapCourseLabels(g,courses,colors,tx,ty,cw,ch){
+ const used=[];g.save();g.textBaseline='middle';
+ for(const [index,course] of courses.entries()){
+  const point=courseLabelPoint(course);if(!point)continue;
+  const label=[course.abbr,course.name].filter(Boolean).join(' · ')||String(course.id);
+  const color=colors.get(course.id)||'#22577a';
+  g.font='700 20px system-ui,sans-serif';
+  const width=g.measureText(label).width,anchorX=tx(point.x),anchorY=ty(point.y);
+  const side=index%2===0?-1:1;
+  const x=Math.max(58,Math.min(cw-width-58,anchorX+15)),initialY=anchorY+side*24;
+  let y=Math.max(115,Math.min(ch-55,initialY)),rect={x:x-5,y:y-13,w:width+10,h:26};
+  for(let tries=0;tries<20&&used.some(b=>rect.x<b.x+b.w&&rect.x+rect.w>b.x&&rect.y<b.y+b.h&&rect.y+rect.h>b.y);tries++){
+   y=Math.max(115,Math.min(ch-55,initialY+side*(tries+1)*27));rect={x:x-5,y:y-13,w:width+10,h:26};
+  }
+  used.push(rect);
+  if(Math.hypot(x-anchorX,y-anchorY)>29){
+   g.beginPath();g.moveTo(anchorX,anchorY);g.lineTo(x,y);
+   g.strokeStyle='rgba(255,255,255,.95)';g.lineWidth=5;g.setLineDash([]);g.stroke();
+   g.strokeStyle=color;g.lineWidth=1.8;g.stroke();
+  }
+  g.lineWidth=6;g.strokeStyle='rgba(255,255,255,.98)';g.strokeText(label,x,y);
+  g.fillStyle=color;g.fillText(label,x,y);
+ }
+ g.restore();
+}
+async function generalMapDataUrl(){
+ const {rasters,opacity}=generalMapRasterLayers(),basins=generalMapBasinLayers();
+ // Some SHP files are unloaded from RAM until requested: read without changing their visibility.
+ await Promise.all(basins.map(layer=>ensureReferenceLayerFeatures(layer)));
+ const regions=[...rasters.map(r=>rasterBounds(r)),...basins.map(layer=>layer.fullBounds||referenceLayerBounds(layer)).filter(Boolean),
+  ...hydroBasins().filter(f=>f.points?.length).map(featureBounds),
+  ...hydroCourses().filter(f=>f.points?.length).map(featureBounds)].filter(Boolean);
+ const raw=combineBounds(regions)||projectRasterBounds();if(!raw)return'';
+ const bounds=expandedBounds(raw,.035,10),width=1800,height=1250;
+ const c=document.createElement('canvas');c.width=width;c.height=height;
+ const g=c.getContext('2d');g.fillStyle='#faf9f4';g.fillRect(0,0,width,height);
+ const {tx,ty}=drawExportRasterStack(g,bounds,width,height,52,{rasters,sharedOpacity:opacity});
+ // Preserve all other visible reference layers and additionally draw the definitive
+ // basin boundary even when the layer is switched off in the working view.
+ drawReferenceLayersExport(g,tx,ty,bounds);
+ drawGeneralMapBasinBoundaries(g,bounds,tx,ty,basins);
+ const courses=hydroCourses().filter(course=>courseFragments(course).some(points=>points.length>1&&boundsIntersect(pointsBounds([points]),bounds)));
+ const colors=generalMapCourseColors(courses);
+ g.save();g.lineCap='round';g.lineJoin='round';g.setLineDash([]);
+ for(const course of courses){
+  const color=colors.get(course.id);for(const points of courseFragments(course)){
+   if(points.length<2)continue;g.beginPath();
+   points.forEach((p,i)=>i?g.lineTo(tx(p.x),ty(p.y)):g.moveTo(tx(p.x),ty(p.y)));
+   g.strokeStyle='rgba(255,255,255,.95)';g.lineWidth=9;g.stroke();
+   g.strokeStyle=color;g.lineWidth=4.7;g.stroke();
+  }
+ }
+ g.restore();
+ drawGeneralMapCourseLabels(g,courses,colors,tx,ty,width,height);
+ g.fillStyle='rgba(250,249,244,.95)';g.fillRect(38,22,Math.min(740,width-76),44);
+ g.fillStyle='#20352a';g.font='700 23px system-ui,sans-serif';
+ g.fillText('Mapa general · '+(state.project?.name||'GeoCauce'),54,50);
+ g.fillStyle='#20352a';g.font='18px system-ui,sans-serif';g.fillText('N',width-58,34);
+ g.beginPath();g.moveTo(width-51,70);g.lineTo(width-51,42);g.lineTo(width-59,53);
+ g.moveTo(width-51,42);g.lineTo(width-43,53);g.strokeStyle='#20352a';g.lineWidth=2;g.stroke();
+ return c.toDataURL('image/jpeg',.94);
+}
 function dataUrlBlob(url){const [head,b64]=String(url||'').split(',');if(!b64)return null;const mime=(head.match(/data:([^;]+)/)||[])[1]||'image/jpeg',bin=atob(b64),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return new Blob([u],{type:mime});}
 
 function safeExportInk(store,w,h){try{return renderInkToDataUrl(store,w,h);}catch(e){console.warn('FITXA I · tinta exportació',e);return'';}}
@@ -5335,7 +5459,7 @@ async function localPdfSectionSheet(section,stage){
 }
 async function localExportArchiveFile(id){
  if(id==='__general_map__'){
-  const blob=dataUrlBlob(generalMapDataUrl());
+  const blob=dataUrlBlob(await generalMapDataUrl());
   if(!blob)throw Error('No hi ha mapes georeferenciats visibles');
   return blob;
  }
@@ -5467,7 +5591,7 @@ async function exportSelectedContents(){
         }
       }
       if(id==='__general_map__'){
-        try{if(st)st.textContent=`Generant mapa general · ${n+1}/${ids.length}…`;const url=generalMapDataUrl(),blob=dataUrlBlob(url);if(!blob)throw Error('No hi ha mapes georeferenciats visibles');await downloadBlob(blob,`MAPA_GENERAL_${safeSlug(state.project?.name||'GeoCauce')}.jpg`);ok++;}catch(e){console.error('Mapa general',e);failed.push(`Mapa general: ${e?.message||String(e)}`);}continue;
+        try{if(st)st.textContent=`Generant mapa general · ${n+1}/${ids.length}…`;const url=await generalMapDataUrl(),blob=dataUrlBlob(url);if(!blob)throw Error('No hi ha mapes georeferenciats visibles');await downloadBlob(blob,`MAPA_GENERAL_${safeSlug(state.project?.name||'GeoCauce')}.jpg`);ok++;}catch(e){console.error('Mapa general',e);failed.push(`Mapa general: ${e?.message||String(e)}`);}continue;
       }
       if(id.startsWith('course:')){
         const c=state.features.find(f=>f.id===id.slice(7)&&f.type==='watercourse');if(!c)continue;if(st)st.textContent=`Preparant ${c.abbr||c.name||'fitxa'} · ${n+1}/${ids.length}…`;
