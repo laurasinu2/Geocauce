@@ -1319,3 +1319,20 @@ body > .modal > .modal-backdrop{position:absolute;inset:0}
  .download-tree-footer #downloadContentsZip{flex:1 1 100%}
  .download-contents-card>.export-note{max-height:78px;overflow:auto}
 }
+
+/* Shared project permissions dialog, r28 */
+.geocauce-share-overlay{position:fixed;inset:0;z-index:5000;background:rgba(13,29,26,.66);display:flex;align-items:center;justify-content:center;padding:14px}
+.geocauce-share-dialog{box-sizing:border-box;width:min(560px,100%);max-height:90dvh;overflow:auto;background:var(--paper,#fff);color:var(--ink,#20372f);padding:23px;border-radius:16px;box-shadow:0 15px 65px rgba(0,0,0,.28)}
+.geocauce-share-dialog h2{font-size:21px;margin:0 0 12px}
+.geocauce-share-dialog h3{font-size:16px;margin:16px 0 8px}
+.geocauce-share-dialog form{display:flex;gap:8px;flex-wrap:wrap}
+.geocauce-share-dialog input{flex:2 1 180px;min-width:0}
+.geocauce-share-dialog select{flex:1 1 140px}
+.geocauce-share-dialog button,.geocauce-share-dialog select,.geocauce-share-dialog input{min-height:42px;border-radius:8px;padding:8px}
+.geocauce-share-member{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid #d9e1dc}
+.geocauce-share-member span{overflow-wrap:anywhere;min-width:0}
+.geocauce-share-status{min-height:20px;font-size:13px}
+.geocauce-share-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:15px}
+.geocauce-share-close{margin-top:18px}
+.project-card-actions .share-project[hidden],.project-card-actions .edit-project[hidden],.project-card-actions .delete-project[hidden]{display:none!important}
+.geocauce-read-only #activeToolBtn{opacity:.72}
