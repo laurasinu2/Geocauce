@@ -1344,6 +1344,7 @@ body > .modal > .modal-backdrop{position:absolute;inset:0}
   overflow:hidden!important;display:block!important;background:#f9f8f1!important;
   border:1px solid #bfc9ba!important;box-shadow:0 6px 20px rgba(17,37,23,.23)!important;
 }
+#featureCard.feature-card-material-only.hidden{display:none!important}
 #featureCard.feature-card-material-only .feature-card-dragbar,
 #featureCard.feature-card-material-only .feature-preview-wrap,
 #featureCard.feature-card-material-only .feature-card-type,
