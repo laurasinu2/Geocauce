@@ -345,15 +345,15 @@ CON | Confluencia"></textarea></div>
           <input id="mapFileInput" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.svg,.tif,.tiff,.cog,.gpkg,.pgw,.jgw,.tfw,.wld" hidden>
         </label>
         <div class="vector-import-options">
-          <label><span>Nom de la capa</span><input id="vectorImportName" type="text" placeholder="Opcional · usa el nom del SHP"></label>
+          <label><span>Nom de la capa</span><input id="vectorImportName" type="text" placeholder="Opcional · usa el nom de la capa"></label>
           <label><span>Ús de les dades</span><select id="vectorImportRole"><option value="reference">Referència</option><option value="watercourse">Riu / cauce</option><option value="basin">Conca</option><option value="limit">Límit</option><option value="path">Camí / traçat</option><option value="other">Altres…</option></select></label>
           <label id="vectorCustomRoleLabel"><span>Tipus personalitzat</span><input id="vectorImportCustomRole" class="hidden" type="text" placeholder="Ex. canals històrics"></label>
-          <label for="vectorImportColor"><span>Color de la nova capa SHP / ZIP</span><input id="vectorImportColor" type="color" value="#6b5d82" aria-label="Color de la nova capa vectorial"></label>
+          <label for="vectorImportColor"><span>Color de la nova capa vectorial</span><input id="vectorImportColor" type="color" value="#6b5d82" aria-label="Color de la nova capa vectorial"></label>
         </div>
-        <label class="import-btn icon-text"><img src="icons/importar.png" alt=""> Importar capa vectorial SHP / ZIP
+        <label class="import-btn icon-text"><img src="icons/importar.png" alt=""> Importar SHP / ZIP / GeoPackage
           <input id="vectorFileInput" type="file" multiple accept=".gpkg,.zip,.shp,.shx,.dbf,.prj,.cpg,.qmd" hidden>
         </label>
-        <p class="panel-help"><b>GeoTIFF:</b> define la extensión cartográfica del proyecto. <b>SHP:</b> selecciona un ZIP que contenga .shp + .dbf + .prj + .shx (también puede estar dentro de una carpeta del ZIP), o selecciona los archivos sueltos. Las capas vectoriales son solo de referencia y no cambian el zoom general.</p>
+        <p class="panel-help"><b>GeoTIFF:</b> define la extensión cartográfica del proyecto. <b>GeoPackage (.gpkg):</b> se puede elegir desde Importar mapa o SHP; se detectan las capas vectoriales y los mapas de teselas compatibles. Los raster con EPSG diferente necesitan reproyección a QGIS; las coberturas de elevación deben exportarse a GeoTIFF. <b>SHP:</b> selecciona un ZIP con .shp + .dbf + .prj + .shx o los ficheros sueltos.</p>
         <div class="subsection-title"><img src="icons/seccion.svg" alt=""> Secciones</div>
         <div id="sectionList" class="section-list"></div>
         <button id="exportGeojsonBtn" class="secondary full icon-text"><img src="icons/guardar.png" alt=""> Exportar GeoJSON</button>
