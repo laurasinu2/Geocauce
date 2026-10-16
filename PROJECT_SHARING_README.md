@@ -13,6 +13,41 @@ Este documento utiliza la estructura **verificada por consultas de solo lectura*
 
 **NO ejecutar `SUPABASE_SETUP.sql` ni el SQL genérico de ramas anteriores.** No crear `public.project_members`: duplicaría la autorización.
 
+## Instrucciones precisas para activar r28 en Supabase
+
+Los cambios realizados en GitHub **no instalan funciones PostgreSQL**. Si la PWA
+muestra `Could not find the function public.geocauce_project_role`, sigue este
+procedimiento usando **el mismo proyecto Supabase al que está conectada r28**:
+
+1. Descarga una copia completa de cada proyecto importante de GeoCauce y
+   verifica una copia de PostgreSQL **y** de los archivos del bucket
+   `geocauce-files`. No borres los datos locales de la PWA.
+2. En **Supabase Dashboard → proyecto GeoCauce → SQL Editor → New query**,
+   copia íntegramente `SUPABASE_PROJECT_SHARING_R28_PREFLIGHT.sql` y pulsa
+   **Run**. La primera fila debe indicar `rutas_sin_proyecto=0` y
+   `rutas_sin_registro=0`. La segunda, `sin_propietario=0`.
+   Si alguna no es cero, **no continúes**: esas rutas/identidades requieren revisión.
+3. Tras validar la copia y el preflight, abre otra **New query** y ejecuta el
+   contenido completo de `SUPABASE_PROJECT_SHARING_R28.sql` **una sola vez**.
+   El archivo tiene `BEGIN;` y `COMMIT;`, e incluye
+   `NOTIFY pgrst, 'reload schema';` para refrescar las funciones de PostgREST.
+   No ejecutes `SUPABASE_SETUP.sql` y no crees `project_members`.
+4. Ejecuta `SUPABASE_PROJECT_SHARING_R28_POSTCHECK.sql` en una tercera consulta.
+   Deben salir **5 funciones RPC y 5 políticas** (4 en Storage y 1 para borrar
+   snapshots). Si hay un error, guarda el texto exacto; no borres nada.
+5. Cierra y recarga r28 **sin borrar caché, IndexedDB ni datos de la app**.
+   Comprueba que un propietario abre un proyecto, lo edita y sincroniza.
+   El usuario destinatario debe haberse registrado antes en Supabase Auth.
+   Prueba en el panel **Compartir → correo del destinatario → Viewer/Editor**.
+6. Confirma que Viewer no puede guardar, Editor sí y solo Owner gestiona miembros.
+   Revoca al editor y verifica que, con un token previo todavía válido, ya no
+   puede descargar archivos ni guardar cambios. Estos permisos los exige RLS.
+7. No fusiones r28 con `main` antes de validar copias, recuperación de
+   archivos geográficos y sincronización entre dispositivos.
+
+La rama es código, no una base de datos. **Si utilizas un Supabase de pruebas,
+necesitas conectar también el despliegue de pruebas de r28 a ese Supabase.**
+
 ## Seguridad y orden de despliegue
 
 1. Exportar copias completas de los proyectos locales de GeoCauce.
