@@ -22,11 +22,14 @@ procedimiento usando **el mismo proyecto Supabase al que está conectada r28**:
 1. Descarga una copia completa de cada proyecto importante de GeoCauce y
    verifica una copia de PostgreSQL **y** de los archivos del bucket
    `geocauce-files`. No borres los datos locales de la PWA.
-2. En **Supabase Dashboard → proyecto GeoCauce → SQL Editor → New query**,
-   copia íntegramente `SUPABASE_PROJECT_SHARING_R28_PREFLIGHT.sql` y pulsa
-   **Run**. La primera fila debe indicar `rutas_sin_proyecto=0` y
-   `rutas_sin_registro=0`. La segunda, `sin_propietario=0`.
-   Si alguna no es cero, **no continúes**: esas rutas/identidades requieren revisión.
+2. Los diagnósticos del Supabase real ya están disponibles: 90 objetos;
+   15 rutas antiguas con identificador local `Pmue0orw4w56l`, 9 rutas con
+   UUID sin registro en `public.project`, y 0 proyectos sin propietario.
+   **No hace falta repetir esas consultas.** La migración mantiene el acceso a
+   esos 24 archivos únicamente para su propietario de Storage anterior
+   (`owner_id = auth.uid()`), y solo cuando realmente no existe el proyecto,
+   usando una función `SECURITY DEFINER` para no confundir falta de permiso
+   con inexistencia. Esta excepción no autoriza nuevas subidas huérfanas.
 3. Tras validar la copia y el preflight, abre otra **New query** y ejecuta el
    contenido completo de `SUPABASE_PROJECT_SHARING_R28.sql` **una sola vez**.
    El archivo tiene `BEGIN;` y `COMMIT;`, e incluye
