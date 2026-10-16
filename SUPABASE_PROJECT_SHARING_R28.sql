@@ -253,9 +253,9 @@ USING (public.geocauce_is_project_owner(id_project));
 -- 24 legacy objects have no resolvable project record (15 with local IDs,
 -- 9 referencing a removed/unknown cloud UUID). Keep the CURRENT UPLOADER'S
 -- access only, never grant viewer/editor access based on a missing project.
--- An uploader qualifies only if both Storage owner_id and first folder equal
--- the current verified auth.uid(); this branch does NOT grant new orphan uploads.
--- A revoked collaborator cannot use this fallback for ordinary project paths.
+-- Only the existing Storage owner_id may access orphaned legacy objects.
+-- This preserves the previous geocauce_files_*_own policies and does NOT grant
+-- new orphan uploads. Revoked members cannot use this fallback for live projects.
 
 DROP POLICY IF EXISTS geocauce_assets_read_gate ON storage.objects;
 CREATE POLICY geocauce_assets_read_gate ON storage.objects
@@ -265,7 +265,6 @@ USING (
  OR public.geocauce_can_view_project(public.geocauce_storage_project_id(name))
  OR (
     (SELECT auth.uid()) IS NOT NULL
-    AND split_part(name,'/',1)=(SELECT auth.uid())::text
     AND owner_id=(SELECT auth.uid())::text
     AND NOT EXISTS (
       SELECT 1 FROM public.project p
@@ -290,7 +289,6 @@ USING (
   OR public.geocauce_can_edit_project(public.geocauce_storage_project_id(name))
   OR (
     (SELECT auth.uid()) IS NOT NULL
-    AND split_part(name,'/',1)=(SELECT auth.uid())::text
     AND owner_id=(SELECT auth.uid())::text
     AND NOT EXISTS (
       SELECT 1 FROM public.project p
@@ -303,7 +301,6 @@ WITH CHECK (
   OR public.geocauce_can_edit_project(public.geocauce_storage_project_id(name))
   OR (
     (SELECT auth.uid()) IS NOT NULL
-    AND split_part(name,'/',1)=(SELECT auth.uid())::text
     AND owner_id=(SELECT auth.uid())::text
     AND NOT EXISTS (
       SELECT 1 FROM public.project p
@@ -320,7 +317,6 @@ USING (
   OR public.geocauce_can_edit_project(public.geocauce_storage_project_id(name))
   OR (
     (SELECT auth.uid()) IS NOT NULL
-    AND split_part(name,'/',1)=(SELECT auth.uid())::text
     AND owner_id=(SELECT auth.uid())::text
     AND NOT EXISTS (
       SELECT 1 FROM public.project p
