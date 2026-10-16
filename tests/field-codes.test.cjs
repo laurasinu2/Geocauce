@@ -91,8 +91,8 @@ test('handwriting and synchronization pathways remain available',()=>{
   assert.match(app,/function cloudCollectObsoleteAssets/);
 });
 test('new PWA revision references all edited files',()=>{
-  assert.match(html,/app\.js\?v=20261016-sync-r25/);
-  assert.match(sw,/mobile-pwa-r25/);
+  assert.match(html,/app\.js\?v=20261016-sheetmaps-r26/);
+  assert.match(sw,/mobile-pwa-r26/);
 });
 
 

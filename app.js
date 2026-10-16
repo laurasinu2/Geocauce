@@ -4932,7 +4932,7 @@ function drawReferenceLayersExport(g,tx,ty,clipBounds){
 function longestCourseFragment(c){const fr=courseFragments(c);return fr.slice().sort((a,b)=>polylineLength(b)-polylineLength(a))[0]||[];}
 function courseLabelPoint(c){const f=longestCourseFragment(c);return f.length?pointAtAlong(f,polylineLength(f)/2):null;}
 function drawCourseNamesExport(g,courses,tx,ty,{activeId=null}={}){const used=[];g.textBaseline='middle';for(let i=0;i<courses.length;i++){const wc=courses[i],m=courseLabelPoint(wc);if(!m)continue;const label=`${wc.abbr||''}${wc.name?` · ${wc.name}`:''}`.trim();if(!label)continue;const fs=wc.id===activeId?13:11;g.font=`700 ${fs}px system-ui,sans-serif`;const tw=g.measureText(label).width;let x=tx(m.x)+7,y=ty(m.y)+(i%2?12:-12),box;for(let k=0;k<7;k++){box={x:x-4,y:y-9,w:tw+8,h:18};if(!used.some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y))break;y+=(i%2?14:-14);}used.push(box);g.lineWidth=3.5;g.strokeStyle='rgba(255,255,255,.95)';g.strokeText(label,x,y);g.fillStyle=wc.id===activeId?'#164e79':'#28495d';g.fillText(label,x,y);}}
-function renderProjectMapImage(bounds,{width=1400,height=900,activeCourse=null,showReaches=false,showCourseNames=false,showTitle=true}={}){const c=document.createElement('canvas');c.width=width;c.height=height;const g=c.getContext('2d');g.fillStyle='#faf9f4';g.fillRect(0,0,c.width,c.height);if(!bounds)return c;const pad=52,{sc,tx,ty}=drawExportRasterStack(g,bounds,c.width,c.height,pad);drawReferenceLayersExport(g,tx,ty,bounds);const courses=hydroCourses().filter(w=>boundsIntersect(featureBounds(w),bounds));g.lineCap='round';g.lineJoin='round';for(const wc of courses){const wst=featureLineStyle(wc,{color:wc.id===activeCourse?.id?'#105c96':'#3a6987',width:wc.id===activeCourse?.id?5:2.4,dash:'solid'});g.strokeStyle=wst.color;g.lineWidth=wst.width;g.setLineDash(wst.dash);for(const frag of courseFragments(wc)){if(frag.length<2)continue;g.beginPath();frag.forEach((p,i)=>i?g.lineTo(tx(p.x),ty(p.y)):g.moveTo(tx(p.x),ty(p.y)));g.stroke();}}
+function renderProjectMapImage(bounds,{width=1400,height=900,activeCourse=null,showReaches=false,showCourseNames=false,showTitle=true,muteCourses=false}={}){const c=document.createElement('canvas');c.width=width;c.height=height;const g=c.getContext('2d');g.fillStyle='#faf9f4';g.fillRect(0,0,c.width,c.height);if(!bounds)return c;const pad=52,{sc,tx,ty}=drawExportRasterStack(g,bounds,c.width,c.height,pad);drawReferenceLayersExport(g,tx,ty,bounds);const courses=hydroCourses().filter(w=>boundsIntersect(featureBounds(w),bounds));g.lineCap='round';g.lineJoin='round';for(const wc of courses){const wst=featureLineStyle(wc,{color:wc.id===activeCourse?.id?'#105c96':'#3a6987',width:wc.id===activeCourse?.id?5:2.4,dash:'solid'});if(muteCourses){wst.color='#acb7b1';wst.width=2.1;wst.dash=[];}g.strokeStyle=wst.color;g.lineWidth=wst.width;g.setLineDash(wst.dash);for(const frag of courseFragments(wc)){if(frag.length<2)continue;g.beginPath();frag.forEach((p,i)=>i?g.lineTo(tx(p.x),ty(p.y)):g.moveTo(tx(p.x),ty(p.y)));g.stroke();}}
   if(activeCourse&&showReaches){for(const rr of orderedCourseReaches(activeCourse.id)){if(!rr.points?.length)continue;const rst=featureLineStyle(rr,{color:'#d58425',width:5.5,dash:'solid'});g.save();g.strokeStyle=rst.color;g.lineWidth=rst.width;g.setLineDash(rst.dash);g.beginPath();rr.points.forEach((p,i)=>i?g.lineTo(tx(p.x),ty(p.y)):g.moveTo(tx(p.x),ty(p.y)));g.stroke();g.restore();}for(const b of reachBoundaryRecords(activeCourse.id)){const frag=courseFragments(activeCourse)[b.fragmentIndex];if(!frag)continue;const q=b.point,eps=Math.max(.15,8/sc),a=pointAtAlong(frag,Math.max(0,b.along-eps)),z=pointAtAlong(frag,Math.min(polylineLength(frag),b.along+eps)),dx=(z.x-a.x)*sc,dy=-(z.y-a.y)*sc,L=Math.hypot(dx,dy)||1,nx=-dy/L,ny=dx/L,x=tx(q.x),y=ty(q.y);g.strokeStyle='#8d510f';g.lineWidth=2;g.beginPath();g.moveTo(x-nx*7,y-ny*7);g.lineTo(x+nx*7,y+ny*7);g.stroke();g.fillStyle='#f4a43b';g.beginPath();g.arc(x,y,3,0,Math.PI*2);g.fill();}const used=[];const reaches=orderedCourseReaches(activeCourse.id);g.font='700 12px system-ui,sans-serif';g.textBaseline='middle';for(let i=0;i<reaches.length;i++){const r=reaches[i],m=reachLabelPoint(r),label=r.reachCode||r.id,tw=g.measureText(label).width,side=i%2?1:-1;let x=tx(m.x)+7,y=ty(m.y)+side*11,box;for(let k=0;k<7;k++){box={x:x-3,y:y-8,w:tw+6,h:16};if(!used.some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y))break;y+=side*14;}used.push(box);g.lineWidth=3.5;g.strokeStyle='rgba(255,255,255,.94)';g.strokeText(label,x,y);g.fillStyle='#7b4612';g.fillText(label,x,y);}}
   if(showCourseNames)drawCourseNamesExport(g,courses,tx,ty,{activeId:activeCourse?.id||null});if(showTitle&&activeCourse){g.fillStyle='#20352a';g.font='700 18px system-ui,sans-serif';g.fillText(`${activeCourse.abbr} · ${activeCourse.name}`,54,31);}g.font='15px system-ui,sans-serif';g.fillStyle='#20352a';g.fillText('N',c.width-58,34);g.beginPath();g.moveTo(c.width-51,70);g.lineTo(c.width-51,42);g.lineTo(c.width-59,53);g.moveTo(c.width-51,42);g.lineTo(c.width-43,53);g.strokeStyle='#20352a';g.lineWidth=2;g.stroke();return c;}
 function basinMapDataUrl(course){const raw=featureBounds(course),bounds=expandedBounds(raw,.14,45),c=renderProjectMapImage(bounds,{width:1100,height:1450,activeCourse:course,showReaches:true,showCourseNames:false,showTitle:true});const g=c.getContext('2d'),dem=state.rasters.filter(r=>r.meta?.kind==='dem').sort((a,b)=>(sourceResolution(a)||Infinity)-(sourceResolution(b)||Infinity))[0];if(dem){const res=sourceResolution(dem);g.font='13px system-ui,sans-serif';g.fillStyle='rgba(42,52,46,.75)';g.fillText(`MDE: ${dem.name}${Number.isFinite(res)?` · ${formatNum(res,2)} m/píxel`:''}`,54,c.height-18);}return c.toDataURL('image/jpeg',.9);}
@@ -5109,30 +5109,126 @@ function localPdfInkCanvas(canvas,strokes){
  g.clearRect(0,0,canvas.width,canvas.height);
  for(const stroke of strokes||[])drawInkRecord(g,{width,height},stroke,density,false);
 }
+// Export-only map pages. They use the same visible rasters, referenced layers and
+// world coordinates as GeoCauce's general map, never a screenshot of the UI.
+function localPdfMapTransform(bounds,w,h){
+ const pad=52,bw=Math.max(.001,bounds.maxX-bounds.minX),bh=Math.max(.001,bounds.maxY-bounds.minY);
+ const availW=w-2*pad,availH=h-2*pad,sc=Math.min(availW/bw,availH/bh);
+ const offX=pad+(availW-bw*sc)/2,offY=pad+(availH-bh*sc)/2;
+ // Match drawExportRasterStack exactly, including centring when the viewport letterboxes.
+ return {tx:x=>offX+(x-bounds.minX)*sc,ty:y=>offY+bh*sc-(y-bounds.minY)*sc};
+}
+function localPdfFocusMap(kind,feature){
+ const course=kind==='section'?sectionCourse(feature):reachCourse(feature);
+ const reach=kind==='section'?sectionReach(feature):feature;
+ const parts=[course&&featureBounds(course),reach&&featureBounds(reach),featureBounds(feature)].filter(Boolean);
+ const raw=combineBounds(parts)||featureBounds(feature);
+ // Full-course context, but centred on the selected reach/section whenever possible.
+ const focus=reach?.points?.length?featureBounds(reach):featureBounds(feature);
+ const bounds=expandedBounds(focus||raw,.25,60),width=1200,height=1440;
+ const canvas=renderProjectMapImage(bounds,{width,height,showTitle:false,showCourseNames:false,muteCourses:true});
+ const g=canvas.getContext('2d'),{tx,ty}=localPdfMapTransform(bounds,width,height);
+ const stroke=(f,outline,lineWidth)=>{
+  if(!f?.points?.length)return false;
+  g.save();g.lineCap='round';g.lineJoin='round';g.setLineDash([]);
+  for(const points of featurePolylines(f)){
+   if(!points.length)continue;
+   g.beginPath();points.forEach((p,i)=>i?g.lineTo(tx(p.x),ty(p.y)):g.moveTo(tx(p.x),ty(p.y)));
+   if(points.length>1){g.strokeStyle='#fff';g.lineWidth=lineWidth+5;g.stroke();g.strokeStyle=outline;g.lineWidth=lineWidth;g.stroke();}
+   else{g.fillStyle='#fff';g.beginPath();g.arc(tx(points[0].x),ty(points[0].y),lineWidth+3,0,Math.PI*2);g.fill();
+    g.fillStyle=outline;g.beginPath();g.arc(tx(points[0].x),ty(points[0].y),lineWidth,0,Math.PI*2);g.fill();}
+  }
+  g.restore();return true;
+ };
+ if(kind==='section')stroke(reach,'#558c9d',7);
+ const hasGeometry=stroke(feature,'#dc6420',kind==='section'?10:9);
+ g.fillStyle='#20372f';g.font='700 18px sans-serif';
+ g.fillText((course?.abbr||course?.name||'Curs')+'  ·  '+(kind==='section'?'Secció':'Tram'),54,31);
+ if(hasGeometry){
+  const points=featurePolylines(feature).flat(),mid=points[Math.floor(points.length/2)];
+  if(mid){
+   const x=Math.max(60,Math.min(width-260,tx(mid.x)+12)),y=Math.max(100,Math.min(height-100,ty(mid.y)-12));
+   const name=kind==='section'?(feature.sectionName||feature.sheetIII?.sectionName||feature.id):(feature.reachCode||feature.id);
+   g.font='700 24px sans-serif';g.strokeStyle='#fff';g.lineWidth=6;g.strokeText(name,x,y);g.fillStyle='#943900';g.fillText(name,x,y);
+  }
+ }else{g.fillStyle='#923d2f';g.font='18px sans-serif';g.fillText('Geometria de la '+(kind==='section'?'secció':'tram')+' no disponible',54,height-25);}
+ return canvas;
+}
+function localPdfIllustratedPage(stage,title,subtitle,canvas,footnote){
+ const page=document.createElement('section');
+ page.className='geocauce-export-map-page';
+ Object.assign(page.style,{boxSizing:'border-box',display:'block',width:'1000px',minHeight:'1270px',margin:'0',padding:'30px 32px 26px',background:'#fff',color:'#25332a',fontFamily:'Arial,sans-serif',overflow:'visible'});
+ const titleEl=document.createElement('h2');titleEl.textContent=title;
+ Object.assign(titleEl.style,{fontSize:'29px',fontWeight:'700',textAlign:'center',margin:'5px 0 14px'});
+ const subtitleEl=document.createElement('div');subtitleEl.textContent=subtitle;
+ Object.assign(subtitleEl.style,{fontSize:'19px',fontWeight:'600',margin:'0 0 18px'});
+ canvas.style.display='block';canvas.style.width='936px';canvas.style.height='1123px';canvas.style.border='1px solid #9ba9a0';
+ const legend=document.createElement('p');legend.textContent=footnote;
+ Object.assign(legend.style,{fontSize:'14px',margin:'14px 0 0',color:'#52645a'});
+ page.append(titleEl,subtitleEl,canvas,legend);stage.appendChild(page);
+ return page;
+}
+async function localPdfProfileGraph(course,stage){
+ const page=document.createElement('section');
+ Object.assign(page.style,{display:'block',boxSizing:'border-box',width:'1000px',minHeight:'870px',margin:'0',padding:'38px 32px',background:'#fff',fontFamily:'Arial,sans-serif',overflow:'visible'});
+ const title=document.createElement('h2');title.textContent='PERFIL LONGITUDINAL DEL CURS';
+ Object.assign(title.style,{fontSize:'30px',textAlign:'center',margin:'0 0 20px',color:'#28362e'});
+ const subtitle=document.createElement('div');subtitle.textContent=[course.abbr,course.name].filter(Boolean).join(' · ');
+ Object.assign(subtitle.style,{fontSize:'19px',margin:'0 0 25px',fontWeight:'600'});
+ page.append(title,subtitle);
+ try{
+  const profile=await ensureCourseLongitudinalProfile(course,{preserveManual:true});
+  const data=profile?courseLongProfileDataUrl(course,profile):'';
+  if(data){
+   const img=document.createElement('img');img.src=data;img.style.cssText='display:block;width:936px;height:auto;border:1px solid #b9c6bd';
+   page.appendChild(img);await img.decode?.().catch(()=>{});
+  }else{const note=document.createElement('p');note.textContent='Perfil longitudinal MDE no disponible';page.appendChild(note);}
+ }catch(e){console.warn('Perfil FITXA I',e);const note=document.createElement('p');note.textContent='Perfil longitudinal no disponible';page.appendChild(note);}
+ stage.appendChild(page);return page;
+}
 async function localPdfProfileCourse(course,stage){
- const source=$('#profileSheetDoc'),doc=localPdfClone(source,stage,1040);
- localPdfField(doc,'profileCourseName',(course.abbr||'')+', '+(course.name||''));
- localPdfField(doc,'profileCrsLabel',projectCrsDisplayName());
- const tbody=doc.querySelector('#profileSheetRows');tbody.replaceChildren();
- const ink=[];
- for(const reach of orderedCourseReaches(course.id)){
-  const tr=document.createElement('tr'),p0=reach.points[0],p1=reach.points.at(-1),m=reach.mdeStats||{};
-  tr.innerHTML='<td class="reach-code">'+escapeHtml(reach.reachCode||reach.id)+'</td>'+
+ const map=renderProjectMapImage(expandedBounds(featureBounds(course),.15,45),{width:1200,height:1440,activeCourse:course,showReaches:true,showCourseNames:false,showTitle:true});
+ const mapPage=localPdfIllustratedPage(stage,'FITXA I · PERFIL LONGITUDINAL',
+  [course.abbr,course.name].filter(Boolean).join(' · '),map,'Mapa del curs d’aigua amb els límits i codis dels trams');
+ const source=$('#profileSheetDoc'),reaches=orderedCourseReaches(course.id),sheets=[],ink=[];
+ // Keep the existing FITXA I field table and its handwritten cells, but paginate
+ // complete rows with a repeated heading. The original editor is never changed.
+ const perSheet=6;
+ for(let start=0;start<Math.max(1,reaches.length);start+=perSheet){
+  const doc=localPdfClone(source,stage,1580);
+  Object.assign(doc.style,{minWidth:'1580px',overflow:'visible',padding:'28px 30px',background:'#fff',minHeight:'0'});
+  localPdfField(doc,'profileCourseName',[course.abbr,course.name].filter(Boolean).join(' · '));
+  localPdfField(doc,'profileCrsLabel',projectCrsDisplayName());
+  const table=doc.querySelector('.profile-table');
+  if(!table)throw Error('No es troba la taula original de FITXA I');
+  Object.assign(table.style,{width:'100%',minWidth:'0',tableLayout:'fixed',fontSize:'15px',marginTop:'18px'});
+  const widths=['6%','9%','9%','6%','6%','6%','6%','7%','6%','39%'];
+  table.querySelectorAll('col').forEach((col,i)=>{col.style.width=widths[i];});
+  table.querySelectorAll('th').forEach(th=>Object.assign(th.style,{fontSize:'15px',whiteSpace:'normal',overflowWrap:'break-word',padding:'9px 4px'}));
+  const tbody=doc.querySelector('#profileSheetRows');tbody.replaceChildren();
+  for(const reach of reaches.slice(start,start+perSheet)){
+   const tr=document.createElement('tr'),p0=reach.points?.[0],p1=reach.points?.at(-1),m=reach.mdeStats||{};
+   tr.innerHTML='<td class="reach-code">'+escapeHtml(reach.reachCode||reach.id)+'</td>'+
     '<td class="coord">'+escapeHtml(formatXY(p0))+'</td><td class="coord">'+escapeHtml(formatXY(p1))+'</td>'+
     '<td class="profile-auto-cell">'+escapeHtml(formatNum(featureLength(reach),1))+'</td>'+
     '<td class="profile-auto-cell">'+(Number.isFinite(m.minElevation)?escapeHtml(formatNum(m.minElevation,1)):'—')+'</td>'+
     '<td class="profile-auto-cell">'+(Number.isFinite(m.maxElevation)?escapeHtml(formatNum(m.maxElevation,1)):'—')+'</td>'+
     '<td class="profile-auto-cell">'+(Number.isFinite(m.mdeSlopePct)?escapeHtml(formatNum(m.mdeSlopePct,1)):'—')+'</td>'+
     '<td class="profile-ink-cell slope"><canvas data-pdf-ink="fieldSlopeInk"></canvas></td>'+
-    '<td class="profile-ink-cell code"><div class="reach-code-choice">'+escapeHtml(reach.changeReasonCode||'—')+' · '+escapeHtml(codedFieldLabel(FIELD_CHANGE_REASONS,reach.changeReasonCode))+'</div><canvas data-pdf-ink="changeCodeInk"></canvas></td>'+
+    '<td class="profile-ink-cell code"><div class="reach-code-choice">'+escapeHtml(reach.changeReasonCode||'—')+'</div><canvas data-pdf-ink="changeCodeInk"></canvas></td>'+
     '<td class="profile-ink-cell obs"><span class="reach-code-meaning">'+escapeHtml(codedFieldLabel(FIELD_CHANGE_REASONS,reach.changeReasonCode)||'—')+'</span><div>'+escapeHtml(reach.changeReasonNote||'')+'</div><canvas data-pdf-ink="observationsInk"></canvas></td>';
-  tbody.appendChild(tr);
-  tr.querySelectorAll('canvas[data-pdf-ink]').forEach(cv=>ink.push([cv,reach[cv.dataset.pdfInk]||[]]));
+   tr.style.height='108px';
+   tbody.appendChild(tr);
+   tr.querySelectorAll('td').forEach(td=>{if(!td.classList.contains('profile-ink-cell'))Object.assign(td.style,{fontSize:'14px',lineHeight:'1.3',whiteSpace:td.classList.contains('coord')?'pre-line':'normal',overflowWrap:'break-word'});});
+   tr.querySelectorAll('canvas[data-pdf-ink]').forEach(cv=>ink.push([cv,reach[cv.dataset.pdfInk]||[]]));
+  }
+  if(!tbody.children.length){const tr=document.createElement('tr');tr.innerHTML='<td colspan="10">Encara no hi ha trams</td>';tbody.appendChild(tr);}
+  sheets.push(doc);
  }
- if(!tbody.children.length){const tr=document.createElement('tr');tr.innerHTML='<td colspan="10">Encara no hi ha trams</td>';tbody.appendChild(tr);}
  await new Promise(r=>requestAnimationFrame(r));
  ink.forEach(([cv,strokes])=>localPdfInkCanvas(cv,strokes));
- return [doc];
+ const profilePage=await localPdfProfileGraph(course,stage);
+ return [mapPage,...sheets,profilePage];
 }
 async function localPdfReachSheet(reach,stage){
  const course=reachCourse(reach),d=ensureReachSheetData(reach),doc=localPdfClone($('#reachSheetDoc'),stage,880);
@@ -5157,7 +5253,11 @@ async function localPdfReachSheet(reach,stage){
   canvas.style.width='100%';canvas.style.height='430px';canvas.style.display='block';
   await drawReachProfileCanvas(canvas,reach,course,{width:1400,height:600,forExport:true,includeInk:true});
  }
- return pages;
+ const selected=localPdfFocusMap('reach',reach);
+ const appendix=localPdfIllustratedPage(stage,'FITXA II · LOCALITZACIÓ DEL TRAM',
+   [course?.abbr,course?.name,reach.reachCode||reach.id].filter(Boolean).join(' · '),
+   selected,'Tram seleccionat en taronja · resta de la xarxa en gris');
+ return [...pages,appendix];
 }
 function localPdfSectionTable(section,root){
  const d=ensureSectionSheetData(section),target=root.querySelector('#sectionFieldTable');
@@ -5227,7 +5327,11 @@ async function localPdfSectionSheet(section,stage){
  }
  await new Promise(r=>requestAnimationFrame(r));
  ink.forEach(([cv,strokes])=>localPdfInkCanvas(cv,strokes));
- return pages;
+ const selected=localPdfFocusMap('section',section);
+ const appendix=localPdfIllustratedPage(stage,'FITXA III · LOCALITZACIÓ DE LA SECCIÓ',
+  [sectionCourse(section)?.abbr,sectionReach(section)?.reachCode||sectionReach(section)?.id,section.sectionName||section.sheetIII?.sectionName||section.id].filter(Boolean).join(' · '),
+  selected,'Secció seleccionada en taronja · tram corresponent en blau · resta en gris');
+ return [...pages,appendix];
 }
 async function localExportArchiveFile(id){
  if(id==='__general_map__'){
@@ -5340,12 +5444,28 @@ function nativeExportProfileSheetPdf(payload){
   return window.GeoCauceNative?.exportProfileSheetPdf?nativeCall('exportProfileSheetPdf',json)||'':'';
 }
 async function exportSelectedContents(){
-  const ids=localExportTreeSelection().map(x=>x.value);if(!ids.length){toast('Selecciona almenys un contingut');return;}
+  const selected=localExportTreeSelection(),ids=selected.map(x=>x.value);if(!ids.length){toast('Selecciona almenys un contingut');return;}
   const btn=$('#downloadContentsExport'),st=$('#downloadContentsStatus'),oldLabel=btn?.textContent||'Exportar seleccionades';let ok=0,failed=[];
   if(btn){btn.disabled=true;btn.textContent='Preparant…';}if(st){st.dataset.busy='1';st.classList.remove('hidden');st.textContent='Preparant l’exportació…';}
   try{
     for(let n=0;n<ids.length;n++){
       const id=ids[n];await new Promise(r=>requestAnimationFrame(()=>setTimeout(r,0)));
+      // Use the same high-fidelity, map-inclusive PDF for the ZIP and for
+      // individual exports. Keep Android's previous native renderer as fallback.
+      if(id!=='__general_map__'&&window.GeoCauceFieldPdf){
+        try{
+          if(st)st.textContent=`Generant PDF amb mapa · ${n+1}/${ids.length}…`;
+          const pdf=await localExportArchiveFile(id);
+          if(pdf?.type!=='application/pdf')throw Error('El generador no ha retornat un PDF');
+          const filename=selected[n]?.dataset.zipPath?.split('/').pop()||`FITXA_${n+1}.pdf`;
+          await downloadBlob(pdf,filename);
+          ok++;continue;
+        }catch(e){
+          console.error('Exportació PDF de camp',id,e);
+          if(!ANDROID_NATIVE){failed.push(`${id}: ${e?.message||String(e)}`);continue;}
+          // Only on old Android WebViews: fall back to the preexisting native PDF.
+        }
+      }
       if(id==='__general_map__'){
         try{if(st)st.textContent=`Generant mapa general · ${n+1}/${ids.length}…`;const url=generalMapDataUrl(),blob=dataUrlBlob(url);if(!blob)throw Error('No hi ha mapes georeferenciats visibles');await downloadBlob(blob,`MAPA_GENERAL_${safeSlug(state.project?.name||'GeoCauce')}.jpg`);ok++;}catch(e){console.error('Mapa general',e);failed.push(`Mapa general: ${e?.message||String(e)}`);}continue;
       }

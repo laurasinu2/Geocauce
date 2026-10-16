@@ -25,9 +25,9 @@ test('mobile map provides both fit-to-project and locate controls',()=>{
   assert.match(responsive,/\.map-quick-actions>button:not\(#fitAllBtn\):not\(#locateQuickBtn\)/);
 });
 test('mobile PWA cache and markup use the current revision',()=>{
-  assert.match(index,/mobile-pwa\.css\?v=20261016-sync-r25/);
-  assert.match(index,/mobile-pwa\.js\?v=20261016-sync-r25/);
-  assert.match(sw,/const CACHE='geocauce-v0\.16\.39-mobile-pwa-r25'/);
+  assert.match(index,/mobile-pwa\.css\?v=20261016-sheetmaps-r26/);
+  assert.match(index,/mobile-pwa\.js\?v=20261016-sheetmaps-r26/);
+  assert.match(sw,/const CACHE='geocauce-v0\.16\.39-mobile-pwa-r26'/);
 });
 test('first mobile map opening refits project once, but subsequent navigation preserves zoom',async()=>{
   const start=js.indexOf('async function showMap(){');
