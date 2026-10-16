@@ -4121,13 +4121,13 @@ function importQueueId(){return 'iq'+Date.now().toString(36)+Math.random().toStr
 function queueStatusLabel(item){return item.status==='queued'?'Esperant':item.status==='processing'?'Processant':item.status==='ready'?'Preparat':item.status==='loading'?'Carregant':item.status==='loaded'?'Carregat':item.status==='error'?'Error':item.status==='cancelled'?'Cancel·lat':'Pendent';}
 function updateImportQueueBadge(){const n=importQueue.filter(x=>!['loaded','cancelled'].includes(x.status)).length,b=$('#layersQueueBadge');if(!b)return;b.textContent=String(n);b.classList.toggle('hidden',n===0);}
 function queueSet(item,{status=item.status,progress=item.progress,message=item.message,error=item.error}={}){item.status=status;if(progress!=null)item.progress=Math.max(0,Math.min(1,+progress||0));if(message!=null)item.message=message;if(error!==undefined)item.error=error;renderImportQueue();}
-function importItemKindLabel(item){return item.kind==='raster'?(item.geoKind||'MAPA'):item.kind==='vector'?'SHP / ZIP':'FITXER';}
+function importItemKindLabel(item){return item.kind==='raster'?(item.geoKind||'MAPA'):item.kind==='vector'?'SHP / ZIP':item.kind==='gpkg'?'GeoPackage (GPKG)':'FITXER';}
 function renderImportQueue(){
   const sec=$('#importQueueSection'),root=$('#importQueueList'),loadAll=$('#loadReadyImportsBtn');if(!sec||!root)return;
   const shown=importQueue.filter(x=>!['loaded','cancelled'].includes(x.status));sec.classList.toggle('hidden',shown.length===0);root.innerHTML='';
   for(const item of shown){const row=document.createElement('div');row.className=`import-queue-item ${item.status==='ready'?'ready':''} ${item.status==='error'?'error':''}`;const pct=Math.round((item.progress||0)*100);row.innerHTML=`<div class="import-queue-row"><span class="import-kind">${escapeHtml(importItemKindLabel(item))}</span><span class="import-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span><span class="import-state">${escapeHtml(queueStatusLabel(item))}${item.status==='processing'?` · ${pct}%`:''}</span></div><div class="import-queue-progress"><span style="width:${pct}%"></span></div><div class="import-queue-meta">${escapeHtml(item.message||'')}</div>${item.error?`<div class="import-queue-error">${escapeHtml(item.error)}</div>`:''}<div class="import-queue-config"></div><div class="import-queue-actions"></div>`;
     const cfg=row.querySelector('.import-queue-config'),actions=row.querySelector('.import-queue-actions');
-    if(item.kind==='vector'&&['queued','processing','ready','error'].includes(item.status)){
+    if(['vector','gpkg'].includes(item.kind)&&['queued','processing','ready','error'].includes(item.status)){
       cfg.innerHTML=`<input class="iq-name" type="text" value="${escapeHtml(item.config?.displayName||'')}" placeholder="Nom de la capa"><select class="iq-role"><option value="reference">Referència</option><option value="watercourse">Riu / cauce</option><option value="basin">Conca</option><option value="limit">Límit</option><option value="path">Camí / traçat</option><option value="other">Altres…</option></select><input class="iq-custom ${item.config?.role==='other'?'':'hidden'}" type="text" value="${escapeHtml(item.config?.customRole||'')}" placeholder="Tipus personalitzat"><input class="iq-color" type="color" value="${normalizeVectorColor(item.config?.color)}">`;
       const rs=cfg.querySelector('.iq-role'),custom=cfg.querySelector('.iq-custom');rs.value=item.config?.role||'reference';cfg.querySelector('.iq-name').onchange=e=>item.config.displayName=e.target.value.trim();rs.onchange=e=>{item.config.role=e.target.value;custom.classList.toggle('hidden',item.config.role!=='other');};custom.onchange=e=>item.config.customRole=e.target.value.trim();cfg.querySelector('.iq-color').oninput=e=>item.config.color=normalizeVectorColor(e.target.value);
     }
@@ -4137,22 +4137,25 @@ function renderImportQueue(){
   }
   if(loadAll)loadAll.disabled=!shown.some(x=>x.status==='ready');updateImportQueueBadge();
 }
-function disposePreparedImport(item){if(item?.prepared?.kind==='raster'){try{item.prepared.raster?.image?.close?.()}catch{}}item.prepared=null;}
+function disposePreparedImport(item){if(item?.prepared?.kind==='raster'){try{item.prepared.raster?.image?.close?.()}catch{}}for(const raster of item?.prepared?.rasters||[])try{raster.image?.close?.()}catch{}item.prepared=null;}
 function enqueueMapImports(fileList){
   const files=[...fileList||[]],imgs=files.filter(f=>/\.(png|jpe?g|webp|svg|tiff?|cog)$/i.test(f.name)),worlds=files.filter(f=>/\.(pgw|jgw|tfw|wld)$/i.test(f.name));
-  if(!imgs.length){toast('Selecciona almenys un mapa compatible');return;}
+  const gpkg=files.filter(f=>/\.gpkg$/i.test(f.name));
+  if(!imgs.length&&!gpkg.length){toast('Selecciona almenys un mapa o GeoPackage compatible');return;}
+  for(const file of gpkg)importQueue.push({id:importQueueId(),kind:'gpkg',name:file.name,files:[file],file,status:'queued',progress:0,message:'GeoPackage a la cua',error:'',prepared:null,cancelled:false,config:{color:normalizeVectorColor(appSettings.vectorImportColor),role:'reference',customRole:'',displayName:''}});
   for(const file of imgs){const stem=file.name.replace(/\.[^.]+$/,'').toLowerCase(),wf=worlds.find(w=>w.name.replace(/\.[^.]+$/,'').toLowerCase()===stem)||((imgs.length===1&&worlds.length===1)?worlds[0]:null);importQueue.push({id:importQueueId(),kind:'raster',name:file.name,files:[file],file,wf,status:'queued',progress:0,message:'A la cua',error:'',prepared:null,cancelled:false,geoKind:/\.(tiff?|cog)$/i.test(file.name)?'GeoTIFF / COG':'MAPA'});}
   renderImportQueue();processImportQueue();
 }
 function enqueueVectorImports(fileList){
-  const files=[...fileList||[]];if(!files.length)return;const zips=files.filter(f=>/\.zip$/i.test(f.name)),direct=files.filter(f=>!/\.zip$/i.test(f.name));const baseCfg={color:normalizeVectorColor($('#vectorImportColor')?.value||appSettings.vectorImportColor),role:$('#vectorImportRole')?.value||'reference',customRole:($('#vectorImportCustomRole')?.value||'').trim(),displayName:($('#vectorImportName')?.value||'').trim()};
+  const files=[...fileList||[]];if(!files.length)return;const zips=files.filter(f=>/\.zip$/i.test(f.name)),gpkg=files.filter(f=>/\.gpkg$/i.test(f.name)),direct=files.filter(f=>!/\.(zip|gpkg)$/i.test(f.name));const baseCfg={color:normalizeVectorColor($('#vectorImportColor')?.value||appSettings.vectorImportColor),role:$('#vectorImportRole')?.value||'reference',customRole:($('#vectorImportCustomRole')?.value||'').trim(),displayName:($('#vectorImportName')?.value||'').trim()};
+  for(const file of gpkg)importQueue.push({id:importQueueId(),kind:'gpkg',name:file.name,files:[file],file,status:'queued',progress:0,message:'GeoPackage a la cua',error:'',prepared:null,cancelled:false,config:{...baseCfg}});
   for(const z of zips)importQueue.push({id:importQueueId(),kind:'vector',name:z.name,files:[z],zip:z,status:'queued',progress:0,message:'ZIP a la cua',error:'',prepared:null,cancelled:false,config:{...baseCfg}});
   if(direct.some(f=>/\.shp$/i.test(f.name)))importQueue.push({id:importQueueId(),kind:'vector',name:direct.filter(f=>/\.shp$/i.test(f.name)).map(f=>f.name).join(', '),files:direct,status:'queued',progress:0,message:'Paquet SHP a la cua',error:'',prepared:null,cancelled:false,config:{...baseCfg}});
-  if(!zips.length&&!direct.some(f=>/\.shp$/i.test(f.name))){toast('Selecciona un ZIP amb SHP o els fitxers .shp + auxiliars');return;}
+  if(!zips.length&&!gpkg.length&&!direct.some(f=>/\.shp$/i.test(f.name))){toast('Selecciona un .gpkg, un ZIP amb SHP o els fitxers .shp + auxiliars');return;}
   renderImportQueue();processImportQueue();
 }
 async function processImportQueue(){if(importQueueRunning)return;const item=importQueue.find(x=>x.status==='queued'&&!x.cancelled);if(!item)return;importQueueRunning=true;queueSet(item,{status:'processing',progress:.02,message:'Preparant…',error:''});
-  try{if(item.kind==='raster')item.prepared=await prepareQueuedRaster(item);else item.prepared=await prepareQueuedVector(item);if(item.cancelled){disposePreparedImport(item);item.status='cancelled';}else queueSet(item,{status:'ready',progress:1,message:item.kind==='raster'?'Mapa preparat · encara no visible':'Capa preparada · encara no visible'});}catch(e){console.error('Import queue',e);if(!item.cancelled)queueSet(item,{status:'error',progress:0,message:'No s’ha pogut preparar',error:e?.message||String(e)});}finally{importQueueRunning=false;renderImportQueue();setTimeout(processImportQueue,0);}}
+  try{if(item.kind==='raster')item.prepared=await prepareQueuedRaster(item);else if(item.kind==='gpkg')item.prepared=await prepareQueuedGeoPackage(item);else item.prepared=await prepareQueuedVector(item);if(item.cancelled){disposePreparedImport(item);item.status='cancelled';}else queueSet(item,{status:'ready',progress:1,message:item.prepared?.kind==='geopackage'?('GPKG · '+item.prepared.layers.length+' vectors · '+item.prepared.rasters.length+' mapes'+(item.prepared.warnings.length?' · avisos: '+item.prepared.warnings.join('; '):'')):item.kind==='raster'?'Mapa preparat · encara no visible':'Capa preparada · encara no visible'});}catch(e){console.error('Import queue',e);if(!item.cancelled)queueSet(item,{status:'error',progress:0,message:'No s’ha pogut preparar',error:e?.message||String(e)});}finally{importQueueRunning=false;renderImportQueue();setTimeout(processImportQueue,0);}}
 async function prepareQueuedRaster(item){
   const file=item.file,wf=item.wf;let bitmap,blob,sourceBlob=null,affine,georef=false,meta={sourceType:'image'};const progress=(p,msg)=>{if(item.cancelled)throw Error('Importació cancel·lada');item.progress=p;item.message=msg;renderImportQueue();};progress(.05,'Llegint fitxer…');
   if(/\.(tiff?|cog)$/i.test(file.name)){
@@ -4164,8 +4167,40 @@ async function prepareVectorLayersFromComponentFiles(files,{sourceZip='',color=n
   const byName=new Map(files.map(f=>[f.name.toLowerCase(),f])),shps=files.filter(f=>/\.shp$/i.test(f.name));if(!shps.length)return[];const projectBounds=projectRasterBounds(),layers=[];
   for(const shp of shps){const base=shp.name.replace(/\.shp$/i,''),find=ext=>byName.get((base+ext).toLowerCase()),prj=find('.prj'),dbf=find('.dbf'),cpg=find('.cpg'),prjText=prj?await prj.text():'',srcEpsg=parsePrjEpsg(prjText)||projectCrsEpsg(),dstEpsg=projectCrsEpsg(),cpgText=cpg?await cpg.text():'',attrs=dbf?parseDbfBuffer(await dbf.arrayBuffer(),cpgText):[],records=parseShpBuffer(await shp.arrayBuffer()),features=[];for(const rec of records){let paths=[];for(const path of rec.paths){const t=[];for(const q of path)t.push(transformVectorPoint(q,srcEpsg,dstEpsg));if(t.length)paths.push(t);}const bounds=pointsBounds(paths);if(!bounds)continue;if(projectBounds&&!boundsIntersect(bounds,projectBounds))continue;features.push({paths,shapeType:rec.shapeType,attrs:attrs[rec.recordIndex]||{},label:vectorFeatureLabel(attrs[rec.recordIndex]||{}),bounds});}const shapeTypes=[...new Set(records.map(r=>+r.shapeType).filter(Boolean))],geometryType=shapeTypes.some(t=>[5,15].includes(t))?'polygon':shapeTypes.some(t=>[1,8,11,18].includes(t))&&!shapeTypes.some(t=>[3,5,13,15].includes(t))?'point':'line',layerName=(displayName||'').trim()||base,baseColor=normalizeVectorColor(color||appSettings.vectorImportColor);layers.push({id:'v'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),name:layerName,sourceName:base,role:role||'reference',customRole:(customRole||'').trim(),sourceType:'shapefile',sourcePackage:sourceZip||'',sourceEpsg:srcEpsg,projectEpsg:dstEpsg,geometryType,visible:true,opacity:.85,color:baseColor,strokeWidth:2.5,vectorStyle:{kind:geometryType,strokeColor:baseColor,strokeWidth:2.5,strokeUnit:'px',strokeOpacity:1,strokeDash:'dash',strokeOffset:0,offsetUnit:'px',lineCap:'round',lineJoin:'round',fillColor:baseColor,fillStyle:'none',fillOpacity:0,pointColor:baseColor,pointOpacity:1,pointSize:6,pointUnit:'px',pointShape:'circle'},features,importedAt:Date.now(),clippedToRasterExtent:!!projectBounds});}return layers;
 }
+async function prepareQueuedGeoPackage(item){
+ if(!window.GeoCauceGpkgImporter)throw Error('Falta el lector GPKG. Actualitza la versió de GeoCauce.');
+ return window.GeoCauceGpkgImporter.prepare(item.file,item.config,{
+  projectEpsg:projectCrsEpsg,rasterBounds:projectRasterBounds,transform:transformVectorPoint,
+  pointsBounds,intersects:boundsIntersect,featureLabel:vectorFeatureLabel,color:normalizeVectorColor,
+  id:prefix=>prefix+Date.now().toString(36)+Math.random().toString(36).slice(2,7)
+ },(fraction,label)=>{if(item.cancelled)throw Error('Importació cancel·lada');item.progress=fraction;item.message=label;renderImportQueue();});
+}
 async function prepareQueuedVector(item){const cfg=item.config||{},layers=[];if(item.zip){item.progress=.12;item.message='Obrint ZIP…';renderImportQueue();const packs=await shapefilePackagesFromZip(item.zip);for(let i=0;i<packs.length;i++){item.progress=.25+.65*(i/Math.max(1,packs.length));item.message=`Processant SHP ${i+1}/${packs.length}`;renderImportQueue();const name=packs.length>1&&cfg.displayName?`${cfg.displayName} · ${i+1}`:cfg.displayName;layers.push(...await prepareVectorLayersFromComponentFiles(packs[i],{sourceZip:item.zip.name,...cfg,displayName:name}));}}else{item.progress=.30;item.message='Llegint SHP…';renderImportQueue();layers.push(...await prepareVectorLayersFromComponentFiles(item.files,cfg));}if(!layers.length)throw Error('No s’ha trobat cap geometria SHP compatible');return{kind:'vector',layers};}
-async function loadPreparedImport(item,{silent=false}={}){if(item.status!=='ready'||!item.prepared)return false;item.status='loading';renderImportQueue();try{if(item.prepared.kind==='raster'){const r=item.prepared.raster,previous=state.rasters.find(x=>x.name===r.name);if(previous){state.rasters=state.rasters.filter(x=>x.id!==previous.id);await dbDelete('rasters',previous.id);await dbDeleteRasterStyleTiles(previous.id);try{previous.image?.close?.()}catch{}}state.rasters.push(r);await dbPut('rasters',stripRaster(r));nativeSyncRasterMeta(r);}else{for(const layer of item.prepared.layers||[]){const cfg=item.config||{};if(cfg.displayName&&item.prepared.layers.length===1)layer.name=cfg.displayName;layer.role=cfg.role||layer.role;layer.customRole=cfg.customRole||'';layer.color=normalizeVectorColor(cfg.color||layer.color);const vst=vectorStyleDefault(layer);layer.vectorStyle={...vst,strokeColor:layer.color,pointColor:layer.color,fillColor:vst.fillStyle==='none'?layer.color:vst.fillColor};await replaceReferenceLayerInState(layer);await optimizeImportedReferenceLayer(layer);}}item.status='loaded';item.progress=1;persistState();renderLayers();drawAll();if(!silent)toast(`${item.name} carregat al mapa`);return true;}catch(e){item.status='error';item.error=e?.message||String(e);renderImportQueue();return false;}}
+async function loadPreparedImport(item,{silent=false}={}){
+ if(item.status!=='ready'||!item.prepared)return false;
+ item.status='loading';renderImportQueue();
+ try{
+  const prepared=item.prepared;
+  const rasters=prepared.kind==='raster'?[prepared.raster]:(prepared.rasters||[]);
+  for(const r of rasters){
+   const previous=state.rasters.find(x=>x.name===r.name);
+   if(previous){state.rasters=state.rasters.filter(x=>x.id!==previous.id);await dbDelete('rasters',previous.id);await dbDeleteRasterStyleTiles(previous.id);try{previous.image?.close?.()}catch{}}
+   state.rasters.push(r);await dbPut('rasters',stripRaster(r));nativeSyncRasterMeta(r);
+  }
+  for(const layer of prepared.layers||[]){
+   const cfg=item.config||{};
+   if(cfg.displayName&&prepared.layers.length===1)layer.name=cfg.displayName;
+   layer.role=cfg.role||layer.role;layer.customRole=cfg.customRole||'';
+   layer.color=normalizeVectorColor(cfg.color||layer.color);
+   const vst=vectorStyleDefault(layer);
+   layer.vectorStyle={...vst,strokeColor:layer.color,pointColor:layer.color,fillColor:vst.fillStyle==='none'?layer.color:vst.fillColor};
+   await replaceReferenceLayerInState(layer);await optimizeImportedReferenceLayer(layer);
+  }
+  item.status='loaded';item.progress=1;persistState();renderLayers();drawAll();
+  if(!silent)toast(item.name+' carregat al mapa');
+  return true;
+ }catch(e){item.status='error';item.error=e?.message||String(e);renderImportQueue();return false;}
+}
 async function loadReadyImports(){const ready=importQueue.filter(x=>x.status==='ready');let lastRaster=null,count=0;for(const item of ready){if(await loadPreparedImport(item,{silent:true})){count++;if(item.prepared?.kind==='raster')lastRaster=item.prepared.raster;}}renderImportQueue();if(lastRaster)fitRaster(lastRaster);if(count)toast(`${count} element${count===1?'':'s'} carregat${count===1?'':'s'} al mapa`);}
 
 function showImportProgress(name,p=0,text='Preparando…'){$('#importProgressTitle').textContent=`Importando ${name}`;$('#importProgressBar').style.width=`${Math.max(2,Math.round(p*100))}%`;$('#importProgressText').textContent=text;$('#importProgress').classList.remove('hidden');}
