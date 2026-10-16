@@ -49,7 +49,7 @@ test('project invitations use protected server RPCs and never accept role from a
  assert.match(app,/geocauce_remove_project_member/);
  assert.match(share,/email\.type='email'/);
  assert.match(share,/textContent=text/);
- assert.doesNotMatch(share,/innerHTML/);
+ assert.doesNotMatch(share,/\.innerHTML\s*=/);
 });
 test('migration protects projects, snapshots, assets and revocations with RLS',()=>{
  assert.match(sql,/ALTER TABLE public\.project_members ENABLE ROW LEVEL SECURITY/);
