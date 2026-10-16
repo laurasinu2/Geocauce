@@ -246,6 +246,20 @@ CREATE POLICY geocauce_snapshot_owner_delete_gate ON public.project_snapshots
 AS RESTRICTIVE FOR DELETE TO authenticated
 USING (public.geocauce_is_project_owner(id_project));
 
+-- SECURITY DEFINER is essential here: an ordinary RLS-filtered NOT EXISTS
+-- would mistake a project hidden from a revoked collaborator for a missing
+-- project and could accidentally restore access to that collaborator's uploads.
+CREATE OR REPLACE FUNCTION public.geocauce_storage_orphaned_object(p_object_name text)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ''
+AS $fn$
+  SELECT NOT EXISTS (
+    SELECT 1 FROM public.project p
+    WHERE p.id_project=public.geocauce_storage_project_id(p_object_name)
+  );
+$fn$;
+REVOKE ALL ON FUNCTION public.geocauce_storage_orphaned_object(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.geocauce_storage_orphaned_object(text) TO authenticated;
+
 -- Protect project-owned private files even when a previous permissive
 -- "owner of the uploaded file" policy exists. Revocation takes effect server-side.
 -- RESTRICTIVE policies only narrow access and leave other buckets unaffected.
@@ -266,10 +280,7 @@ USING (
  OR (
     (SELECT auth.uid()) IS NOT NULL
     AND owner_id=(SELECT auth.uid())::text
-    AND NOT EXISTS (
-      SELECT 1 FROM public.project p
-      WHERE p.id_project=public.geocauce_storage_project_id(name)
-    )
+    AND public.geocauce_storage_orphaned_object(name)
  )
 );
 
@@ -290,10 +301,7 @@ USING (
   OR (
     (SELECT auth.uid()) IS NOT NULL
     AND owner_id=(SELECT auth.uid())::text
-    AND NOT EXISTS (
-      SELECT 1 FROM public.project p
-      WHERE p.id_project=public.geocauce_storage_project_id(name)
-    )
+    AND public.geocauce_storage_orphaned_object(name)
   )
 )
 WITH CHECK (
@@ -302,10 +310,7 @@ WITH CHECK (
   OR (
     (SELECT auth.uid()) IS NOT NULL
     AND owner_id=(SELECT auth.uid())::text
-    AND NOT EXISTS (
-      SELECT 1 FROM public.project p
-      WHERE p.id_project=public.geocauce_storage_project_id(name)
-    )
+    AND public.geocauce_storage_orphaned_object(name)
   )
 );
 
@@ -318,10 +323,7 @@ USING (
   OR (
     (SELECT auth.uid()) IS NOT NULL
     AND owner_id=(SELECT auth.uid())::text
-    AND NOT EXISTS (
-      SELECT 1 FROM public.project p
-      WHERE p.id_project=public.geocauce_storage_project_id(name)
-    )
+    AND public.geocauce_storage_orphaned_object(name)
   )
 );
 
