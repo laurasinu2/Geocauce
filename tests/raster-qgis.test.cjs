@@ -41,6 +41,58 @@ test('QGIS DISCRETE and EXACT styles are supported',()=>{
  assert.deepEqual(Array.from(color(5,p.stops,'exact')||[]),[]);
  assert.deepEqual(Array.from(color(10,p.stops,'exact')),[255,0,0,255]);
 });
+const drainageDirectionQgis=`# S'ha generat un fitxer QGIS d'exportació de mapa de colors
+INTERPOLATION:DISCRETE
+-7,64,64,162,255,<= -7
+-6,70,107,227,255,-7 - -6
+-5,66,148,255,255,-6 - -5
+-4,40,188,235,255,-5 - -4
+-3,24,221,194,255,-4 - -3
+-2,50,242,152,255,-3 - -2
+-1,109,254,98,255,-2 - -1
+0,164,252,60,255,-1 - 0
+1,205,236,52,255,0 - 1
+2,238,207,58,255,1 - 2
+3,253,172,52,255,2 - 3
+4,251,126,33,255,3 - 4
+5,235,80,14,255,4 - 5
+6,208,47,5,255,5 - 6
+7,169,22,1,255,6 - 7
+inf,122,4,3,255,> 7`;
+test('QGIS drainage direction exported file imports its 16 color classes with an unbounded final class',()=>{
+ const map=parse(drainageDirectionQgis);
+ assert.equal(map.interpolation,'discrete');
+ assert.equal(map.stops.length,16);
+ assert.deepEqual(Array.from(map.stops,x=>x.color),[
+  '#4040a2','#466be3','#4294ff','#28bceb','#18ddc2','#32f298',
+  '#6dfe62','#a4fc3c','#cdec34','#eecf3a','#fdac34','#fb7e21',
+  '#eb500e','#d02f05','#a91601','#7a0403'
+ ]);
+ assert.equal(map.stops[0].label,'<= -7');
+ assert.equal(map.stops[15].label,'> 7');
+ assert.equal(map.stops[15].unbounded,true);
+ assert.ok(Number.isFinite(map.stops[15].value)&&map.stops[15].value>7);
+ assert.equal(valid(map.stops),true);
+ assert.deepEqual(Array.from(color(-9,map.stops,'discrete')),[64,64,162,255]);
+ assert.deepEqual(Array.from(color(7,map.stops,'discrete')),[169,22,1,255]);
+ assert.deepEqual(Array.from(color(7.0001,map.stops,'discrete')),[122,4,3,255]);
+ assert.deepEqual(Array.from(color(100000000,map.stops,'discrete')),[122,4,3,255]);
+});
+test('QGIS +inf class remains open across JSON save/restore and an edited upper threshold',()=>{
+ const original=parse(drainageDirectionQgis),restored=JSON.parse(JSON.stringify(original.stops));
+ assert.ok(valid(restored));
+ assert.equal(restored.at(-1).unbounded,true);
+ assert.deepEqual(Array.from(color(1000,restored,'discrete')),[122,4,3,255]);
+ assert.match(app,/num\.readOnly=true/);
+ assert.match(app,/rasterQgisOpenUpper\(value\)/);
+ assert.match(app,/rec\.unbounded\?'∞'/);
+});
+test('QGIS infinity is only permitted on the final DISCRETE interval',()=>{
+ assert.throws(()=>parse('INTERPOLATION:INTERPOLATED\\n0,0,0,0,255,low\\ninf,255,0,0,255,high'),/inf/);
+ assert.throws(()=>parse('INTERPOLATION:EXACT\\n0,0,0,0,255,low\\ninf,255,0,0,255,high'),/inf/);
+ assert.throws(()=>parse('INTERPOLATION:DISCRETE\\n0,0,0,0,255,low\\ninf,255,0,0,255,high\\n10,255,255,0,255,end'),/inf/);
+ assert.throws(()=>parse('INTERPOLATION:DISCRETE\\n0,0,0,0,255,low\\nNaN,255,0,0,255,high'),/RGBA/);
+});
 test('QGIS alpha is preserved in interpolated RGBA output',()=>{
  const p=parse('INTERPOLATION:INTERPOLATED\n0,0,0,0,0,a\n10,255,255,255,255,b');
  assert.deepEqual(Array.from(color(5,p.stops)),[128,128,128,128]);
