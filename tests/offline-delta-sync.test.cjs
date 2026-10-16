@@ -61,3 +61,16 @@ test('new snapshot contains remote unchanged fields alongside local changes',()=
  assert.equal(r.value.sectionPalette[0].name,'rojo');
  assert.equal(r.value.campaigns[0].upserts[0].sheetIII.observations,'new');
 });
+test('conflicting field cannot be resolved without an explicit choice',()=>{
+ const base=state([f('SEC-1','original')]),a=state([f('SEC-1','tablet')]),b=state([f('SEC-1','móvil')]);
+ const first=merge(base,a,b);
+ assert.equal(first.conflicts.length,1);
+ assert.equal(first.value.campaigns[0].upserts[0].sheetIII.observations,'tablet');
+ const path=first.conflicts[0].path;
+ const local=merge(base,a,b,{resolutions:{[path]:'local'}});
+ assert.equal(local.conflicts.length,0);
+ assert.equal(local.value.campaigns[0].upserts[0].sheetIII.observations,'tablet');
+ const remote=merge(base,a,b,{resolutions:{[path]:'remote'}});
+ assert.equal(remote.conflicts.length,0);
+ assert.equal(remote.value.campaigns[0].upserts[0].sheetIII.observations,'móvil');
+});
