@@ -487,15 +487,14 @@ async function cloudRefreshProjectCatalog({quiet=true}={}){
   try{
     const schema=await cloudSchema();
     const rows=await cloudFetch(schema==='legacy'?'/rest/v1/project?deleted_at=is.null&select=*&order=updated_at.desc':'/rest/v1/projects?select=*&order=updated_at.desc');
-    // UI hint only; each open/write still validates with token-scoped RPC and RLS.
+    // The live Supabase schema uses personas/project_persona, NOT project_members.
+    // Roles are derived server-side from auth.uid(); the project must still pass
+    // the token-scoped geocauce_project_role RPC when opened or edited.
     let sharedRoles=new Map();
     try{
-      const uid=sessionUser()?.id;
-      if(uid){
-        const memberships=await cloudFetch('/rest/v1/project_members?user_id=eq.'+encodeURIComponent(uid)+'&select=project_id,role');
-        sharedRoles=new Map((memberships||[]).map(m=>[m.project_id,m.role]));
-      }
-    }catch(e){console.warn('No se pudo leer la lista de proyectos compartidos',e);}
+      const memberships=await cloudFetch('/rest/v1/rpc/geocauce_my_project_roles',{method:'POST',body:{}});
+      sharedRoles=new Map((memberships||[]).map(m=>[m.project_id,m.role]));
+    }catch(e){console.warn('No se pudieron leer los permisos de proyectos compartidos',e);}
     if(!Array.isArray(rows))throw new Error('Respuesta de proyectos no válida');
     for(const row of rows){
       const cloudId=schema==='legacy'?row.id_project:row.id,extra=schema==='legacy'?row:(row.metadata&&typeof row.metadata==='object'?row.metadata:{});
