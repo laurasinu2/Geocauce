@@ -11,8 +11,8 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=20261015-download-r24" />
-  <link rel="stylesheet" href="mobile-pwa.css?v=20261015-download-r24" />
+  <link rel="stylesheet" href="styles.css?v=20261016-sync-r25" />
+  <link rel="stylesheet" href="mobile-pwa.css?v=20261016-sync-r25" />
 </head>
 <body>
   <div id="app">
@@ -178,7 +178,7 @@ CON | Confluencia"></textarea></div>
             <div class="storage-bar cloud"><span id="settingsCloudBar"></span></div>
             <dl class="storage-breakdown"><dt>Datos estructurados conocidos</dt><dd id="settingsCloudData">—</dd><dt>Última sincronización</dt><dd id="settingsCloudLastSync">—</dd><dt>Pendiente</dt><dd id="settingsCloudPending">—</dd></dl>
             <p class="settings-note">Solo se transfieren archivos nuevos o modificados. Los elementos eliminados se quitan del proyecto sincronizado. Si otro dispositivo ha cambiado el proyecto, deberás elegir qué versión conservar.</p>
-            <div class="settings-inline-actions"><button id="settingsCloudSyncBtn" class="primary icon-text" type="button"><img src="icons/nube.svg" alt=""><span>Subir cambios</span></button><button id="settingsCloudDownloadBtn" class="secondary icon-text" type="button"><img src="icons/sincronizar.svg" alt=""><span>Descargar cambios</span></button></div><p class="settings-help">La descarga verifica todos los archivos antes de reemplazar datos y guarda una versión local recuperable. No se combinan automáticamente cambios de dos dispositivos.</p><div class="settings-inline-actions"><button id="settingsCloudRecoveryBtn" class="secondary icon-text" type="button"><img src="icons/deshacer.png" alt=""><span>Recuperar versión local anterior</span></button></div>
+            <div class="settings-inline-actions"><button id="settingsCloudSyncBtn" class="primary icon-text" type="button"><img src="icons/nube.svg" alt=""><span>Sincronizar ahora</span></button><button id="settingsCloudDownloadBtn" class="secondary icon-text" type="button"><img src="icons/sincronizar.svg" alt=""><span>Restaurar desde nube</span></button></div><p class="settings-help">La sincronización normal fusiona automáticamente los cambios independientes del móvil y la tablet, conservando una cola local sin conexión. «Restaurar desde nube» es una operación excepcional que sustituye el estado local y exige confirmación.</p><div class="settings-inline-actions"><button id="settingsCloudRecoveryBtn" class="secondary icon-text" type="button"><img src="icons/deshacer.png" alt=""><span>Recuperar versión local anterior</span></button></div>
             <div class="settings-inline-actions" style="margin-top:12px">
               <button id="settingsUpdateAppBtn" type="button" class="secondary icon-text"><img src="icons/cambio.png" alt=""><span>Actualizar aplicación</span></button>
               <small id="geocauceBuildLabel" style="align-self:center">Versión nube r11</small>
@@ -1265,13 +1265,14 @@ CON | Confluencia"></textarea></div>
     <div class="cloud-progress-track" role="progressbar" aria-label="Progreso de sincronización" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="cloudProgressBar"></span></div>
     <small id="cloudProgressDetail">Preparando transferencia…</small>
   </aside>
-  <script src="supabase-config.js?v=20261015-download-r24"></script>
-  <script src="native-adapter.js?v=20261015-download-r24"></script>
-  <script src="geotiff-lite.js?v=20261015-download-r24"></script>
-  <script src="modal-layer.js?v=20261015-download-r24"></script>
-  <script src="local-export-zip.js?v=20261015-download-r24"></script>
-  <script src="field-sheet-pdf.js?v=20261015-download-r24"></script>
-<script src="app.js?v=20261015-download-r24"></script>
-  <script src="mobile-pwa.js?v=20261015-download-r24"></script>
+  <script src="supabase-config.js?v=20261016-sync-r25"></script>
+  <script src="native-adapter.js?v=20261016-sync-r25"></script>
+  <script src="geotiff-lite.js?v=20261016-sync-r25"></script>
+  <script src="modal-layer.js?v=20261016-sync-r25"></script>
+  <script src="local-export-zip.js?v=20261016-sync-r25"></script>
+  <script src="field-sheet-pdf.js?v=20261016-sync-r25"></script>
+<script src="cloud-delta-sync.js?v=20261016-sync-r25"></script>
+<script src="app.js?v=20261016-sync-r25"></script>
+  <script src="mobile-pwa.js?v=20261016-sync-r25"></script>
 </body>
 </html>
