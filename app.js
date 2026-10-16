@@ -791,7 +791,7 @@ function cloudApplyCollaborativeState(payload){
 
 function cloudDeltaRootError(reason,manual){
  cloudLastError='Sincronización pendiente: '+reason;
- if(manual)toast(cloudLastError,6500);
+ if(manual){cloudProgressFinish(false,'Sincronización pendiente');toast(cloudLastError,6500);}
  refreshAccountUi();
 }
 async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[]){
@@ -870,6 +870,7 @@ async function cloudBidirectionalSync({manual=false}={}){
  if(cloudSyncEditingInProgress()){if(manual)toast('Cierra la ficha abierta para fusionar los cambios guardados sin perder ninguna edición');return false;}
  const projectId=state.projectId,project=state.project,ack=cloudPendingChanges(projectId);
  cloudDeltaRunning=true;cloudLastError='';
+ if(manual)cloudProgressStart('Comparando cambios pendientes con la nube',2);
  try{
   const cloudId=ensureCloudProjectId(project),schema=await cloudSchema(),key=schema==='legacy'?'id_project':'project_id';
   // Check only revision first. Avoid downloading the whole JSON snapshot on every poll.
@@ -881,7 +882,7 @@ async function cloudBidirectionalSync({manual=false}={}){
   const cachedLocal=currentStatePayloadForCloud();
   const verifiedUnchanged=cachedBase?.projectId===projectId&&cachedLocal&&!window.GeoCauceDeltaSync.diff(cachedBase.state,cachedLocal).length;
   if(remoteHead&&previousRemoteAt&&(project._cloudUpdatedAt||0)===previousRemoteAt&&!ack.length&&verifiedUnchanged){
-   cloudLastError='';cloudLastSyncAt=Date.now();refreshAccountUi();return true;
+   cloudLastError='';cloudLastSyncAt=Date.now();if(manual)cloudProgressFinish(true,'Sin cambios nuevos');refreshAccountUi();return true;
   }
   const rows=remoteHead?await cloudFetch(endpoint+'&select=updated_at,state&limit=1'):[];
   const remote=rows?.[0]||null;
@@ -909,7 +910,7 @@ async function cloudBidirectionalSync({manual=false}={}){
   if(remote&&!localChange.length&&!remoteChange.length&&!localAssetsChanged){
    cloudApplyingRemote=true;try{await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);}finally{cloudApplyingRemote=false;}
    if(ack.length)cloudClearAcknowledgedChanges(projectId,ack);
-   cloudLastSyncAt=Date.now();refreshAccountUi();return true;
+   cloudLastSyncAt=Date.now();if(manual)cloudProgressFinish(true,'Sin cambios nuevos');refreshAccountUi();return true;
   }
   let merged=local;
   if(remote){
@@ -960,7 +961,7 @@ async function cloudBidirectionalSync({manual=false}={}){
    saveProjectCatalog();
    await cloudDeltaSaveBase(projectId,merged,remote.updated_at);
    cloudClearAcknowledgedChanges(projectId,ack);
-   if(manual)toast('Sincronizado: se han recibido los cambios de otros dispositivos',4600);
+   if(manual){cloudProgressFinish(true,'Cambios recibidos');toast('Sincronizado: se han recibido los cambios de otros dispositivos',4600);}
    cloudLastError='';refreshAccountUi();return true;
   }
   const ok=await syncCurrentProjectToCloud({manual,expectedUpdatedAt:remote?.updated_at||null});
