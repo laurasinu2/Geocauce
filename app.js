@@ -767,6 +767,28 @@ async function cloudDeltaSaveBase(projectId,snapshot,updatedAt){
  if(!projectId)return;
  await dbPut('cloudSyncBase',{key:'baseline',projectId,updatedAt:updatedAt||null,state:{...cloudDeltaFields(snapshot),assetMetadata:snapshot?.assetMetadata||null}});
 }
+function cloudApplyCollaborativeState(payload){
+ // A full restoreState() would reset raster canvases and the active map.
+ // Only replace actual collaborative records in the live project.
+ if(Array.isArray(payload.campaigns)){
+  state.campaigns=payload.campaigns.map(c=>({...c,parentId:c.parentId||null,author:c.author||'',event:c.event||'none',
+   notes:c.notes||'',upserts:(c.upserts||[]).map(f=>normalizeFeature(f,c.id)),
+   deleted:[...(c.deleted||[])],order:[...(c.order||[])],createdAt:c.createdAt||Date.now()}));
+  const ids=new Set(state.campaigns.map(c=>c.id));
+  if(!ids.has(state.campaign))state.campaign=state.campaigns.at(-1)?.id||'D01';
+  if(!ids.has(state.editableCampaign))state.editableCampaign=state.campaigns.at(-1)?.id||'D01';
+  state.features=materializeCampaign(state.campaign);
+  if(state.selectedId&&!state.features.some(f=>f.id===state.selectedId)){state.selectedId=null;hideFeatureCard();}
+ }
+ for(const field of ['mapInk','mapPins','historicalPhotoPoints','demGroups']){
+  if(Array.isArray(payload[field]))state[field]=cloneAny(payload[field]);
+ }
+ if(payload.notebook&&typeof payload.notebook==='object')state.notebook=cloneAny(payload.notebook);
+ if(payload.materialStyles&&typeof payload.materialStyles==='object')state.materialStyles=cloneAny(payload.materialStyles);
+ if(Array.isArray(payload.referenceLayers))state.referenceLayers=payload.referenceLayers.map(referenceLayerStateRecord);
+ if('activeDemGroupId' in payload)state.activeDemGroupId=payload.activeDemGroupId;
+}
+
 function cloudDeltaRootError(reason,manual){
  cloudLastError='Sincronización pendiente: '+reason;
  if(manual)toast(cloudLastError,6500);
@@ -873,7 +895,7 @@ async function cloudBidirectionalSync({manual=false}={}){
    if(remote)await cloudDeltaReceivePhotos(remote.state?.assetMetadata);
    if(needApply){
     localStorage.setItem(projectStateKey(projectId),JSON.stringify(merged));
-    restoreState(projectId);
+    cloudApplyCollaborativeState(merged);
     renderSectionList();updateCampaignUi();drawAll();
    }
   }finally{cloudApplyingRemote=false;}
