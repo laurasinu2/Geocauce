@@ -59,5 +59,5 @@ test('invalid cloud identifiers are refused by the legacy fallback',async()=>{
  const h=create();
  h.project.id='not-a-uuid';
  h.project.cloudProjectId='not-a-uuid';
- await assert.rejects(h.ctx.getRole(h.project),/identificador cloud/);
+ await assert.rejects(h.ctx.getRole(h.project),/ID de proyecto cloud inválido/);
 });
