@@ -237,6 +237,23 @@ async function cloudBinaryFetch(path,{method='GET',body=null,contentType='applic
   return r;
 }
 // Client checks improve UX. All real authorization is enforced by Supabase JWT + RLS.
+function cloudRoleRpcMissing(error){
+ const msg=String(error?.message||'');
+ return error?.code==='PGRST202'||(error?.status===404&&/could not find the function|schema cache|function .* does not exist/i.test(msg));
+}
+async function cloudProjectRoleFromLegacyRpc(cloudId){
+ if(!isUuid(cloudId))throw new Error('ID de proyecto cloud inválido');
+ // No local owner flags or URL parameters can confer a role here.
+ // Every RPC carries the current Bearer token and reads auth.uid() server-side.
+ const call=async name=>{
+  const result=await cloudFetch('/rest/v1/rpc/'+name,{method:'POST',body:{p_project:cloudId}});
+  return result===true;
+ };
+ if(await call('geocauce_is_project_owner'))return 'owner';
+ if(await call('geocauce_can_edit_project'))return 'editor';
+ if(await call('geocauce_can_view_project'))return 'viewer';
+ return null;
+}
 async function cloudProjectRole(p){
  if(!p)return null;
  const user=sessionUser();
@@ -250,7 +267,16 @@ async function cloudProjectRole(p){
  }
  const cloudId=p.cloudProjectId||(isUuid(p.id)?p.id:null);
  if(!cloudId)throw new Error('El proyecto no tiene identificador cloud');
- const role=await cloudFetch('/rest/v1/rpc/geocauce_project_role',{method:'POST',body:{p_project_id:cloudId}});
+ let role;
+ try{
+  role=await cloudFetch('/rest/v1/rpc/geocauce_project_role',{method:'POST',body:{p_project_id:cloudId}});
+ }catch(error){
+  // Existing GeoCauce installations already have JWT-bound UUID RPCs.
+  // The new combined role RPC is installed only by the sharing migration.
+  // Fallback only when that RPC is missing, never for a genuine 401/403.
+  if(!cloudRoleRpcMissing(error))throw error;
+  role=await cloudProjectRoleFromLegacyRpc(cloudId);
+ }
  p._sharedRole=['owner','editor','viewer'].includes(role)?role:null;
  p._roleUser=user.id;
  saveProjectCatalog();
