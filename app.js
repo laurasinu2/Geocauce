@@ -794,19 +794,25 @@ function cloudDeltaRootError(reason,manual){
  if(manual)toast(cloudLastError,6500);
  refreshAccountUi();
 }
-async function cloudDeltaReceivePhotos(assets){
- const changed=[];
+async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[]){
+ const changed=[],baseline=new Map((baseAssets?.photos||[]).map(p=>[p.id,p]));
+ const localMutations=new Set(queue.filter(q=>q.kind==='photos').map(q=>q.path.split(':').slice(1).join(':')));
  for(const photo of assets?.photos||[]){
   if(!photo.cloudBlobPath)continue;
-  const existing=await dbGet('photos',photo.id);
-  if(existing?.blob instanceof Blob){
-   // A change to the same photo ID is not an ordinary addition and must be reconciled.
-   if(existing.blob.size!==photo.cloudBlobSize)throw new Error('La foto '+(photo.name||photo.id)+' cambió en ambos dispositivos. Se necesita revisar el conflicto.');
-   continue;
+  const previous=baseline.get(photo.id),existing=await dbGet('photos',photo.id);
+  const remoteModified=previous&&cloudStableJson(previous)!==cloudStableJson(photo);
+  if((remoteModified||(!previous&&existing))&&localMutations.has(photo.id))
+   throw new Error('La foto '+(photo.name||photo.id)+' fue editada desde los dos dispositivos. Se conserva la copia local y se requiere revisión.');
+  if(!existing&&localMutations.has(photo.id))
+   throw new Error('La fotografía '+(photo.name||photo.id)+' se ha eliminado localmente. No se volverá a añadir sin resolverlo.');
+  const newContent=!existing?.blob||Boolean(remoteModified&&previous?.cloudBlobHash!==photo.cloudBlobHash);
+  if(!newContent&&!remoteModified)continue;
+  let blob=existing?.blob;
+  if(newContent){
+   blob=await cloudDownloadBlob(photo.cloudBlobPath);
+   if(!(blob instanceof Blob)||(photo.cloudBlobSize!=null&&blob.size!==Number(photo.cloudBlobSize)))
+    throw new Error('La fotografía '+(photo.name||photo.id)+' no se descargó completa');
   }
-  const blob=await cloudDownloadBlob(photo.cloudBlobPath);
-  if(!(blob instanceof Blob)||(photo.cloudBlobSize!=null&&blob.size!==Number(photo.cloudBlobSize)))
-   throw new Error('La fotografía '+(photo.name||photo.id)+' no se descargó completa');
   const copy={...photo,blob};
   for(const key of Object.keys(copy))if(key.startsWith('cloudBlob'))delete copy[key];
   await dbPut('photos',copy);
@@ -859,7 +865,7 @@ async function cloudBidirectionalSync({manual=false}={}){
   const localAssetsChanged=ack.some(x=>['photos','rasters','vectorLayers'].includes(x.kind));
   if(!remote&&!localChange.length&&!localAssetsChanged)return true;
   if(remote&&!localChange.length&&!remoteChange.length&&!localAssetsChanged){
-   cloudApplyingRemote=true;try{await cloudDeltaReceivePhotos(remote.state?.assetMetadata);}finally{cloudApplyingRemote=false;}
+   cloudApplyingRemote=true;try{await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);}finally{cloudApplyingRemote=false;}
    if(ack.length)cloudClearAcknowledgedChanges(projectId,ack);
    cloudLastSyncAt=Date.now();refreshAccountUi();return true;
   }
@@ -892,7 +898,7 @@ async function cloudBidirectionalSync({manual=false}={}){
   if(needApply)await dbPut('cloudSyncBase',{key:'preMergeRecovery',projectId,state:local,createdAt:Date.now()});
   cloudApplyingRemote=true;
   try{
-   if(remote)await cloudDeltaReceivePhotos(remote.state?.assetMetadata);
+   if(remote)await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
    if(needApply){
     localStorage.setItem(projectStateKey(projectId),JSON.stringify(merged));
     cloudApplyCollaborativeState(merged);
