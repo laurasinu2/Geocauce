@@ -550,7 +550,7 @@ async function restoreCloudLocalRecovery(){
 async function restoreProjectFromCloud(projectId,{manual=false}={}){
   if(!cloudConfigured()||!navigator.onLine||!loadCloudSession()?.access_token)return false;
   if(cloudSyncRunning||cloudRestoreRunning)return false;
-  cloudRestoreRunning=true;let started=false;
+  cloudRestoreRunning=true;const previousCloudApplyingRemote=cloudApplyingRemote;cloudApplyingRemote=true;let started=false;
   try{
     const p0=projectById(projectId),cloudId=p0?.cloudProjectId||(isUuid(projectId)?projectId:null);
     if(!cloudId)throw new Error('Este proyecto todavía no tiene copia en la nube');
@@ -611,6 +611,7 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
     if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
     cloudProgressUpdate('Guardando copia de seguridad local',done+1,total);
     await cloudCommitStaging(projectId,sv);
+    try{await cloudDeltaSaveBase(projectId,sv,snap.updated_at);cloudClearAcknowledgedChanges(projectId,cloudPendingChanges(projectId));}catch(e){console.warn('Cloud baseline after restore',e);}
     try{cloudSeedDownloadedAssets(loadCloudSession()?.user?.id||'',cloudId,lists);}catch(e){console.warn('No se pudo registrar el índice cloud',e);}
     await dbClear('cloudStaging').catch(()=>{});
     if(ANDROID_NATIVE){
@@ -631,7 +632,7 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
     if(started)cloudProgressFinish(false,'Descarga interrumpida');
     if(manual)toast(cloudLastError,6500);
     refreshAccountUi();return false;
-  }finally{cloudRestoreRunning=false;refreshAccountUi();}
+  }finally{cloudApplyingRemote=previousCloudApplyingRemote;cloudRestoreRunning=false;refreshAccountUi();}
 }
 async function refreshCloudSession(){
   const old=loadCloudSession();if(!old?.refresh_token)throw new Error('No hay sesión para renovar');
@@ -807,7 +808,10 @@ async function cloudBidirectionalSync({manual=false}={}){
   const heads=await cloudFetch(endpoint+'&select=updated_at&limit=1');
   const remoteHead=heads?.[0]||null;
   const previousRemoteAt=Date.parse(remoteHead?.updated_at||'')||0;
-  if(remoteHead&&previousRemoteAt&&(project._cloudUpdatedAt||0)===previousRemoteAt&&!ack.length){
+  const cachedBase=await dbGet('cloudSyncBase','baseline');
+  const cachedLocal=currentStatePayloadForCloud();
+  const verifiedUnchanged=cachedBase?.projectId===projectId&&cachedLocal&&!window.GeoCauceDeltaSync.diff(cachedBase.state,cachedLocal).length;
+  if(remoteHead&&previousRemoteAt&&(project._cloudUpdatedAt||0)===previousRemoteAt&&!ack.length&&verifiedUnchanged){
    cloudLastError='';cloudLastSyncAt=Date.now();refreshAccountUi();return true;
   }
   const rows=remoteHead?await cloudFetch(endpoint+'&select=updated_at,state&limit=1'):[];
