@@ -30,6 +30,13 @@ test('topographic map is layered after DEM with exactly the same blending opacit
  assert.equal(topo.visible,false,'export must not turn on the source map');
  assert.equal(topo.opacity,1,'export must not change source map opacity');
 });
+test('topographic grayscale GeoTIFF is not confused with the elevation model',()=>{
+ const terrain={id:'terrain',name:'MDT.tif',meta:{kind:'dem'},georef:true,image:{},affine:{},opacity:.45};
+ const topo={id:'topo',name:'Mapa_topografia.tif',meta:{kind:'dem'},georef:true,image:{},affine:{}};
+ const fn=load({state:{rasters:[topo,terrain]},sourceResolution:()=>.25});
+ const out=fn.generalMapRasterLayers();
+ assert.deepEqual(Array.from(out.rasters.map(r=>r.id)),['terrain','topo']);
+});
 test('non-dem georeferenced map is fallback topographic layer and opacity keeps both backgrounds visible',()=>{
  const dem={id:'dem',name:'mde',meta:{kind:'dem'},opacity:1,image:{},affine:{},georef:true};
  const other={id:'base',name:'ICGC full image',image:{},affine:{},georef:true};
