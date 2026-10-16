@@ -88,10 +88,10 @@ test('QGIS +inf class remains open across JSON save/restore and an edited upper 
  assert.match(app,/rec\.unbounded\?'∞'/);
 });
 test('QGIS infinity is only permitted on the final DISCRETE interval',()=>{
- assert.throws(()=>parse('INTERPOLATION:INTERPOLATED\\n0,0,0,0,255,low\\ninf,255,0,0,255,high'),/inf/);
- assert.throws(()=>parse('INTERPOLATION:EXACT\\n0,0,0,0,255,low\\ninf,255,0,0,255,high'),/inf/);
- assert.throws(()=>parse('INTERPOLATION:DISCRETE\\n0,0,0,0,255,low\\ninf,255,0,0,255,high\\n10,255,255,0,255,end'),/inf/);
- assert.throws(()=>parse('INTERPOLATION:DISCRETE\\n0,0,0,0,255,low\\nNaN,255,0,0,255,high'),/RGBA/);
+ assert.throws(()=>parse('INTERPOLATION:INTERPOLATED\n0,0,0,0,255,low\ninf,255,0,0,255,high'),/inf/);
+ assert.throws(()=>parse('INTERPOLATION:EXACT\n0,0,0,0,255,low\ninf,255,0,0,255,high'),/inf/);
+ assert.throws(()=>parse('INTERPOLATION:DISCRETE\n0,0,0,0,255,low\ninf,255,0,0,255,high\n10,255,255,0,255,end'),/inf/);
+ assert.throws(()=>parse('INTERPOLATION:DISCRETE\n0,0,0,0,255,low\nNaN,255,0,0,255,high'),/RGBA/);
 });
 test('QGIS alpha is preserved in interpolated RGBA output',()=>{
  const p=parse('INTERPOLATION:INTERPOLATED\n0,0,0,0,0,a\n10,255,255,255,255,b');
