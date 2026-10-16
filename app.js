@@ -329,9 +329,23 @@ async function cloudUploadBlob(objectPath,blob){
   await cloudBinaryFetch(`/storage/v1/object/geocauce-files/${p}`,{method:'POST',body:blob,contentType:blob.type||'application/octet-stream',headers:{'x-upsert':'true','cache-control':'3600'}});
   return objectPath;
 }
-async function cloudDownloadBlob(objectPath){
-  if(!objectPath)return null;const p=String(objectPath).split('/').map(encodeURIComponent).join('/');
-  const r=await cloudBinaryFetch(`/storage/v1/object/authenticated/geocauce-files/${p}`,{method:'GET',contentType:null});return await r.blob();
+// Small, immutable Storage objects: this works even when Supabase's per-object
+// size limit is below the original GeoTIFF size. A chunked asset keeps the first
+// part in the legacy path field and all part paths in the extended manifest.
+const CLOUD_ASSET_PART_SIZE=8*1024*1024;
+function cloudAssetParts(path,parts){
+ return Array.isArray(parts)&&parts.length?parts:[path].filter(Boolean);
+}
+async function cloudDownloadBlob(objectPath,parts=null,type='application/octet-stream'){
+ const objectPaths=cloudAssetParts(objectPath,parts);
+ if(!objectPaths.length)return null;
+ const blobs=[];
+ for(const part of objectPaths){
+  const p=String(part).split('/').map(encodeURIComponent).join('/');
+  const response=await cloudBinaryFetch(`/storage/v1/object/authenticated/geocauce-files/${p}`,{method:'GET',contentType:null});
+  blobs.push(await response.blob());
+ }
+ return objectPaths.length===1?blobs[0]:new Blob(blobs,{type});
 }
 async function cloudAssetDigest(blob){
   if(!(blob instanceof Blob))throw new Error('Archivo local inválido');
@@ -371,28 +385,41 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
   const put=async function(key,base,blob,legacySig,label,ext){
  if(manual)cloudProgressUpdate('Analizando · '+label,done,total+2);
  const old=cache[key],remote=remoteFiles.get(key);
- // Reuse an immutable object acknowledged in the last committed cloud manifest.
  const committed=!!(old?.hash&&old.path&&old.sig===legacySig&&remote?.path===old.path&&remote.hash===old.hash&&Number(remote.size)===blob.size);
  const fingerprint=committed?old.hash:`sha256-chunks-v1:${blob.size}:${blob.type||''}:${await cloudAssetDigest(blob)}`;
  const hash=fingerprint.split(':').pop();
- let path=committed?old.path:null,didUpload=false;
- if(!path&&remote?.path&&remote.hash===fingerprint&&Number(remote.size)===blob.size)path=remote.path;
- // Uncommitted cache entries are only hints. They may point to missing objects
- // after interrupted uploads, so never probe or trust them as cloud truth.
- // An identical blob can be uploaded safely to its content-addressed path.
+ let path=committed?old.path:null,parts=committed?(remote?.parts||old.parts||null):null,didUpload=false;
+ if(!path&&remote?.path&&remote.hash===fingerprint&&Number(remote.size)===blob.size){
+  path=remote.path;parts=remote.parts||null;
+ }
  if(!path){
-  const pending=old?.pending,candidate=pending?.hash===fingerprint&&pending.path?pending.path:`${base}.${hash}${ext}`;
-  // No HEAD/INFO lookup for new or interrupted objects: a nonexistent object
-  // can produce an opaque HTTP 400. Uploading the deterministic path is safe,
-  // and the current snapshot is updated only after the entire upload succeeds.
-  cache[key]={sig:legacySig,hash:fingerprint,pending:{hash:fingerprint,path:candidate}};persist();
-  if(manual)cloudProgressUpdate('Subiendo · '+label,done,total+2);
-  await cloudUploadBlob(candidate,blob);
-  path=candidate;didUpload=true;uploaded++;
+  const chunked=blob.size>CLOUD_ASSET_PART_SIZE;
+  const candidate=`${base}.${hash}${ext}`;
+  parts=chunked?Array.from({length:Math.ceil(blob.size/CLOUD_ASSET_PART_SIZE)},(_,i)=>candidate+'.part'+String(i).padStart(4,'0')):null;
+  path=parts?.[0]||candidate;
+  // An interrupted upload may have completed some chunks. Confirm their
+  // existence with object/info before reusing; never trust local hints alone.
+  const pending=old?.pending?.hash===fingerprint?old.pending:null;
+  const verified=[];
+  cache[key]={sig:legacySig,hash:fingerprint,pending:{hash:fingerprint,path,parts,uploaded:pending?.uploaded||[]}};persist();
+  for(let i=0;i<(parts?.length||1);i++){
+   const partPath=parts?parts[i]:path;
+   const start=parts?i*CLOUD_ASSET_PART_SIZE:0;
+   const length=parts?Math.min(CLOUD_ASSET_PART_SIZE,blob.size-start):blob.size;
+   const alreadyUploaded=!!(pending?.uploaded?.includes(i)&&pending?.parts?.[i]===partPath
+     &&await cloudStorageObjectExists(partPath,length,uid));
+   if(!alreadyUploaded){
+    if(manual)cloudProgressUpdate('Subiendo · '+label+(parts?` (${i+1}/${parts.length})`:''),done+(parts?i/parts.length:0),total+2);
+    await cloudUploadBlob(partPath,parts?blob.slice(start,start+length,blob.type):blob);
+    uploaded++;didUpload=true;
+   }
+   verified.push(i);
+   cache[key].pending.uploaded=verified.slice();persist();
+  }
  }
  if(!didUpload)reused++;
- cache[key]={sig:legacySig,hash:fingerprint,path};
- globalCache[fingerprint]={path,size:blob.size,savedAt:Date.now()};persist();
+ cache[key]={sig:legacySig,hash:fingerprint,path,...(parts?{parts}:{})};
+ globalCache[fingerprint]={path,parts,size:blob.size,savedAt:Date.now()};persist();
  done++;if(manual)cloudProgressUpdate((didUpload?'Subido':'Reutilizado')+' · '+label,done,total+2);
  return path;
 };
@@ -402,7 +429,7 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
     const x={...rec};delete x.blob;
     const base=cloudObjectPath(uid,projectId,'photos',rec.id);
     const path=await put('photo:'+rec.id,base,rec.blob,sigBlob(rec.blob,rec.date||rec.importedAt||rec.updatedAt||''),rec.name||'foto','.bin');
-    result.photos.push({...x,cloudBlobPath:path,cloudBlobType:rec.blob.type||null,cloudBlobSize:rec.blob.size,cloudBlobHash:cache['photo:'+rec.id].hash});
+    result.photos.push({...x,cloudBlobPath:path,cloudBlobType:rec.blob.type||null,cloudBlobSize:rec.blob.size,cloudBlobHash:cache['photo:'+rec.id].hash,cloudBlobParts:cache['photo:'+rec.id].parts||null});
   }
   for(const rec of rasters){
     if(!(rec.blob instanceof Blob)&&!(rec.sourceBlob instanceof Blob))throw new Error('El mapa '+(rec.name||rec.id)+' no tiene archivo local. No se ha creado un snapshot incompleto.');
@@ -410,14 +437,14 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
     const base=cloudObjectPath(uid,projectId,'rasters',rec.id),extra=rec.importedAt||rec.meta?.importedAt||rec.meta?.sourceWidth||'',previewRevision=extra+'|'+(rec.styleCache?.generatedAt||'');
     const previewPath=rec.blob instanceof Blob?await put('raster-preview:'+rec.id,base,rec.blob,sigBlob(rec.blob,previewRevision),rec.name||'mapa','.preview'):null;
     const sourcePath=rec.sourceBlob instanceof Blob?await put('raster-source:'+rec.id,base,rec.sourceBlob,sigBlob(rec.sourceBlob,extra),rec.name||'original','.source'):null;
-    result.rasters.push({...x,cloudPreviewPath:previewPath,cloudSourcePath:sourcePath,cloudPreviewType:rec.blob?.type||null,cloudSourceType:rec.sourceBlob?.type||null,cloudPreviewSize:rec.blob?.size||0,cloudSourceSize:rec.sourceBlob?.size||0,cloudPreviewHash:cache['raster-preview:'+rec.id]?.hash||null,cloudSourceHash:cache['raster-source:'+rec.id]?.hash||null});
+    result.rasters.push({...x,cloudPreviewPath:previewPath,cloudSourcePath:sourcePath,cloudPreviewType:rec.blob?.type||null,cloudSourceType:rec.sourceBlob?.type||null,cloudPreviewSize:rec.blob?.size||0,cloudSourceSize:rec.sourceBlob?.size||0,cloudPreviewHash:cache['raster-preview:'+rec.id]?.hash||null,cloudSourceHash:cache['raster-source:'+rec.id]?.hash||null,cloudPreviewParts:cache['raster-preview:'+rec.id]?.parts||null,cloudSourceParts:cache['raster-source:'+rec.id]?.parts||null});
   }
   for(const rec of vectorLayers){
     const x={...rec};delete x.features;delete x.renderBlob;
     const base=cloudObjectPath(uid,projectId,'vectors',rec.id),geomText=JSON.stringify(rec.features||[]),geomBlob=new Blob([geomText],{type:'application/json'});
     const geomPath=await put('vector-geometry:'+rec.id,base,geomBlob,`${geomBlob.size}:${tinyHash(geomText)}`,(rec.name||'SHP')+' · geometría','.geometry.json');
     const renderPath=rec.renderBlob instanceof Blob?await put('vector-render:'+rec.id,base,rec.renderBlob,sigBlob(rec.renderBlob,vectorRenderSignature(rec)+'|'+(rec.renderCache?.createdAt||'')),(rec.name||'SHP')+' · render','.render'):null;
-    result.vectorLayers.push({...x,cloudFeaturesPath:geomPath,cloudRenderPath:renderPath,cloudFeaturesSize:geomBlob.size,cloudRenderType:rec.renderBlob?.type||null,cloudRenderSize:rec.renderBlob?.size||0,cloudFeaturesHash:cache['vector-geometry:'+rec.id]?.hash||null,cloudRenderHash:cache['vector-render:'+rec.id]?.hash||null});
+    result.vectorLayers.push({...x,cloudFeaturesPath:geomPath,cloudRenderPath:renderPath,cloudFeaturesSize:geomBlob.size,cloudRenderType:rec.renderBlob?.type||null,cloudRenderSize:rec.renderBlob?.size||0,cloudFeaturesHash:cache['vector-geometry:'+rec.id]?.hash||null,cloudRenderHash:cache['vector-render:'+rec.id]?.hash||null,cloudFeaturesParts:cache['vector-geometry:'+rec.id]?.parts||null,cloudRenderParts:cache['vector-render:'+rec.id]?.parts||null});
   }
   // Preserve cloud-only media metadata when a second device has not downloaded its
   // maps or photos locally. Removing a file requires an explicit deletion operation.
@@ -437,9 +464,9 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
 function cloudStableJson(v){if(Array.isArray(v))return '['+v.map(x=>cloudStableJson(x)).join(',')+']';if(v&&typeof v==='object')return '{'+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+cloudStableJson(v[k])).join(',')+'}';return JSON.stringify(v)??'null';}
 function cloudRemoteAssetIndex(m){
  const x=new Map();
- for(const p of m?.photos||[])x.set('photo:'+p.id,{path:p.cloudBlobPath,hash:p.cloudBlobHash,size:p.cloudBlobSize});
- for(const r of m?.rasters||[]){x.set('raster-preview:'+r.id,{path:r.cloudPreviewPath,hash:r.cloudPreviewHash,size:r.cloudPreviewSize});x.set('raster-source:'+r.id,{path:r.cloudSourcePath,hash:r.cloudSourceHash,size:r.cloudSourceSize});}
- for(const v of m?.vectorLayers||[]){x.set('vector-geometry:'+v.id,{path:v.cloudFeaturesPath,hash:v.cloudFeaturesHash,size:v.cloudFeaturesSize});x.set('vector-render:'+v.id,{path:v.cloudRenderPath,hash:v.cloudRenderHash,size:v.cloudRenderSize});}
+ for(const p of m?.photos||[])x.set('photo:'+p.id,{path:p.cloudBlobPath,parts:p.cloudBlobParts,hash:p.cloudBlobHash,size:p.cloudBlobSize});
+ for(const r of m?.rasters||[]){x.set('raster-preview:'+r.id,{path:r.cloudPreviewPath,parts:r.cloudPreviewParts,hash:r.cloudPreviewHash,size:r.cloudPreviewSize});x.set('raster-source:'+r.id,{path:r.cloudSourcePath,parts:r.cloudSourceParts,hash:r.cloudSourceHash,size:r.cloudSourceSize});}
+ for(const v of m?.vectorLayers||[]){x.set('vector-geometry:'+v.id,{path:v.cloudFeaturesPath,parts:v.cloudFeaturesParts,hash:v.cloudFeaturesHash,size:v.cloudFeaturesSize});x.set('vector-render:'+v.id,{path:v.cloudRenderPath,parts:v.cloudRenderParts,hash:v.cloudRenderHash,size:v.cloudRenderSize});}
  return x;
 }
 async function cloudStorageObjectExists(path,size,uid){
@@ -468,9 +495,9 @@ async function cloudCollectObsoleteAssets(uid,cloudId,before,after){
   // Old cloud backup projects can share these objects, so inspect every accessible snapshot.
   const paths=m=>{
     const refs=new Set();
-    for(const p of m?.photos||[])if(p.cloudBlobPath)refs.add(p.cloudBlobPath);
-    for(const r of m?.rasters||[])for(const x of [r.cloudPreviewPath,r.cloudSourcePath])if(x)refs.add(x);
-    for(const v of m?.vectorLayers||[])for(const x of [v.cloudFeaturesPath,v.cloudRenderPath])if(x)refs.add(x);
+    for(const p of m?.photos||[])for(const x of cloudAssetParts(p.cloudBlobPath,p.cloudBlobParts))refs.add(x);
+    for(const r of m?.rasters||[])for(const x of [...cloudAssetParts(r.cloudPreviewPath,r.cloudPreviewParts),...cloudAssetParts(r.cloudSourcePath,r.cloudSourceParts)])refs.add(x);
+    for(const v of m?.vectorLayers||[])for(const x of [...cloudAssetParts(v.cloudFeaturesPath,v.cloudFeaturesParts),...cloudAssetParts(v.cloudRenderPath,v.cloudRenderParts)])refs.add(x);
     return refs;
   };
   const prefix=cloudObjectPath(uid,cloudId)+'/',queueKey='geocauce-cloud-gc-v1:'+uid+':'+cloudId;
@@ -564,23 +591,23 @@ function cloudSeedDownloadedAssets(uid,cloudId,lists){
   const cacheKey=`geocauce-cloud-assets-${cloudId}`,globalKey=`geocauce-cloud-asset-index-v1:${uid}`;
   const read=key=>{try{return JSON.parse(localStorage.getItem(key)||'{}')||{};}catch{return {};}};
   const cache=read(cacheKey),globalCache=read(globalKey);
-  const add=(key,path,hash,legacySig,size)=>{
+  const add=(key,path,hash,legacySig,size,parts=null)=>{
     if(!path||!String(path).startsWith(encodeURIComponent(String(uid))+'/'))return;
-    cache[key]={path,sig:legacySig,hash:hash||undefined};
-    if(hash)globalCache[hash]={path,size,savedAt:Date.now()};
+    cache[key]={path,sig:legacySig,hash:hash||undefined,...(parts?.length?{parts}:{})};
+    if(hash)globalCache[hash]={path,parts,size,savedAt:Date.now()};
   };
   const sig=(size,type,extra='')=>`${size||0}:${type||''}:${extra}`;
   for(const p of lists.photos||[]){
-    add('photo:'+p.id,p.cloudBlobPath,p.cloudBlobHash,sig(p.cloudBlobSize,p.cloudBlobType,p.date||p.importedAt||p.updatedAt||''),p.cloudBlobSize);
+    add('photo:'+p.id,p.cloudBlobPath,p.cloudBlobHash,sig(p.cloudBlobSize,p.cloudBlobType,p.date||p.importedAt||p.updatedAt||''),p.cloudBlobSize,p.cloudBlobParts);
   }
   for(const r of lists.rasters||[]){
     const extra=r.importedAt||r.meta?.importedAt||r.meta?.sourceWidth||'';
-    add('raster-preview:'+r.id,r.cloudPreviewPath,r.cloudPreviewHash,sig(r.cloudPreviewSize,r.cloudPreviewType,extra+'|'+(r.styleCache?.generatedAt||'')),r.cloudPreviewSize);
-    add('raster-source:'+r.id,r.cloudSourcePath,r.cloudSourceHash,sig(r.cloudSourceSize,r.cloudSourceType,extra),r.cloudSourceSize);
+    add('raster-preview:'+r.id,r.cloudPreviewPath,r.cloudPreviewHash,sig(r.cloudPreviewSize,r.cloudPreviewType,extra+'|'+(r.styleCache?.generatedAt||'')),r.cloudPreviewSize,r.cloudPreviewParts);
+    add('raster-source:'+r.id,r.cloudSourcePath,r.cloudSourceHash,sig(r.cloudSourceSize,r.cloudSourceType,extra),r.cloudSourceSize,r.cloudSourceParts);
   }
   for(const v of lists.vectorLayers||[]){
-    add('vector-geometry:'+v.id,v.cloudFeaturesPath,v.cloudFeaturesHash,null,v.cloudFeaturesSize);
-    add('vector-render:'+v.id,v.cloudRenderPath,v.cloudRenderHash,sig(v.cloudRenderSize,v.cloudRenderType,vectorRenderSignature(v)+'|'+(v.renderCache?.createdAt||'')),v.cloudRenderSize);
+    add('vector-geometry:'+v.id,v.cloudFeaturesPath,v.cloudFeaturesHash,null,v.cloudFeaturesSize,v.cloudFeaturesParts);
+    add('vector-render:'+v.id,v.cloudRenderPath,v.cloudRenderHash,sig(v.cloudRenderSize,v.cloudRenderType,vectorRenderSignature(v)+'|'+(v.renderCache?.createdAt||'')),v.cloudRenderSize,v.cloudRenderParts);
   }
   try{localStorage.setItem(cacheKey,JSON.stringify(cache));localStorage.setItem(globalKey,JSON.stringify(globalCache));}catch(e){console.warn('No se pudo recordar los archivos descargados',e);}
 }
@@ -671,9 +698,9 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
       lists.vectorLayers.reduce((n,x)=>n+(x.cloudFeaturesPath?1:0)+(x.cloudRenderPath?1:0),0);
     let done=0;cloudProgressStart('Descargando archivos del proyecto',total);started=true;
     await dbClear('cloudStaging');
-    const get=async(path,label,expectedSize=null,reusable=null)=>{
+    const get=async(path,label,expectedSize=null,reusable=null,parts=null,type='application/octet-stream')=>{
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
-      const blob=reusable||await cloudDownloadBlob(path);
+      const blob=reusable||await cloudDownloadBlob(path,parts,type);
       if(!(blob instanceof Blob))throw new Error('Falta el archivo '+label);
       if(Number(expectedSize)>0&&blob.size!==Number(expectedSize))throw new Error('Archivo incompleto o corrupto: '+label);
       done++;cloudProgressUpdate((reusable?'Reutilizado':'Descargado')+' · '+label,done,total);return blob;
@@ -682,7 +709,7 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
       if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
       if(!ph.id||!ph.cloudBlobPath)throw new Error('Falta el archivo de la fotografía '+(ph.name||ph.id||''));
       const rec={...ph};delete rec.cloudBlobPath;delete rec.cloudBlobType;delete rec.cloudBlobSize;
-      rec.blob=await get(ph.cloudBlobPath,ph.name||'fotografía',ph.cloudBlobSize,await cloudReuseBlob(oldPhotos.get(ph.id)?.blob,ph.cloudBlobSize,ph.cloudBlobHash));
+      rec.blob=await get(ph.cloudBlobPath,ph.name||'fotografía',ph.cloudBlobSize,await cloudReuseBlob(oldPhotos.get(ph.id)?.blob,ph.cloudBlobSize,ph.cloudBlobHash),ph.cloudBlobParts,ph.cloudBlobType);
       await dbPut('cloudStaging',{key:'photos:'+ph.id,record:rec});
     }
     for(const r of lists.rasters){
@@ -690,8 +717,8 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
       if(!r.id||!r.cloudPreviewPath)throw new Error('Falta la imagen del mapa '+(r.name||r.id||''));
       const rec={...r};for(const k of ['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize'])delete rec[k];
       const localRaster=oldRasters.get(r.id);
-      if(r.cloudPreviewPath)rec.blob=await get(r.cloudPreviewPath,r.name||'mapa',r.cloudPreviewSize,await cloudReuseBlob(localRaster?.blob,r.cloudPreviewSize,r.cloudPreviewHash));
-      if(r.cloudSourcePath)rec.sourceBlob=await get(r.cloudSourcePath,(r.name||'mapa')+' · original',r.cloudSourceSize,await cloudReuseBlob(localRaster?.sourceBlob,r.cloudSourceSize,r.cloudSourceHash));
+      if(r.cloudPreviewPath)rec.blob=await get(r.cloudPreviewPath,r.name||'mapa',r.cloudPreviewSize,await cloudReuseBlob(localRaster?.blob,r.cloudPreviewSize,r.cloudPreviewHash),r.cloudPreviewParts,r.cloudPreviewType);
+      if(r.cloudSourcePath)rec.sourceBlob=await get(r.cloudSourcePath,(r.name||'mapa')+' · original',r.cloudSourceSize,await cloudReuseBlob(localRaster?.sourceBlob,r.cloudSourceSize,r.cloudSourceHash),r.cloudSourceParts,r.cloudSourceType);
       if(rec.styleCache)rec.styleCache={...rec.styleCache,ready:false,missing:true};
       await dbPut('cloudStaging',{key:'rasters:'+r.id,record:rec});
     }
@@ -701,9 +728,9 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
       const rec={...vl};for(const k of ['cloudFeaturesPath','cloudRenderPath','cloudFeaturesSize','cloudRenderType','cloudRenderSize'])delete rec[k];
       const localVector=oldVectors.get(vl.id),sameFeatures=vl.cloudFeaturesPath?await cloudReuseFeatures(localVector?.features,vl.cloudFeaturesSize,vl.cloudFeaturesHash):null;
       if(sameFeatures){rec.features=sameFeatures;done++;cloudProgressUpdate('Reutilizado · geometría de '+(vl.name||'capa'),done,total);}
-      else rec.features=vl.cloudFeaturesPath?JSON.parse(await (await get(vl.cloudFeaturesPath,vl.name||'capa',vl.cloudFeaturesSize)).text()):[];
+      else rec.features=vl.cloudFeaturesPath?JSON.parse(await (await get(vl.cloudFeaturesPath,vl.name||'capa',vl.cloudFeaturesSize,null,vl.cloudFeaturesParts,'application/json')).text()):[];
       if(!Array.isArray(rec.features))throw new Error('Geometría de capa inválida: '+(vl.name||vl.id));
-      if(vl.cloudRenderPath)rec.renderBlob=await get(vl.cloudRenderPath,(vl.name||'capa')+' · render',vl.cloudRenderSize,await cloudReuseBlob(localVector?.renderBlob,vl.cloudRenderSize,vl.cloudRenderHash));
+      if(vl.cloudRenderPath)rec.renderBlob=await get(vl.cloudRenderPath,(vl.name||'capa')+' · render',vl.cloudRenderSize,await cloudReuseBlob(localVector?.renderBlob,vl.cloudRenderSize,vl.cloudRenderHash),vl.cloudRenderParts,vl.cloudRenderType);
       await dbPut('cloudStaging',{key:'vectorLayers:'+vl.id,record:rec});
     }
     if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
