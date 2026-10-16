@@ -5444,12 +5444,28 @@ function nativeExportProfileSheetPdf(payload){
   return window.GeoCauceNative?.exportProfileSheetPdf?nativeCall('exportProfileSheetPdf',json)||'':'';
 }
 async function exportSelectedContents(){
-  const ids=localExportTreeSelection().map(x=>x.value);if(!ids.length){toast('Selecciona almenys un contingut');return;}
+  const selected=localExportTreeSelection(),ids=selected.map(x=>x.value);if(!ids.length){toast('Selecciona almenys un contingut');return;}
   const btn=$('#downloadContentsExport'),st=$('#downloadContentsStatus'),oldLabel=btn?.textContent||'Exportar seleccionades';let ok=0,failed=[];
   if(btn){btn.disabled=true;btn.textContent='Preparant…';}if(st){st.dataset.busy='1';st.classList.remove('hidden');st.textContent='Preparant l’exportació…';}
   try{
     for(let n=0;n<ids.length;n++){
       const id=ids[n];await new Promise(r=>requestAnimationFrame(()=>setTimeout(r,0)));
+      // Use the same high-fidelity, map-inclusive PDF for the ZIP and for
+      // individual exports. Keep Android's previous native renderer as fallback.
+      if(id!=='__general_map__'&&window.GeoCauceFieldPdf){
+        try{
+          if(st)st.textContent=`Generant PDF amb mapa · ${n+1}/${ids.length}…`;
+          const pdf=await localExportArchiveFile(id);
+          if(pdf?.type!=='application/pdf')throw Error('El generador no ha retornat un PDF');
+          const filename=selected[n]?.dataset.zipPath?.split('/').pop()||'FITXA_${n+1}.pdf';
+          await downloadBlob(pdf,filename);
+          ok++;continue;
+        }catch(e){
+          console.error('Exportació PDF de camp',id,e);
+          if(!ANDROID_NATIVE){failed.push(`${id}: ${e?.message||String(e)}`);continue;}
+          // Only on old Android WebViews: fall back to the preexisting native PDF.
+        }
+      }
       if(id==='__general_map__'){
         try{if(st)st.textContent=`Generant mapa general · ${n+1}/${ids.length}…`;const url=generalMapDataUrl(),blob=dataUrlBlob(url);if(!blob)throw Error('No hi ha mapes georeferenciats visibles');await downloadBlob(blob,`MAPA_GENERAL_${safeSlug(state.project?.name||'GeoCauce')}.jpg`);ok++;}catch(e){console.error('Mapa general',e);failed.push(`Mapa general: ${e?.message||String(e)}`);}continue;
       }
