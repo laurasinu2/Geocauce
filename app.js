@@ -3064,6 +3064,7 @@ function depositMaterialLabel(f){
  const selected=materials.find(m=>m.id===f?.material);
  return selected?.name||'Material sin asignar';
 }
+
 function featureCardPresentation(f){
   const material=f.material?materialById(f.material):null;
   const course=f.type==='reach'?state.features.find(x=>x.id===f.courseId&&x.type==='watercourse'):null;
