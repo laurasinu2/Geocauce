@@ -342,7 +342,7 @@ async function cloudDownloadBlob(objectPath,parts=null,type='application/octet-s
   const response=await cloudBinaryFetch(`/storage/v1/object/authenticated/geocauce-files/${p}`,{method:'GET',contentType:null});
   blobs.push(await response.blob());
  }
- return objectPaths.length===1?blobs[0]:new Blob(blobs,{type});
+ return objectPaths.length===1?blobs[0]:new Blob(blobs,{type:type||''});
 }
 async function cloudAssetDigest(blob){
   if(!(blob instanceof Blob))throw new Error('Archivo local inválido');
