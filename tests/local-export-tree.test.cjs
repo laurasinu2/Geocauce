@@ -93,11 +93,11 @@ test('PDF UI has an all-selection checkbox, both export actions and cached modul
   assert.match(html,/id="downloadContentsSelectAll"/);
   assert.match(html,/id="downloadContentsZip"/);
   assert.match(html,/id="downloadContentsExport"/);
-  assert.match(html,/local-export-zip\.js\?v=20261015-download-r24/);
-  assert.match(sw,/mobile-pwa-r24/);
+  assert.match(html,/local-export-zip\.js\?v=20261016-sync-r25/);
+  assert.match(sw,/mobile-pwa-r25/);
   assert.match(sw,/"local-export-zip\.js"/);
   assert.match(html,/fitxes PDF/);
-  assert.match(html,/field-sheet-pdf\.js\?v=20261015-download-r24/);
+  assert.match(html,/field-sheet-pdf\.js\?v=20261016-sync-r25/);
   assert.match(sw,/"field-sheet-pdf\.js"/);
 });
 test('all scripts parse',()=>{

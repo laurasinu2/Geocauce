@@ -203,7 +203,7 @@ function isUuid(v){return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a
 function ensureCloudProjectId(p){if(!p)return null;if(isUuid(p.cloudProjectId))return p.cloudProjectId;if(isUuid(p.id)){p.cloudProjectId=p.id;return p.id;}p.cloudProjectId=cloudUuid();p.updatedAt=Date.now();saveProjectCatalog();return p.cloudProjectId;}
 function cloudIdForProject(projectId){const p=projectById(projectId);return p?ensureCloudProjectId(p):(isUuid(projectId)?projectId:null);}
 function loadCloudSession(){try{return JSON.parse(localStorage.getItem(AUTH_SESSION_KEY)||'null');}catch{return null;}}
-function saveCloudSession(session){if(session)localStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(session));else localStorage.removeItem(AUTH_SESSION_KEY);refreshAccountUi();}
+function saveCloudSession(session){if(session)localStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(session));else localStorage.removeItem(AUTH_SESSION_KEY);refreshAccountUi();if(session?.access_token)scheduleCloudSync(2500);}
 function authEntryChoice(){return localStorage.getItem(AUTH_PREF_KEY)||'';}
 function setAuthEntryChoice(v){if(v)localStorage.setItem(AUTH_PREF_KEY,v);else localStorage.removeItem(AUTH_PREF_KEY);}
 function sessionUser(session=loadCloudSession()){return session?.user||null;}
@@ -330,6 +330,19 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
     const geomPath=await put('vector-geometry:'+rec.id,base,geomBlob,`${geomBlob.size}:${tinyHash(geomText)}`,(rec.name||'SHP')+' · geometría','.geometry.json');
     const renderPath=rec.renderBlob instanceof Blob?await put('vector-render:'+rec.id,base,rec.renderBlob,sigBlob(rec.renderBlob,vectorRenderSignature(rec)+'|'+(rec.renderCache?.createdAt||'')),(rec.name||'SHP')+' · render','.render'):null;
     result.vectorLayers.push({...x,cloudFeaturesPath:geomPath,cloudRenderPath:renderPath,cloudFeaturesSize:geomBlob.size,cloudRenderType:rec.renderBlob?.type||null,cloudRenderSize:rec.renderBlob?.size||0,cloudFeaturesHash:cache['vector-geometry:'+rec.id]?.hash||null,cloudRenderHash:cache['vector-render:'+rec.id]?.hash||null});
+  }
+  // Preserve cloud-only media metadata when a second device has not downloaded its
+  // maps or photos locally. Removing a file requires an explicit deletion operation.
+  // This prevents a mobile phone photo upload from erasing tablet raster references.
+  if(remoteAssets){
+    const queue=cloudPendingChanges(state.projectId);
+    for(const kind of ['photos','rasters','vectorLayers']){
+      const localIds=new Set(result[kind].map(x=>x.id));
+      for(const remote of remoteAssets[kind]||[]){
+        if(localIds.has(remote.id)||queue.some(q=>q.kind===kind&&q.path==='delete:'+remote.id))continue;
+        result[kind].push(remote);localIds.add(remote.id);
+      }
+    }
   }
   return {metadata:result,steps:done,total:total+2,reused,uploaded};
 }
@@ -537,7 +550,7 @@ async function restoreCloudLocalRecovery(){
 async function restoreProjectFromCloud(projectId,{manual=false}={}){
   if(!cloudConfigured()||!navigator.onLine||!loadCloudSession()?.access_token)return false;
   if(cloudSyncRunning||cloudRestoreRunning)return false;
-  cloudRestoreRunning=true;let started=false;
+  cloudRestoreRunning=true;const previousCloudApplyingRemote=cloudApplyingRemote;cloudApplyingRemote=true;let started=false;
   try{
     const p0=projectById(projectId),cloudId=p0?.cloudProjectId||(isUuid(projectId)?projectId:null);
     if(!cloudId)throw new Error('Este proyecto todavía no tiene copia en la nube');
@@ -598,6 +611,7 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
     if(state.projectId!==projectId)throw new Error('El proyecto activo cambió durante la descarga');
     cloudProgressUpdate('Guardando copia de seguridad local',done+1,total);
     await cloudCommitStaging(projectId,sv);
+    try{await cloudDeltaSaveBase(projectId,sv,snap.updated_at);cloudClearAcknowledgedChanges(projectId,cloudPendingChanges(projectId));}catch(e){console.warn('Cloud baseline after restore',e);}
     try{cloudSeedDownloadedAssets(loadCloudSession()?.user?.id||'',cloudId,lists);}catch(e){console.warn('No se pudo registrar el índice cloud',e);}
     await dbClear('cloudStaging').catch(()=>{});
     if(ANDROID_NATIVE){
@@ -618,7 +632,7 @@ async function restoreProjectFromCloud(projectId,{manual=false}={}){
     if(started)cloudProgressFinish(false,'Descarga interrumpida');
     if(manual)toast(cloudLastError,6500);
     refreshAccountUi();return false;
-  }finally{cloudRestoreRunning=false;refreshAccountUi();}
+  }finally{cloudApplyingRemote=previousCloudApplyingRemote;cloudRestoreRunning=false;refreshAccountUi();}
 }
 async function refreshCloudSession(){
   const old=loadCloudSession();if(!old?.refresh_token)throw new Error('No hay sesión para renovar');
@@ -695,10 +709,278 @@ function refreshAccountUi(){
   if(sync){sync.classList.toggle('hidden',a.kind!=='account');sync.onclick=syncNow;}
   renderAccountManageBody();if(state.screen==='settings')renderSettings();
 }
+
+const CLOUD_CHANGE_QUEUE_PREFIX='geocauce-pending-sync-v1:';
+let cloudApplyingRemote=false,cloudDeltaRunning=false,cloudLastAssetManifest=null;
+function cloudQueueKey(projectId){return CLOUD_CHANGE_QUEUE_PREFIX+projectId;}
+function cloudPendingChanges(projectId=state.projectId){
+ try{const a=JSON.parse(localStorage.getItem(cloudQueueKey(projectId))||'[]');return Array.isArray(a)?a:[];}catch{return [];}
+}
+function cloudQueueChange(projectId,kind,path){
+ if(!projectId||cloudApplyingRemote)return;
+ try{
+  const entries=cloudPendingChanges(projectId),next=entries.filter(x=>!(x.kind===kind&&x.path===path));
+  next.push({id:cloudUuid(),kind,path,createdAt:Date.now()});
+  localStorage.setItem(cloudQueueKey(projectId),JSON.stringify(next.slice(-5000)));
+  scheduleCloudSync(1800);
+ }catch(e){cloudLastError='No se pudo guardar la cola de sincronización';console.error(cloudLastError,e);refreshAccountUi();}
+}
+function cloudQueueStateDiff(projectId,previousJson,next){
+ if(cloudApplyingRemote||!window.GeoCauceDeltaSync)return;
+ try{
+  const before=previousJson?JSON.parse(previousJson):{};
+  const changes=window.GeoCauceDeltaSync.diff(before,next);
+  if(!changes.length)return;
+  const entries=cloudPendingChanges(projectId);
+  const changedPaths=new Set(changes.map(op=>op.path));
+  const pending=entries.filter(x=>!(x.kind==='data'&&changedPaths.has(x.path)));
+  for(const op of changes)pending.push({id:cloudUuid(),kind:'data',path:op.path,createdAt:Date.now()});
+  localStorage.setItem(cloudQueueKey(projectId),JSON.stringify(pending.slice(-5000)));
+  scheduleCloudSync(1800);
+ }catch(e){console.warn('Cloud pending state queue',e);cloudQueueChange(projectId,'data','/campaigns');}
+}
+function cloudQueueAssetChange(store,id,operation){
+ if(!state.projectId||id==null)return;
+ cloudQueueChange(state.projectId,store,operation+':'+id);
+}
+function cloudClearAcknowledgedChanges(projectId,acknowledged){
+ if(!projectId||!acknowledged?.length)return;
+ const confirmed=new Set(acknowledged.map(x=>x.id));
+ try{localStorage.setItem(cloudQueueKey(projectId),JSON.stringify(cloudPendingChanges(projectId).filter(x=>!confirmed.has(x.id))));}
+ catch(e){console.warn('No se ha podido limpiar la cola, se comprobará en el próximo ciclo',e);}
+}
+
 function lastKnownCloudSyncAt(){
   const p=state.project||projectById(localStorage.getItem(ACTIVE_PROJECT_KEY));
   return cloudLastSyncAt||p?._cloudSyncedAt||0;
 }
+
+function cloudSyncEditingInProgress(){
+ if(state.currentStroke||state.pendingStroke||state.notebookStroke)return true;
+ return !!document.querySelector('#sectionModal:not(.hidden),#reachSheetModal:not(.hidden),#profileSheetModal:not(.hidden),#photoEditorModal:not(.hidden),#fieldNotebookModal:not(.hidden)');
+}
+function cloudDeltaFields(payload){
+ const out={};for(const field of window.GeoCauceDeltaSync?.fields||[])if(payload&&Object.prototype.hasOwnProperty.call(payload,field))out[field]=payload[field];
+ return out;
+}
+async function cloudDeltaSaveBase(projectId,snapshot,updatedAt){
+ if(!projectId)return;
+ await dbPut('cloudSyncBase',{key:'baseline',projectId,updatedAt:updatedAt||null,state:{...cloudDeltaFields(snapshot),assetMetadata:snapshot?.assetMetadata||null}});
+}
+function cloudApplyCollaborativeState(payload){
+ // A full restoreState() would reset raster canvases and the active map.
+ // Only replace actual collaborative records in the live project.
+ if(Array.isArray(payload.campaigns)){
+  state.campaigns=payload.campaigns.map(c=>({...c,parentId:c.parentId||null,author:c.author||'',event:c.event||'none',
+   notes:c.notes||'',upserts:(c.upserts||[]).map(f=>normalizeFeature(f,c.id)),
+   deleted:[...(c.deleted||[])],order:[...(c.order||[])],createdAt:c.createdAt||Date.now()}));
+  const ids=new Set(state.campaigns.map(c=>c.id));
+  if(!ids.has(state.campaign))state.campaign=state.campaigns.at(-1)?.id||'D01';
+  if(!ids.has(state.editableCampaign))state.editableCampaign=state.campaigns.at(-1)?.id||'D01';
+  state.features=materializeCampaign(state.campaign);
+  if(state.selectedId&&!state.features.some(f=>f.id===state.selectedId)){state.selectedId=null;hideFeatureCard();}
+ }
+ for(const field of ['mapInk','mapPins','historicalPhotoPoints','demGroups']){
+  if(Array.isArray(payload[field]))state[field]=cloneAny(payload[field]);
+ }
+ if(payload.notebook&&typeof payload.notebook==='object')state.notebook=cloneAny(payload.notebook);
+ if(payload.materialStyles&&typeof payload.materialStyles==='object')state.materialStyles=cloneAny(payload.materialStyles);
+ if(Array.isArray(payload.referenceLayers))state.referenceLayers=payload.referenceLayers.map(referenceLayerStateRecord);
+ if('activeDemGroupId' in payload)state.activeDemGroupId=payload.activeDemGroupId;
+}
+
+function cloudDeltaRootError(reason,manual){
+ cloudLastError='Sincronización pendiente: '+reason;
+ if(manual){cloudProgressFinish(false,'Sincronización pendiente');toast(cloudLastError,6500);}
+ refreshAccountUi();
+}
+async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[]){
+ const changed=[],baseline=new Map((baseAssets?.photos||[]).map(p=>[p.id,p]));
+ const localMutations=new Set(queue.filter(q=>q.kind==='photos').map(q=>q.path.split(':').slice(1).join(':')));
+ const locallyDeleted=new Set(queue.filter(q=>q.kind==='photos'&&q.path.startsWith('delete:')).map(q=>q.path.slice(7)));
+ for(const photo of assets?.photos||[]){
+  if(!photo.cloudBlobPath)continue;
+  const previous=baseline.get(photo.id),existing=await dbGet('photos',photo.id);
+  const remoteModified=previous&&cloudStableJson(previous)!==cloudStableJson(photo);
+  if((remoteModified||(!previous&&existing))&&localMutations.has(photo.id))
+   throw new Error('La foto '+(photo.name||photo.id)+' fue editada desde los dos dispositivos. Se conserva la copia local y se requiere revisión.');
+  if(locallyDeleted.has(photo.id)&&!remoteModified)continue;
+  if(!existing&&localMutations.has(photo.id))
+   throw new Error('La fotografía '+(photo.name||photo.id)+' se ha eliminado localmente. No se volverá a añadir sin resolverlo.');
+  const newContent=!existing?.blob||Boolean(remoteModified&&previous?.cloudBlobHash!==photo.cloudBlobHash);
+  if(!newContent&&!remoteModified)continue;
+  let blob=existing?.blob;
+  if(newContent){
+   blob=await cloudDownloadBlob(photo.cloudBlobPath);
+   if(!(blob instanceof Blob)||(photo.cloudBlobSize!=null&&blob.size!==Number(photo.cloudBlobSize)))
+    throw new Error('La fotografía '+(photo.name||photo.id)+' no se descargó completa');
+  }
+  const copy={...photo,blob};
+  for(const key of Object.keys(copy))if(key.startsWith('cloudBlob'))delete copy[key];
+  await dbPut('photos',copy);
+  nativeSyncPhotoMeta(copy);
+  changed.push(photo.id);
+ }
+ return changed;
+}
+function cloudResolveFieldConflicts(conflicts){
+ return new Promise(resolve=>{
+  const modal=$('#cloudDeltaConflictModal'),list=$('#cloudDeltaConflictList'),
+   ok=$('#cloudDeltaConflictApply'),cancel=$('#cloudDeltaConflictCancel');
+  if(!modal||!list||!ok||!cancel){resolve(null);return;}
+  list.replaceChildren();
+  const rows=[];
+  for(const item of conflicts){
+   const wrapper=document.createElement('div');
+   wrapper.style.cssText='border:1px solid #bdc9c4;border-radius:10px;padding:12px;background:#fff';
+   const title=document.createElement('strong');title.textContent=item.path;wrapper.appendChild(title);
+   const view=(label,value)=>{
+    const box=document.createElement('div');box.style.cssText='margin:8px 0;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:100px;overflow:auto';
+    const header=document.createElement('b');header.textContent=label+': ';box.appendChild(header);
+    const details=document.createElement('span');const full=JSON.stringify(value);
+    details.textContent=(full||'Sin valor').slice(0,800)+(full?.length>800?'…':'');box.appendChild(details);wrapper.appendChild(box);
+   };
+   view('Móvil/tablet actual',item.local);view('Versión de la nube',item.remote);
+   const choice=document.createElement('select');
+   choice.setAttribute('aria-label','Resolución de '+item.path);
+   for(const [value,label] of [['','Elegir versión…'],['local','Conservar este dispositivo'],['remote','Conservar la nube']]){
+    const option=document.createElement('option');option.value=value;option.textContent=label;choice.appendChild(option);
+   }
+   choice.style.cssText='width:100%;padding:9px;min-height:42px';
+   wrapper.appendChild(choice);list.appendChild(wrapper);rows.push([item.path,choice]);
+  }
+  const finish=data=>{
+   modal.classList.add('hidden');ok.onclick=null;cancel.onclick=null;
+   resolve(data);
+  };
+  cancel.onclick=()=>finish(null);
+  ok.onclick=()=>{
+   if(rows.some(([,choice])=>!choice.value)){toast('Elige qué versión conservar en cada conflicto');return;}
+   finish(Object.fromEntries(rows.map(([path,choice])=>[path,choice.value])));
+  };
+  modal.classList.remove('hidden');
+ });
+}
+
+async function cloudBidirectionalSync({manual=false}={}){
+ if(cloudDeltaRunning||cloudSyncRunning||cloudRestoreRunning||!state.projectId||!state.project)return false;
+ if(!window.GeoCauceDeltaSync){if(manual)toast('Actualiza GeoCauce para activar la sincronización incremental');return false;}
+ if(!loadCloudSession()?.access_token||!cloudConfigured()){if(manual)toast('Inicia sesión para sincronizar');return false;}
+ if(!navigator.onLine){if(manual)toast('Sin conexión. Los cambios permanecen en la cola local.');return false;}
+ if(cloudSyncEditingInProgress()){if(manual)toast('Cierra la ficha abierta para fusionar los cambios guardados sin perder ninguna edición');return false;}
+ const projectId=state.projectId,project=state.project,ack=cloudPendingChanges(projectId);
+ cloudDeltaRunning=true;cloudLastError='';
+ if(manual)cloudProgressStart('Comparando cambios pendientes con la nube',2);
+ try{
+  const cloudId=ensureCloudProjectId(project),schema=await cloudSchema(),key=schema==='legacy'?'id_project':'project_id';
+  // Check only revision first. Avoid downloading the whole JSON snapshot on every poll.
+  const endpoint='/rest/v1/project_snapshots?'+key+'=eq.'+encodeURIComponent(cloudId);
+  const heads=await cloudFetch(endpoint+'&select=updated_at&limit=1');
+  const remoteHead=heads?.[0]||null;
+  const previousRemoteAt=Date.parse(remoteHead?.updated_at||'')||0;
+  const cachedBase=await dbGet('cloudSyncBase','baseline');
+  const cachedLocal=currentStatePayloadForCloud();
+  const verifiedUnchanged=cachedBase?.projectId===projectId&&cachedLocal&&!window.GeoCauceDeltaSync.diff(cachedBase.state,cachedLocal).length;
+  if(remoteHead&&previousRemoteAt&&(project._cloudUpdatedAt||0)===previousRemoteAt&&!ack.length&&verifiedUnchanged){
+   cloudLastError='';cloudLastSyncAt=Date.now();if(manual)cloudProgressFinish(true,'Sin cambios nuevos');refreshAccountUi();return true;
+  }
+  const rows=remoteHead?await cloudFetch(endpoint+'&select=updated_at,state&limit=1'):[];
+  const remote=rows?.[0]||null;
+  const local=currentStatePayloadForCloud();
+  if(!local||local.projectId!==projectId)throw new Error('El proyecto local no está preparado. No se ha cambiado ningún dato.');
+  let baseline=await dbGet('cloudSyncBase','baseline'),base=baseline?.projectId===projectId?baseline.state:null;
+  if(remote&&!base){
+   const known=project._cloudUpdatedAt||0,remoteDate=Date.parse(remote.updated_at||'')||0;
+   if(known&&remoteDate===known&&(project._cloudSyncedAt||project._cloudPulledAt)){
+    base=cloudDeltaFields(remote.state);
+    await cloudDeltaSaveBase(projectId,remote.state,remote.updated_at);
+   }else if(!window.GeoCauceDeltaSync.diff(remote.state,local).length){
+    base=cloudDeltaFields(remote.state);
+    await cloudDeltaSaveBase(projectId,remote.state,remote.updated_at);
+   }else{
+    // No baseline was available before this app revision. Merge conservatively:
+    // identical or independent data combine, divergent leaf values require a choice.
+    base={};
+   }
+  }
+  const localChange=base?window.GeoCauceDeltaSync.diff(base,local):window.GeoCauceDeltaSync.diff({},local);
+  const remoteChange=remote&&base?window.GeoCauceDeltaSync.diff(base,remote.state):[];
+  const localAssetsChanged=ack.some(x=>['photos','rasters','vectorLayers'].includes(x.kind));
+  if(!remote&&!localChange.length&&!localAssetsChanged)return true;
+  if(remote&&!localChange.length&&!remoteChange.length&&!localAssetsChanged){
+   cloudApplyingRemote=true;try{await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);}finally{cloudApplyingRemote=false;}
+   if(ack.length)cloudClearAcknowledgedChanges(projectId,ack);
+   cloudLastSyncAt=Date.now();if(manual)cloudProgressFinish(true,'Sin cambios nuevos');refreshAccountUi();return true;
+  }
+  let merged=local;
+  if(remote){
+   let result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state);
+   if(result.conflicts.length){
+    if(manual){
+     const decisions=await cloudResolveFieldConflicts(result.conflicts);
+     if(decisions)result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state,{resolutions:decisions});
+    }
+    if(result.conflicts.length){
+     const paths=result.conflicts.slice(0,4).map(c=>c.path).join(', ');
+     cloudDeltaRootError(result.conflicts.length+' conflictos pendientes en '+paths+'. Los dos dispositivos conservan sus datos. Usa «Sincronizar ahora» para elegir.',manual);
+     return false;
+    }
+   }
+   merged={...local};
+   for(const field of window.GeoCauceDeltaSync.fields){
+    if(Object.prototype.hasOwnProperty.call(result.value,field))merged[field]=result.value[field];
+    else delete merged[field];
+   }
+   // A deletion on the other device cannot be treated as a new upload from this one.
+   for(const kind of ['photos','rasters','vectorLayers']){
+    const knownIds=new Set((baseline?.state?.assetMetadata?.[kind]||[]).map(x=>x.id));
+    const remoteIds=new Set((remote.state?.assetMetadata?.[kind]||[]).map(x=>x.id));
+    if([...knownIds].some(id=>!remoteIds.has(id)&&!ack.some(q=>q.kind===kind&&q.path==='delete:'+id))){
+     cloudDeltaRootError('Se ha eliminado un archivo en otro dispositivo. Hace falta confirmar esta operación antes de compartir el resultado.',manual);
+     return false;
+    }
+   }
+  }
+  if(state.projectId!==projectId||cloudSyncEditingInProgress())return false;
+  const needApply=!!remote&&window.GeoCauceDeltaSync.diff(local,merged).length>0;
+  // Protect the current, complete local state before incorporating remote edits.
+  if(needApply)await dbPut('cloudSyncBase',{key:'preMergeRecovery',projectId,state:local,createdAt:Date.now()});
+  cloudApplyingRemote=true;
+  try{
+   if(remote)await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
+   if(needApply){
+    localStorage.setItem(projectStateKey(projectId),JSON.stringify(merged));
+    cloudApplyCollaborativeState(merged);
+    renderSectionList();updateCampaignUi();drawAll();
+   }
+  }finally{cloudApplyingRemote=false;}
+  const hasLocal=localChange.length>0||localAssetsChanged;
+  if(remote&&!hasLocal){
+   project._cloudUpdatedAt=Date.parse(remote.updated_at)||Date.now();
+   project._cloudPulledAt=Date.now();cloudLastSyncAt=Date.now();
+   saveProjectCatalog();
+   await cloudDeltaSaveBase(projectId,merged,remote.updated_at);
+   cloudClearAcknowledgedChanges(projectId,ack);
+   if(manual){cloudProgressFinish(true,'Cambios recibidos');toast('Sincronizado: se han recibido los cambios de otros dispositivos',4600);}
+   cloudLastError='';refreshAccountUi();return true;
+  }
+  const ok=await syncCurrentProjectToCloud({manual,expectedUpdatedAt:remote?.updated_at||null});
+  if(ok){
+   await cloudDeltaSaveBase(projectId,{...currentStatePayloadForCloud(),assetMetadata:cloudLastAssetManifest},new Date(project._cloudUpdatedAt||Date.now()).toISOString());
+   cloudClearAcknowledgedChanges(projectId,ack);
+   if(manual)toast('Sincronización bidireccional completada',4000);
+   return true;
+  }
+  return false;
+ }catch(e){
+  cloudDeltaRootError(e.message||String(e),manual);
+  console.warn('Bidirectional cloud sync',e);
+  return false;
+ }finally{
+  cloudDeltaRunning=false;refreshAccountUi();
+ }
+}
+
 async function syncNow(){
   if(!state.projectId){
     const id=localStorage.getItem(ACTIVE_PROJECT_KEY);
@@ -706,7 +988,7 @@ async function syncNow(){
     await openProject(id);
     if(state.projectId!==id)return false;
   }
-  return uploadCloudChanges();
+  return cloudBidirectionalSync({manual:true});
 }
 async function cloudRemoteSnapshotInfo(){
   const cloudId=state.project?.cloudProjectId;
@@ -732,7 +1014,7 @@ function cloudConflictChoice(){
 async function uploadCloudChanges(){
   if(!state.projectId||!state.project){toast('Abre un proyecto para subir cambios');return false;}
   if(!navigator.onLine){toast('Sin conexión. Los datos siguen guardados en el dispositivo.');return false;}
-  if(cloudSyncRunning||cloudRestoreRunning){toast('Ya hay una transferencia en curso');return false;}
+  if(cloudSyncRunning||cloudRestoreRunning||cloudDeltaRunning){toast('Ya hay una transferencia en curso');return false;}
   try{
     const remote=await cloudRemoteSnapshotInfo(),remoteTime=Date.parse(remote?.updated_at||0)||0;
     const known=state.project._cloudUpdatedAt||0;
@@ -753,7 +1035,7 @@ async function uploadCloudChanges(){
 async function downloadCloudChanges(){
   if(!state.projectId||!state.project){toast('Abre el proyecto que quieres descargar');return false;}
   if(!navigator.onLine){toast('Necesitas conexión para descargar cambios');return false;}
-  if(cloudSyncRunning||cloudRestoreRunning){toast('Ya hay una transferencia en curso');return false;}
+  if(cloudSyncRunning||cloudRestoreRunning||cloudDeltaRunning){toast('Ya hay una transferencia en curso');return false;}
   try{
     const remote=await cloudRemoteSnapshotInfo();
     if(!remote){toast('Todavía no hay una copia de este proyecto en la nube');return false;}
@@ -781,9 +1063,10 @@ function renderAccountManageBody(){
   }else{
     html=`<div class="account-status-box"><div class="account-status-row"><span>Modo</span><b>Local / sin conexión</b></div><div class="account-status-row"><span>Almacenamiento</span><b>SQLite + archivos del dispositivo</b></div><div class="account-status-row"><span>Nube</span><b>${configured?'Disponible al iniciar sesión':'Pendiente de configurar'}</b></div></div><div class="account-cloud-state sync-warn"><img src="icons/offline.svg" alt=""><span>Puedes trabajar indefinidamente sin cuenta. Si creas una más adelante, tus proyectos locales se pueden asociar y sincronizar.</span></div>`;
   }
+  if(a.kind==='account')html+=`<p class="account-note">Cambios en cola local: <b>${cloudPendingChanges().length}</b>. Los cambios se envían automáticamente cuando hay conexión, con la app abierta. Las modificaciones incompatibles se conservan sin sobrescribir.</p>`;
   root.innerHTML=html;
   const p=$('#accountManagePrimary'),q=$('#accountManageSecondary');if(!p||!q)return;
-  if(a.kind==='account'){p.textContent='Subir cambios';p.onclick=syncNow;q.textContent='Cerrar sesión y seguir local';q.onclick=async()=>{await signOutCloud();closeAccountManage();toast('Sesión cerrada · tus datos locales siguen disponibles');};}
+  if(a.kind==='account'){p.textContent='Sincronizar ahora';p.onclick=syncNow;q.textContent='Cerrar sesión y seguir local';q.onclick=async()=>{await signOutCloud();closeAccountManage();toast('Sesión cerrada · tus datos locales siguen disponibles');};}
   else{p.textContent='Iniciar sesión';p.onclick=()=>{closeAccountManage();openAuthModal('manage','signin');};q.textContent='Crear cuenta';q.onclick=()=>{closeAccountManage();openAuthModal('manage','signup');};}
 }
 function currentStatePayloadForCloud(){
@@ -820,6 +1103,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
     const previous=previousRows?.[0]||null;
     if((previous?.updated_at||null)!==expectedUpdatedAt)throw new Error('Otro dispositivo cambió la nube. Descarga sus cambios antes de subir.');
     const assets=await cloudUploadProjectAssets(uid,cloudId,{manual,remoteAssets:previous?.state?.assetMetadata});
+    cloudLastAssetManifest=assets.metadata;
     if(state.projectId!==uploadingProjectId)throw new Error('El proyecto cambió durante la subida');
     const current=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=updated_at&limit=1`);
     const actual=current?.[0]?.updated_at||null;
@@ -862,11 +1146,11 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
   }catch(e){cloudLastError=`Pendiente: ${e.message||e}`;console.warn('Cloud sync',e);if(manual){cloudProgressFinish(false,'Error al subir');toast(`No se pudo sincronizar: ${e.message||e}`,6500);}refreshAccountUi();return false;}
   finally{cloudSyncRunning=false;refreshAccountUi();}
 }
-function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);/* Subidas solo manuales: evita pisar cambios de otro dispositivo. */}
+function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);if(!state.projectId||!cloudConfigured()||!loadCloudSession()?.access_token||!navigator.onLine||document.hidden)return;cloudSyncTimer=setTimeout(()=>{cloudBidirectionalSync({manual:false}).catch(e=>console.warn('Background sync',e));},Math.max(600,delay));}
 function persistStateLocalOnly(){
-  if(!state.projectId)return;syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));touchProject();nativeSyncProject(payload);return payload;
+  if(!state.projectId)return;const previousCloudPayload=localStorage.getItem(projectStateKey(state.projectId));syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));cloudQueueStateDiff(state.projectId,previousCloudPayload,payload);touchProject();nativeSyncProject(payload);return payload;
 }
-window.addEventListener('online',()=>{refreshAccountUi();cloudRefreshProjectCatalog().catch(()=>{});scheduleCloudSync(800);});window.addEventListener('offline',refreshAccountUi);
+window.addEventListener('online',()=>{refreshAccountUi();cloudRefreshProjectCatalog().catch(()=>{});scheduleCloudSync(800);});window.addEventListener('offline',()=>{clearTimeout(cloudSyncTimer);refreshAccountUi();});document.addEventListener('visibilitychange',()=>{if(!document.hidden)scheduleCloudSync(700);});setInterval(()=>{if(!document.hidden&&navigator.onLine&&state.projectId)scheduleCloudSync(1000);},90000);
 
 const SECTION_PALETTE_KEY='geocauce-section-palette-v1';
 const DEFAULT_SECTION_COLORS=[
@@ -1126,7 +1410,7 @@ async function renderSettings(){
   $('#settingInputMode').value=appSettings.inputMode;$('#settingPersistentTool').checked=!!appSettings.persistentTool;$('#settingLengthUnit').value=appSettings.lengthUnit;$('#settingClastUnit').value=appSettings.clastUnit;$('#settingAreaUnit').value=appSettings.areaUnit;$('#settingVolumeUnit').value=appSettings.volumeUnit;$('#settingCoordMode').value=appSettings.coordMode;$('#settingGpsAccuracy').value=String(appSettings.gpsMinAccuracy);$('#settingPhotoHeading').checked=!!appSettings.photoHeading;$('#settingGpsAltitude').checked=!!appSettings.gpsAltitude;$('#settingShowAccuracy').checked=!!appSettings.showAccuracy;$('#settingNotebookBg').value=appSettings.notebookBg;$('#settingNotebookAutosave').checked=!!appSettings.notebookAutosave;if($('#settingReachPattern'))$('#settingReachPattern').value=appSettings.reachPattern||'{CURS}-{N}';if($('#settingReachCodes'))$('#settingReachCodes').value=appSettings.reachCodes||'';if($('#settingMobileUi'))$('#settingMobileUi').value=appSettings.mobileUi||'auto';
   const recovery=state.projectId?await dbGet('cloudRecovery','state').catch(()=>null):null;
   const st=await storageBreakdown();$('#settingsLocalMaps').textContent=formatBytes(st.maps);$('#settingsLocalPhotos').textContent=formatBytes(st.photos);$('#settingsLocalNotebook').textContent=formatBytes(st.notebook);$('#settingsLocalData').textContent=formatBytes(st.data);$('#settingsLocalTotal').textContent=formatBytes(st.usage??st.totalKnown);$('#settingsLocalBar').style.width=st.quota&&st.usage?`${Math.min(100,st.usage/st.quota*100)}%`:`${Math.min(100,st.totalKnown/(1024*1024*1024)*100)}%`;
-  const cloudBytes=bytesOfJson(currentStatePayloadForCloud?.()||{})+bytesOfJson(state.project||{});$('#settingsCloudState').textContent=a.kind==='account'?(online?(cloudLastError?'Pendiente':'Conectado'):'Sin conexión'):'Sin cuenta';$('#settingsCloudData').textContent=a.kind==='account'?`≈ ${formatBytes(cloudBytes)}`:'—';$('#settingsCloudLastSync').textContent=lastKnownCloudSyncAt()?new Date(lastKnownCloudSyncAt()).toLocaleString('es-ES'):'—';$('#settingsCloudPending').textContent=cloudLastError||(!online&&a.kind==='account'?'Sin conexión':'Sin comprobar');$('#settingsCloudBar').style.width='0%';if($('#settingsCloudRecoveryBtn'))$('#settingsCloudRecoveryBtn').disabled=!state.projectId||!recovery?.state||cloudSyncRunning||cloudRestoreRunning;$('#settingsCloudSyncBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;$('#settingsCloudDownloadBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning;
+  const cloudBytes=bytesOfJson(currentStatePayloadForCloud?.()||{})+bytesOfJson(state.project||{});$('#settingsCloudState').textContent=a.kind==='account'?(online?(cloudLastError?'Pendiente':'Conectado'):'Sin conexión'):'Sin cuenta';$('#settingsCloudData').textContent=a.kind==='account'?`≈ ${formatBytes(cloudBytes)}`:'—';$('#settingsCloudLastSync').textContent=lastKnownCloudSyncAt()?new Date(lastKnownCloudSyncAt()).toLocaleString('es-ES'):'—';$('#settingsCloudPending').textContent=cloudLastError||`${cloudPendingChanges().length} operación(es) pendientes${online?'':' · sin conexión'}`;$('#settingsCloudBar').style.width='0%';if($('#settingsCloudRecoveryBtn'))$('#settingsCloudRecoveryBtn').disabled=!state.projectId||!recovery?.state||cloudSyncRunning||cloudRestoreRunning||cloudDeltaRunning;$('#settingsCloudSyncBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning||cloudDeltaRunning;$('#settingsCloudDownloadBtn').disabled=a.kind!=='account'||!online||cloudSyncRunning||cloudRestoreRunning||cloudDeltaRunning;
 }
 
 function cloneAny(v){return typeof structuredClone==='function'?structuredClone(v):JSON.parse(JSON.stringify(v));}
@@ -1221,7 +1505,7 @@ async function openProject(id,opt={}){
   if(projectOpenInProgress){toast('Espera a que termine de abrirse el proyecto');return;}
   projectOpenInProgress=true;
   try{
-  if((cloudRestoreRunning||cloudSyncRunning)&&state.projectId&&id!==state.projectId){toast('Espera a que termine la sincronización antes de cambiar de proyecto');return;}
+  if((cloudRestoreRunning||cloudSyncRunning||cloudDeltaRunning)&&state.projectId&&id!==state.projectId){toast('Espera a que termine la sincronización antes de cambiar de proyecto');return;}
   if(state.view3d?.active)exit3DMode({quiet:true});
   const p=projectById(id);if(!p)return;
   const needsCloudRestore=!localStorage.getItem(projectStateKey(id))||p._cloudOnly===true;
@@ -4017,12 +4301,12 @@ async function downloadBlob(blob,name){
 async function clearProject(){if(!state.projectId||!confirm(`¿Vaciar todos los mapas, fotos, campañas y dibujos de “${state.project?.name||'este proyecto'}”? La información general del proyecto se conservará.`))return;localStorage.removeItem(projectStateKey(state.projectId));await dbClear('rasters');await dbClear('photos');await dbClear('rasterStyleTiles');await dbClear('vectorLayers');resetStateForProject(state.project);hideFeatureCard();updateCampaignUi();renderLayers();renderSectionList();drawAll();persistState();toast('Datos del proyecto vaciados');}
 
 let dbp=null,dbpName=null;
-function db(){const name=state.project?.dbName||'GeoCauceDB_scratch';if(dbp&&dbpName===name)return dbp;if(dbp){dbp.then(d=>{try{d.close();}catch{}}).catch(()=>{});dbp=null;}dbpName=name;dbp=new Promise((resolve,reject)=>{const req=indexedDB.open(name,4);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains('rasters'))d.createObjectStore('rasters',{keyPath:'id'});if(!d.objectStoreNames.contains('photos'))d.createObjectStore('photos',{keyPath:'id'});if(!d.objectStoreNames.contains('rasterStyleTiles')){const st=d.createObjectStore('rasterStyleTiles',{keyPath:'key'});st.createIndex('rasterId','rasterId',{unique:false});}if(!d.objectStoreNames.contains('vectorLayers'))d.createObjectStore('vectorLayers',{keyPath:'id'});if(!d.objectStoreNames.contains('cloudStaging'))d.createObjectStore('cloudStaging',{keyPath:'key'});if(!d.objectStoreNames.contains('cloudRecovery'))d.createObjectStore('cloudRecovery',{keyPath:'key'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});return dbp;}
-async function dbPut(store,obj){const d=await db();return new Promise((res,rej)=>{const tx=d.transaction(store,'readwrite');tx.objectStore(store).put(obj);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
+function db(){const name=state.project?.dbName||'GeoCauceDB_scratch';if(dbp&&dbpName===name)return dbp;if(dbp){dbp.then(d=>{try{d.close();}catch{}}).catch(()=>{});dbp=null;}dbpName=name;dbp=new Promise((resolve,reject)=>{const req=indexedDB.open(name,5);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains('rasters'))d.createObjectStore('rasters',{keyPath:'id'});if(!d.objectStoreNames.contains('photos'))d.createObjectStore('photos',{keyPath:'id'});if(!d.objectStoreNames.contains('rasterStyleTiles')){const st=d.createObjectStore('rasterStyleTiles',{keyPath:'key'});st.createIndex('rasterId','rasterId',{unique:false});}if(!d.objectStoreNames.contains('vectorLayers'))d.createObjectStore('vectorLayers',{keyPath:'id'});if(!d.objectStoreNames.contains('cloudStaging'))d.createObjectStore('cloudStaging',{keyPath:'key'});if(!d.objectStoreNames.contains('cloudRecovery'))d.createObjectStore('cloudRecovery',{keyPath:'key'});if(!d.objectStoreNames.contains('cloudSyncBase'))d.createObjectStore('cloudSyncBase',{keyPath:'key'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});return dbp;}
+async function dbPut(store,obj){const d=await db();return new Promise((res,rej)=>{const tx=d.transaction(store,'readwrite');tx.objectStore(store).put(obj);tx.oncomplete=()=>{if(['photos','rasters','vectorLayers'].includes(store)&&!cloudApplyingRemote)cloudQueueAssetChange(store,obj?.id,'put');res();};tx.onerror=()=>rej(tx.error);});}
 async function dbGet(store,key){const d=await db();return new Promise((res,rej)=>{const r=d.transaction(store).objectStore(store).get(key);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
 async function dbAll(store){const d=await db();return new Promise((res,rej)=>{const r=d.transaction(store).objectStore(store).getAll();r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
-async function dbClear(store){const d=await db();return new Promise((res,rej)=>{const tx=d.transaction(store,'readwrite');tx.objectStore(store).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
-async function dbDelete(store,key){const d=await db();return new Promise((res,rej)=>{const tx=d.transaction(store,'readwrite');tx.objectStore(store).delete(key);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
+async function dbClear(store){const d=await db();return new Promise((res,rej)=>{const tx=d.transaction(store,'readwrite'),records=tx.objectStore(store),tracked=['photos','rasters','vectorLayers'].includes(store)&&!cloudApplyingRemote;let ids=[];if(tracked){const keys=records.getAllKeys();keys.onsuccess=()=>{ids=keys.result||[];};}records.clear();tx.oncomplete=()=>{if(tracked&&state.projectId){for(const key of ids)cloudQueueAssetChange(store,key,'delete');}res();};tx.onerror=()=>rej(tx.error);});}
+async function dbDelete(store,key){const d=await db();return new Promise((res,rej)=>{const tx=d.transaction(store,'readwrite');tx.objectStore(store).delete(key);tx.oncomplete=()=>{if(['photos','rasters','vectorLayers'].includes(store)&&!cloudApplyingRemote)cloudQueueAssetChange(store,key,'delete');res();};tx.onerror=()=>rej(tx.error);});}
 async function dbDeleteRasterStyleTiles(rasterId){const d=await db();if(!d.objectStoreNames.contains('rasterStyleTiles'))return;return new Promise((res,rej)=>{const tx=d.transaction('rasterStyleTiles','readwrite'),st=tx.objectStore('rasterStyleTiles'),idx=st.index('rasterId'),req=idx.openCursor(IDBKeyRange.only(rasterId));req.onsuccess=()=>{const cur=req.result;if(cur){cur.delete();cur.continue();}};tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
 
 
@@ -5096,7 +5380,7 @@ function initUi(){
   $('#enterBtn').onclick=$('#openCampaignBtn').onclick=enterApp;
   $('#authCloseBtn').onclick=closeAuthModal;$('#authOfflineBtn').onclick=chooseOfflineEntry;$('#authSwitchMode').onclick=()=>setAuthMode(authUiMode==='signin'?'signup':'signin');$('#authTogglePassword').onclick=()=>{const i=$('#authPassword');i.type=i.type==='password'?'text':'password';};$('#authForm').onsubmit=e=>{e.preventDefault();submitAuth();};
   $('#projectAccountBtn').onclick=openAccountManage;if($('#projectCreateAccountBtn'))$('#projectCreateAccountBtn').onclick=openAccountManage;$('#projectSettingsBtn').onclick=()=>showSettings('projects');$('#settingsFromMapBtn').onclick=()=>{closeFloatingPanels();showSettings('map');};$('#accountManageClose').onclick=closeAccountManage;
-  $('#settingsBackBtn').onclick=closeSettings;$('#settingsAccountChip').onclick=openAccountManage;$('#settingsAccountAction').onclick=openAccountManage;$('#settingsSyncAction').onclick=()=>accountState().kind==='account'?syncNow():openAuthModal('manage','signin');$('#settingsCloudSyncBtn').onclick=uploadCloudChanges;$('#settingsCloudDownloadBtn').onclick=downloadCloudChanges;if($('#settingsCloudRecoveryBtn'))$('#settingsCloudRecoveryBtn').onclick=restoreCloudLocalRecovery;$('#settingsUpdateAppBtn').onclick=updateGeoCauceApp;$('#settingsExportBackup').onclick=()=>state.projectId?exportProjectPackage():toast('Abre un proyecto para exportar una copia');$('#settingsImportBackup').onclick=()=>$('#projectImportInput').click();
+  $('#settingsBackBtn').onclick=closeSettings;$('#settingsAccountChip').onclick=openAccountManage;$('#settingsAccountAction').onclick=openAccountManage;$('#settingsSyncAction').onclick=()=>accountState().kind==='account'?syncNow():openAuthModal('manage','signin');$('#settingsCloudSyncBtn').onclick=syncNow;$('#settingsCloudDownloadBtn').onclick=downloadCloudChanges;if($('#settingsCloudRecoveryBtn'))$('#settingsCloudRecoveryBtn').onclick=restoreCloudLocalRecovery;$('#settingsUpdateAppBtn').onclick=updateGeoCauceApp;$('#settingsExportBackup').onclick=()=>state.projectId?exportProjectPackage():toast('Abre un proyecto para exportar una copia');$('#settingsImportBackup').onclick=()=>$('#projectImportInput').click();
   const settingBindings={settingInputMode:['inputMode','value'],settingPersistentTool:['persistentTool','checked'],settingLengthUnit:['lengthUnit','value'],settingClastUnit:['clastUnit','value'],settingAreaUnit:['areaUnit','value'],settingVolumeUnit:['volumeUnit','value'],settingCoordMode:['coordMode','value'],settingGpsAccuracy:['gpsMinAccuracy','number'],settingPhotoHeading:['photoHeading','checked'],settingGpsAltitude:['gpsAltitude','checked'],settingShowAccuracy:['showAccuracy','checked'],settingNotebookBg:['notebookBg','value'],settingNotebookAutosave:['notebookAutosave','checked'],settingReachPattern:['reachPattern','value'],settingReachCodes:['reachCodes','value'],settingMobileUi:['mobileUi','value']};
   for(const [id,[key,kind]] of Object.entries(settingBindings)){const el=$('#'+id);if(!el)continue;el.onchange=()=>{appSettings[key]=kind==='checked'?el.checked:kind==='number'?+el.value:el.value;saveAppSettings();if(key==='inputMode'&&appSettings.inputMode==='finger'&&state.tool!=='pan')toast('Modo dedo activo · selecciona Mover para navegar con un dedo');if(['lengthUnit','areaUnit','coordMode','showAccuracy'].includes(key)){updateGnssUi();drawAll();const f=state.features.find(x=>x.id===state.selectedId);if(f)showFeatureCard(f);}};}
 
