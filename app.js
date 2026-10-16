@@ -216,6 +216,7 @@ async function cloudFetch(path,{method='GET',body=null,auth=true,headers={}}={})
   const cfg=cloudConfig();if(!cfg.enabled)throw new Error('Supabase no está configurado todavía');
   let session=loadCloudSession();
   if(auth&&session?.refresh_token&&sessionExpired(session))session=await refreshCloudSession();
+  if(auth&&(!session?.access_token||sessionExpired(session)))throw new Error('Sesión caducada. Inicia sesión para continuar.');
   const h={'apikey':cfg.key,'Content-Type':'application/json',...headers};
   if(auth&&session?.access_token)h.Authorization=`Bearer ${session.access_token}`;
   const r=await fetch(cfg.url+path,{method,headers:h,body:body==null?undefined:JSON.stringify(body),cache:'no-store'});
@@ -234,6 +235,59 @@ async function cloudBinaryFetch(path,{method='GET',body=null,contentType='applic
   const r=await fetch(cfg.url+path,{method,headers:h,body});
   if(!r.ok){let msg=`HTTP ${r.status}`;try{const t=await r.text();if(t){try{const j=JSON.parse(t);msg=j?.message||j?.error||j?.msg||t;}catch{msg=t;}}}catch{}const err=new Error(msg);err.status=r.status;throw err;}
   return r;
+}
+// Client checks improve UX. All real authorization is enforced by Supabase JWT + RLS.
+async function cloudProjectRole(p){
+ if(!p)return null;
+ const user=sessionUser();
+ const onlyLocal=!p.ownerUserId&&!p._cloudOnly&&!p._cloudSyncedAt&&!p._cloudPulledAt&&!p._cloudUpdatedAt;
+ if(onlyLocal)return 'owner';
+ if(!user?.id)throw new Error('Inicia sesión para abrir un proyecto compartido');
+ if(!navigator.onLine){
+  if(p._roleUser===user.id&&p._sharedRole)return p._sharedRole;
+  if(p.ownerUserId===user.id)return 'owner';
+  throw new Error('Conéctate para verificar los permisos de este proyecto');
+ }
+ const cloudId=p.cloudProjectId||(isUuid(p.id)?p.id:null);
+ if(!cloudId)throw new Error('El proyecto no tiene identificador cloud');
+ const role=await cloudFetch('/rest/v1/rpc/geocauce_project_role',{method:'POST',body:{p_project_id:cloudId}});
+ p._sharedRole=['owner','editor','viewer'].includes(role)?role:null;
+ p._roleUser=user.id;
+ saveProjectCatalog();
+ return p._sharedRole;
+}
+function canEditProjectInUi(p){
+ if(!p)return false;
+ if(!p.ownerUserId&&!p._cloudOnly)return true;
+ const uid=sessionUser()?.id;
+ return !!uid&&(p.ownerUserId===uid||(p._roleUser===uid&&window.GeoCauceProjectAccess?.canEdit(p._sharedRole)));
+}
+function canEditCurrentProject(){
+ return !!state.project&&canEditProjectInUi(state.project)&&state.project._accessMode!=='view';
+}
+function isCurrentProjectOwner(p=state.project){
+ if(!p)return false;
+ if(!p.ownerUserId&&!p._cloudOnly)return true;
+ return !!sessionUser()?.id&&p.ownerUserId===sessionUser().id;
+}
+async function openProjectShare(id){
+ const p=projectById(id);
+ if(!p||!isCurrentProjectOwner(p)){toast('Solo el propietario puede compartir el proyecto');return;}
+ if(!loadCloudSession()?.access_token||!navigator.onLine){toast('Inicia sesión y conéctate para compartir');return;}
+ if(state.projectId!==id){toast('Abre primero el proyecto para poder compartirlo');return;}
+ if(!p._cloudSyncedAt&&!p._cloudPulledAt){const ok=await syncNow();if(!ok){toast('Sincroniza el proyecto antes de compartirlo');return;}}
+ try{
+  if(await cloudProjectRole(p)!=='owner')throw new Error('No tienes permisos para compartir este proyecto');
+  const cloudId=p.cloudProjectId;
+  const rpc=(path,body)=>cloudFetch('/rest/v1/rpc/'+path,{method:'POST',body});
+  const urlFor=mode=>new URL(window.GeoCauceProjectAccess.routeUrl(cloudId,mode),location.href).href;
+  window.GeoCauceShareDialog.open({
+   name:p.name,viewUrl:urlFor('view'),editUrl:urlFor('edit'),
+   list:()=>rpc('geocauce_list_project_members',{p_project_id:cloudId}),
+   invite:(email,role)=>rpc('geocauce_set_project_member',{p_project_id:cloudId,p_email:email,p_role:role}),
+   remove:userId=>rpc('geocauce_remove_project_member',{p_project_id:cloudId,p_user_id:userId})
+  });
+ }catch(e){toast('No se puede compartir: '+(e.message||String(e)),6000);}
 }
 async function cloudUploadBlob(objectPath,blob){
   if(!(blob instanceof Blob))return null;
@@ -863,6 +917,7 @@ function cloudResolveFieldConflicts(conflicts){
 }
 
 async function cloudBidirectionalSync({manual=false}={}){
+ if(!canEditCurrentProject()){if(manual)toast('Proyecto de solo lectura: no se pueden sincronizar cambios de edición');return false;}
  if(cloudDeltaRunning||cloudSyncRunning||cloudRestoreRunning||!state.projectId||!state.project)return false;
  if(!window.GeoCauceDeltaSync){if(manual)toast('Actualiza GeoCauce para activar la sincronización incremental');return false;}
  if(!loadCloudSession()?.access_token||!cloudConfigured()){if(manual)toast('Inicia sesión para sincronizar');return false;}
@@ -1085,6 +1140,7 @@ async function cloudStructuredSnapshot(assetMetadata=null){
   return {...base,cloudSchema:4,appVersion:'0.16.39-android-alpha',sectionPalette:cloneAny(sectionPalette||[]),appSettings:cloneAny(appSettings),assetMetadata};
 }
 async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={}){
+  if(!canEditCurrentProject()){if(manual)toast('No tienes permiso de edición');return false;}
   if(cloudSyncRunning||cloudRestoreRunning||!state.projectId||!state.project)return false;
   const session=loadCloudSession();if(!session?.access_token){if(manual)toast('Inicia sesión para sincronizar');return false;}
   if(!cloudConfigured()){if(manual)toast('Supabase todavía no está configurado');return false;}
@@ -1095,6 +1151,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
     if(!uid)throw new Error('Sesión sin identificador de usuario');
     const p=state.project,cloudId=ensureCloudProjectId(p);if(!cloudId)throw new Error('No se pudo asignar ID cloud al proyecto');
     const schema=await cloudSchema();if(p._cloudOnly)throw new Error('Descarga primero el proyecto cloud');
+    if(p.ownerUserId&&!['editor','owner'].includes(await cloudProjectRole(p)))throw new Error('Tu cuenta ya no tiene permiso para editar este proyecto');
     const uploadingProjectId=state.projectId;
     persistStateLocalOnly();
     const startingPayload=localStorage.getItem(projectStateKey(uploadingProjectId));
@@ -1102,7 +1159,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
     const previousRows=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=updated_at,state&limit=1`);
     const previous=previousRows?.[0]||null;
     if((previous?.updated_at||null)!==expectedUpdatedAt)throw new Error('Otro dispositivo cambió la nube. Descarga sus cambios antes de subir.');
-    const assets=await cloudUploadProjectAssets(uid,cloudId,{manual,remoteAssets:previous?.state?.assetMetadata});
+    const assets=await cloudUploadProjectAssets(p.ownerUserId||uid,cloudId,{manual,remoteAssets:previous?.state?.assetMetadata});
     cloudLastAssetManifest=assets.metadata;
     if(state.projectId!==uploadingProjectId)throw new Error('El proyecto cambió durante la subida');
     const current=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=updated_at&limit=1`);
@@ -1110,17 +1167,17 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
     if(actual!==expectedUpdatedAt)throw new Error('Otro dispositivo ha actualizado la nube. No se ha sobrescrito su proyecto.');
     const payload=await cloudStructuredSnapshot(assets.metadata),now=new Date().toISOString();
     if(localStorage.getItem(projectStateKey(uploadingProjectId))!==startingPayload)throw new Error('Se han modificado datos durante la subida. Repite la sincronización cuando termines de editar.');
-    if(p.ownerUserId!==uid){p.ownerUserId=uid;p.updatedAt=Date.now();saveProjectCatalog();state.project=p;nativeSyncProject(payload);}
+    if(!p.ownerUserId){p.ownerUserId=uid;p._sharedRole='owner';p._roleUser=uid;p.updatedAt=Date.now();saveProjectCatalog();state.project=p;nativeSyncProject(payload);}
     const row=schema==='legacy'
-      ? {id_project:cloudId,owner_user_id:uid,name:p.name||'Proyecto',zona:p.zone||null,torrent:p.torrent||null,institution:p.institution||null,autor:p.author||null,start_date:p.startDate||new Date().toISOString().slice(0,10),crs:p.crs||'EPSG:25831',objective:p.objective||null,methodology:p.methodology||null,notes:p.notes||null,updated_at:now,deleted_at:null}
-      : {id:cloudId,owner_id:uid,name:p.name||'Proyecto',zone:p.zone||null,torrent:p.torrent||null,crs:p.crs||'EPSG:25831',metadata:{author:p.author||'',institution:p.institution||'',startDate:p.startDate||'',objective:p.objective||'',methodology:p.methodology||'',notes:p.notes||''},updated_at:now};
+      ? {id_project:cloudId,owner_user_id:p.ownerUserId,name:p.name||'Proyecto',zona:p.zone||null,torrent:p.torrent||null,institution:p.institution||null,autor:p.author||null,start_date:p.startDate||new Date().toISOString().slice(0,10),crs:p.crs||'EPSG:25831',objective:p.objective||null,methodology:p.methodology||null,notes:p.notes||null,updated_at:now,deleted_at:null}
+      : {id:cloudId,owner_id:p.ownerUserId,name:p.name||'Proyecto',zone:p.zone||null,torrent:p.torrent||null,crs:p.crs||'EPSG:25831',metadata:{author:p.author||'',institution:p.institution||'',startDate:p.startDate||'',objective:p.objective||'',methodology:p.methodology||'',notes:p.notes||''},updated_at:now};
     if(previous?.state&&cloudStableJson(previous.state)===cloudStableJson(payload)){
       const table=schema==='legacy'?'project':'projects',idCol=schema==='legacy'?'id_project':'id';
       const rows=await cloudFetch(`/rest/v1/${table}?${idCol}=eq.${encodeURIComponent(cloudId)}&select=*&limit=1`),remoteRow=rows?.[0];
       if(remoteRow&&Object.entries(row).every(([k,v])=>k==='updated_at'||cloudStableJson(remoteRow[k]??null)===cloudStableJson(v??null))){
         cloudLastSyncAt=Date.now();cloudLastError='';p._cloudSyncedAt=cloudLastSyncAt;p._cloudUpdatedAt=Date.parse(actual||0)||cloudLastSyncAt;saveProjectCatalog();
         if(manual){cloudProgressFinish(true,'Sin cambios pendientes');toast('Todo actualizado ✓ · 0 archivos transferidos',4500);}
-        cloudCollectObsoleteAssets(uid,cloudId,previous?.state?.assetMetadata,assets.metadata).catch(e=>console.warn('Cloud asset cleanup',e));
+        cloudCollectObsoleteAssets(p.ownerUserId||uid,cloudId,previous?.state?.assetMetadata,assets.metadata).catch(e=>console.warn('Cloud asset cleanup',e));
         refreshAccountUi();return true;
       }
     }
@@ -1134,21 +1191,21 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
       });
     }else{
       saved=await cloudFetch(schema==='legacy'?'/rest/v1/project_snapshots?on_conflict=id_project&select=updated_at':'/rest/v1/project_snapshots?on_conflict=project_id&select=updated_at',{
-        method:'POST',body:[schema==='legacy'?{id_project:cloudId,schema_version:4,state:payload,updated_at:now}:{project_id:cloudId,owner_id:uid,state:payload,palette:cloneAny(sectionPalette||[]),updated_at:now}],
+        method:'POST',body:[schema==='legacy'?{id_project:cloudId,schema_version:4,state:payload,updated_at:now}:{project_id:cloudId,owner_id:p.ownerUserId,state:payload,palette:cloneAny(sectionPalette||[]),updated_at:now}],
         headers:{Prefer:'resolution=ignore-duplicates,return=representation'}
       });
     }
     if(!Array.isArray(saved)||saved.length!==1)throw new Error('Conflicto al guardar: el proyecto remoto cambió. No se ha sobrescrito su snapshot.');
     cloudLastSyncAt=Date.now();cloudLastError='';p.cloudProjectId=cloudId;p._cloudOnly=false;p._cloudSyncedAt=cloudLastSyncAt;p._cloudUpdatedAt=Date.parse(saved[0].updated_at||now)||cloudLastSyncAt;saveProjectCatalog();
     if(manual){cloudProgressUpdate('Sincronización completada',assets.total,assets.total);cloudProgressFinish(true,'Subida completada');toast(`Proyecto sincronizado ✓ · ${assets.uploaded} archivos subidos, ${assets.reused} reutilizados`,6000);}
-    cloudCollectObsoleteAssets(uid,cloudId,previous?.state?.assetMetadata,assets.metadata).catch(e=>console.warn('Cloud asset cleanup',e));
+    cloudCollectObsoleteAssets(p.ownerUserId||uid,cloudId,previous?.state?.assetMetadata,assets.metadata).catch(e=>console.warn('Cloud asset cleanup',e));
     refreshAccountUi();return true;
   }catch(e){cloudLastError=`Pendiente: ${e.message||e}`;console.warn('Cloud sync',e);if(manual){cloudProgressFinish(false,'Error al subir');toast(`No se pudo sincronizar: ${e.message||e}`,6500);}refreshAccountUi();return false;}
   finally{cloudSyncRunning=false;refreshAccountUi();}
 }
-function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);if(!state.projectId||!cloudConfigured()||!loadCloudSession()?.access_token||!navigator.onLine||document.hidden)return;cloudSyncTimer=setTimeout(()=>{cloudBidirectionalSync({manual:false}).catch(e=>console.warn('Background sync',e));},Math.max(600,delay));}
+function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);if(state.project&&!canEditCurrentProject())return;if(!state.projectId||!cloudConfigured()||!loadCloudSession()?.access_token||!navigator.onLine||document.hidden)return;cloudSyncTimer=setTimeout(()=>{cloudBidirectionalSync({manual:false}).catch(e=>console.warn('Background sync',e));},Math.max(600,delay));}
 function persistStateLocalOnly(){
-  if(!state.projectId)return;const previousCloudPayload=localStorage.getItem(projectStateKey(state.projectId));syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));cloudQueueStateDiff(state.projectId,previousCloudPayload,payload);touchProject();nativeSyncProject(payload);return payload;
+  if(!state.projectId||!canEditCurrentProject())return;const previousCloudPayload=localStorage.getItem(projectStateKey(state.projectId));syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));cloudQueueStateDiff(state.projectId,previousCloudPayload,payload);touchProject();nativeSyncProject(payload);return payload;
 }
 window.addEventListener('online',()=>{refreshAccountUi();cloudRefreshProjectCatalog().catch(()=>{});scheduleCloudSync(800);});window.addEventListener('offline',()=>{clearTimeout(cloudSyncTimer);refreshAccountUi();});document.addEventListener('visibilitychange',()=>{if(!document.hidden)scheduleCloudSync(700);});setInterval(()=>{if(!document.hidden&&navigator.onLine&&state.projectId)scheduleCloudSync(1000);},90000);
 
