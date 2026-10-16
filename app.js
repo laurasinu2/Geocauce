@@ -331,6 +331,19 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
     const renderPath=rec.renderBlob instanceof Blob?await put('vector-render:'+rec.id,base,rec.renderBlob,sigBlob(rec.renderBlob,vectorRenderSignature(rec)+'|'+(rec.renderCache?.createdAt||'')),(rec.name||'SHP')+' · render','.render'):null;
     result.vectorLayers.push({...x,cloudFeaturesPath:geomPath,cloudRenderPath:renderPath,cloudFeaturesSize:geomBlob.size,cloudRenderType:rec.renderBlob?.type||null,cloudRenderSize:rec.renderBlob?.size||0,cloudFeaturesHash:cache['vector-geometry:'+rec.id]?.hash||null,cloudRenderHash:cache['vector-render:'+rec.id]?.hash||null});
   }
+  // Preserve cloud-only media metadata when a second device has not downloaded its
+  // maps or photos locally. Removing a file requires an explicit deletion operation.
+  // This prevents a mobile phone photo upload from erasing tablet raster references.
+  if(remoteAssets){
+    const queue=cloudPendingChanges(state.projectId);
+    for(const kind of ['photos','rasters','vectorLayers']){
+      const localIds=new Set(result[kind].map(x=>x.id));
+      for(const remote of remoteAssets[kind]||[]){
+        if(localIds.has(remote.id)||queue.some(q=>q.kind===kind&&q.path==='delete:'+remote.id))continue;
+        result[kind].push(remote);localIds.add(remote.id);
+      }
+    }
+  }
   return {metadata:result,steps:done,total:total+2,reused,uploaded};
 }
 function cloudStableJson(v){if(Array.isArray(v))return '['+v.map(x=>cloudStableJson(x)).join(',')+']';if(v&&typeof v==='object')return '{'+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+cloudStableJson(v[k])).join(',')+'}';return JSON.stringify(v)??'null';}
