@@ -27,7 +27,7 @@ test('mobile map provides both fit-to-project and locate controls',()=>{
 test('mobile PWA cache and markup use the current revision',()=>{
   assert.match(index,/mobile-pwa\.css\?v=20261016-sharing-r28/);
   assert.match(index,/mobile-pwa\.js\?v=20261016-sharing-r28/);
-  assert.match(sw,/const CACHE='geocauce-v0\.16\.40-mobile-pwa-r28'/);
+  assert.match(sw,/const CACHE='geocauce-v0\.16\.40-mobile-pwa-r28(?:-hillshade-chunks)?'/);
 });
 test('first mobile map opening refits project once, but subsequent navigation preserves zoom',async()=>{
   const start=js.indexOf('async function showMap(){');
