@@ -897,8 +897,9 @@ async function cloudBidirectionalSync({manual=false}={}){
     base=cloudDeltaFields(remote.state);
     await cloudDeltaSaveBase(projectId,remote.state,remote.updated_at);
    }else{
-    cloudDeltaRootError('El proyecto ya tiene cambios cloud y no existe un punto de partida común. Conservaré ambas versiones hasta resolver la primera fusión.',manual);
-    return false;
+    // No baseline was available before this app revision. Merge conservatively:
+    // identical or independent data combine, divergent leaf values require a choice.
+    base={};
    }
   }
   const localChange=base?window.GeoCauceDeltaSync.diff(base,local):window.GeoCauceDeltaSync.diff({},local);
