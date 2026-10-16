@@ -5457,7 +5457,7 @@ async function exportSelectedContents(){
           if(st)st.textContent=`Generant PDF amb mapa · ${n+1}/${ids.length}…`;
           const pdf=await localExportArchiveFile(id);
           if(pdf?.type!=='application/pdf')throw Error('El generador no ha retornat un PDF');
-          const filename=selected[n]?.dataset.zipPath?.split('/').pop()||'FITXA_${n+1}.pdf';
+          const filename=selected[n]?.dataset.zipPath?.split('/').pop()||`FITXA_${n+1}.pdf`;
           await downloadBlob(pdf,filename);
           ok++;continue;
         }catch(e){
