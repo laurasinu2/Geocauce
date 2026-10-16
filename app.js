@@ -2061,6 +2061,16 @@ function rasterParseFiniteNumber(value){
  if(!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text))return null;
  const n=Number(text);return Number.isFinite(n)?n:null;
 }
+// Infinity cannot be stored directly in the project JSON: represent an open
+// DISCRETE final class with a finite bound and an explicit unbounded marker.
+// Discrete lookup falls through to the final color for every greater value.
+function rasterQgisOpenUpper(previous){
+ const step=Math.max(1,Math.abs(previous)*1e-6);
+ const value=previous+step;
+ if(!Number.isFinite(value)||!(value>previous))
+  throw new Error('El límit anterior és massa gran per representar la classe QGIS oberta');
+ return value;
+}
 function rasterParseQgisColorMap(source){
  const lines=String(source||'').replace(/^\uFEFF/,'').split(/\r?\n/),stops=[];let mode=null;
  for(let i=0;i<lines.length;i++){
@@ -2073,13 +2083,17 @@ function rasterParseQgisColorMap(source){
   }
   const parts=line.split(',');
   if(parts.length<6)throw new Error('Línia '+(i+1)+': s’esperen valor, R, G, B, A i etiqueta');
-  const value=rasterParseFiniteNumber(parts[0]);
+  const openUpper=/^(?:\+?inf(?:inity)?|∞)$/i.test(parts[0].trim());
+  if(openUpper&&(mode!=='discrete'||!stops.length||
+    lines.slice(i+1).some(nextLine=>nextLine.trim()&&!nextLine.trim().startsWith('#'))))
+   throw new Error('Línia '+(i+1)+': inf només es permet a la darrera classe QGIS DISCRETE');
+  const value=openUpper?rasterQgisOpenUpper(stops[stops.length-1].value):rasterParseFiniteNumber(parts[0]);
   const rgba=parts.slice(1,5).map(v=>rasterParseFiniteNumber(v));
   if(value===null||rgba.some(n=>n===null||n<0||n>255||!Number.isInteger(n)))
     throw new Error('Línia '+(i+1)+': valor o components RGBA incorrectes');
   if(stops.length&&value<=stops[stops.length-1].value)
     throw new Error('Línia '+(i+1)+': els punts han d’estar ordenats sense duplicats');
-  stops.push({value,color:rgbHex(rgba[0],rgba[1],rgba[2]),alpha:rgba[3],label:parts.slice(5).join(',').trim(),visible:true});
+  stops.push({value,color:rgbHex(rgba[0],rgba[1],rgba[2]),alpha:rgba[3],label:parts.slice(5).join(',').trim(),visible:true,...(openUpper?{unbounded:true}:{})});
  }
  if(stops.length<2)throw new Error('Calen com a mínim dos punts de color al fitxer QGIS');
  if(stops.length>1024)throw new Error('La paleta supera 1024 punts; redueix-la abans d’importar');
@@ -2158,15 +2172,22 @@ function renderRasterQgisStops(){
     '<input type="checkbox" class="raster-break-visible" aria-label="Visible">';
   const num=row.querySelector('.raster-break-limit'),color=row.querySelector('.raster-break-color'),
         label=row.querySelector('.raster-break-label'),visible=row.querySelector('.raster-break-visible');
-  num.value=String(rec.value);color.value=rec.color;label.value=rec.label||'';visible.checked=rec.visible!==false;
-  num.onchange=()=>{
+  num.value=rec.unbounded?'∞':String(rec.value);color.value=rec.color;label.value=rec.label||'';visible.checked=rec.visible!==false;
+  if(rec.unbounded){num.readOnly=true;num.title='Límit superior obert (QGIS: inf)';}
+  else num.onchange=()=>{
    const value=rasterParseFiniteNumber(num.value),
      previous=i?rasterStyleQgisStops[i-1].value:-Infinity,
-     next=i===stops.length-1?Infinity:rasterStyleQgisStops[i+1].value;
+     next=i===stops.length-1||(i===stops.length-2&&stops[stops.length-1].unbounded)?Infinity:rasterStyleQgisStops[i+1].value;
    if(value===null||!(value>previous&&value<next)){
     toast('Valor invàlid: els punts han d’estar en ordre ascendent');num.value=String(rec.value);return;
    }
+   let openValue=null;
+   if(i===stops.length-2&&stops[stops.length-1].unbounded){
+    try{openValue=rasterQgisOpenUpper(value);}
+    catch(e){toast(e.message);num.value=String(rec.value);return;}
+   }
    rec.value=value;num.value=String(value);
+   if(openValue!==null)stops[stops.length-1].value=openValue;
    $('#rasterStyleMin').value=String(stops[0].value);
    $('#rasterStyleMax').value=String(stops[stops.length-1].value);
    updateRasterStylePreview();
@@ -2177,7 +2198,7 @@ function renderRasterQgisStops(){
   root.appendChild(row);
  });
  const help=$('#rasterStyleQgisStatus');if(help)help.textContent=
-  'Paleta QGIS · '+stops.length+' punts editables. Només «Classificar» recrearà els límits.';
+  'Paleta QGIS · '+stops.length+' punts (el límit ∞ és obert i no es pot editar). Només «Classificar» recrearà els límits.';
 }
 async function importRasterQgisPalette(file){
  if(!file)return;
