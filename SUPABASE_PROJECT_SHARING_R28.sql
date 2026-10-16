@@ -30,9 +30,15 @@ BEGIN
     EXECUTE 'SELECT owner_user_id FROM public.project WHERE id_project::text = $1 LIMIT 1'
       INTO v_owner USING p_project_id;
   END IF;
-  RETURN v_owner;
+  -- Do not disclose ownership UUIDs to callers who have no project access.
+  IF v_owner IS NULL THEN RETURN NULL; END IF;
+  IF v_owner = (SELECT auth.uid()) THEN RETURN v_owner; END IF;
+  IF EXISTS (SELECT 1 FROM public.project_members AS m
+             WHERE m.project_id = p_project_id AND m.user_id = (SELECT auth.uid()))
+  THEN RETURN v_owner; END IF;
+  RETURN NULL;
 END;
-$$;
+$;
 
 CREATE OR REPLACE FUNCTION public.geocauce_project_role(p_project_id text)
 RETURNS text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = ''
