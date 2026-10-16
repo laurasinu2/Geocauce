@@ -710,7 +710,7 @@ function refreshAccountUi(){
 }
 
 const CLOUD_CHANGE_QUEUE_PREFIX='geocauce-pending-sync-v1:';
-let cloudApplyingRemote=false,cloudDeltaRunning=false;
+let cloudApplyingRemote=false,cloudDeltaRunning=false,cloudLastAssetManifest=null;
 function cloudQueueKey(projectId){return CLOUD_CHANGE_QUEUE_PREFIX+projectId;}
 function cloudPendingChanges(projectId=state.projectId){
  try{const a=JSON.parse(localStorage.getItem(cloudQueueKey(projectId))||'[]');return Array.isArray(a)?a:[];}catch{return [];}
@@ -764,7 +764,7 @@ function cloudDeltaFields(payload){
 }
 async function cloudDeltaSaveBase(projectId,snapshot,updatedAt){
  if(!projectId)return;
- await dbPut('cloudSyncBase',{key:'baseline',projectId,updatedAt:updatedAt||null,state:cloudDeltaFields(snapshot)});
+ await dbPut('cloudSyncBase',{key:'baseline',projectId,updatedAt:updatedAt||null,state:{...cloudDeltaFields(snapshot),assetMetadata:snapshot?.assetMetadata||null}});
 }
 function cloudDeltaRootError(reason,manual){
  cloudLastError='Sincronización pendiente: '+reason;
@@ -802,7 +802,15 @@ async function cloudBidirectionalSync({manual=false}={}){
  cloudDeltaRunning=true;cloudLastError='';
  try{
   const cloudId=ensureCloudProjectId(project),schema=await cloudSchema(),key=schema==='legacy'?'id_project':'project_id';
-  const rows=await cloudFetch('/rest/v1/project_snapshots?'+key+'=eq.'+encodeURIComponent(cloudId)+'&select=updated_at,state&limit=1');
+  // Check only revision first. Avoid downloading the whole JSON snapshot on every poll.
+  const endpoint='/rest/v1/project_snapshots?'+key+'=eq.'+encodeURIComponent(cloudId);
+  const heads=await cloudFetch(endpoint+'&select=updated_at&limit=1');
+  const remoteHead=heads?.[0]||null;
+  const previousRemoteAt=Date.parse(remoteHead?.updated_at||'')||0;
+  if(remoteHead&&previousRemoteAt&&(project._cloudUpdatedAt||0)===previousRemoteAt&&!ack.length){
+   cloudLastError='';cloudLastSyncAt=Date.now();refreshAccountUi();return true;
+  }
+  const rows=remoteHead?await cloudFetch(endpoint+'&select=updated_at,state&limit=1'):[];
   const remote=rows?.[0]||null;
   const local=currentStatePayloadForCloud();
   if(!local||local.projectId!==projectId)throw new Error('El proyecto local no está preparado. No se ha cambiado ningún dato.');
@@ -825,6 +833,7 @@ async function cloudBidirectionalSync({manual=false}={}){
   const localAssetsChanged=ack.some(x=>['photos','rasters','vectorLayers'].includes(x.kind));
   if(!remote&&!localChange.length&&!localAssetsChanged)return true;
   if(remote&&!localChange.length&&!remoteChange.length&&!localAssetsChanged){
+   cloudApplyingRemote=true;try{await cloudDeltaReceivePhotos(remote.state?.assetMetadata);}finally{cloudApplyingRemote=false;}
    if(ack.length)cloudClearAcknowledgedChanges(projectId,ack);
    cloudLastSyncAt=Date.now();refreshAccountUi();return true;
   }
@@ -876,7 +885,7 @@ async function cloudBidirectionalSync({manual=false}={}){
   }
   const ok=await syncCurrentProjectToCloud({manual,expectedUpdatedAt:remote?.updated_at||null});
   if(ok){
-   await cloudDeltaSaveBase(projectId,currentStatePayloadForCloud(),new Date(project._cloudUpdatedAt||Date.now()).toISOString());
+   await cloudDeltaSaveBase(projectId,{...currentStatePayloadForCloud(),assetMetadata:cloudLastAssetManifest},new Date(project._cloudUpdatedAt||Date.now()).toISOString());
    cloudClearAcknowledgedChanges(projectId,ack);
    if(manual)toast('Sincronización bidireccional completada',4000);
    return true;
@@ -1012,6 +1021,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
     const previous=previousRows?.[0]||null;
     if((previous?.updated_at||null)!==expectedUpdatedAt)throw new Error('Otro dispositivo cambió la nube. Descarga sus cambios antes de subir.');
     const assets=await cloudUploadProjectAssets(uid,cloudId,{manual,remoteAssets:previous?.state?.assetMetadata});
+    cloudLastAssetManifest=assets.metadata;
     if(state.projectId!==uploadingProjectId)throw new Error('El proyecto cambió durante la subida');
     const current=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=updated_at&limit=1`);
     const actual=current?.[0]?.updated_at||null;
