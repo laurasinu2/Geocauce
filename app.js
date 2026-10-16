@@ -274,7 +274,10 @@ async function openProjectShare(id){
  const p=projectById(id);
  if(!p||!isCurrentProjectOwner(p)){toast('Solo el propietario puede compartir el proyecto');return;}
  if(!loadCloudSession()?.access_token||!navigator.onLine){toast('Inicia sesión y conéctate para compartir');return;}
- if(state.projectId!==id){toast('Abre primero el proyecto para poder compartirlo');return;}
+ if(state.projectId!==id){
+  await openProject(id,{mode:'edit'});
+  if(state.projectId!==id)return;
+ }
  if(!p._cloudSyncedAt&&!p._cloudPulledAt){const ok=await syncNow();if(!ok){toast('Sincroniza el proyecto antes de compartirlo');return;}}
  try{
   if(await cloudProjectRole(p)!=='owner')throw new Error('No tienes permisos para compartir este proyecto');
@@ -484,6 +487,15 @@ async function cloudRefreshProjectCatalog({quiet=true}={}){
   try{
     const schema=await cloudSchema();
     const rows=await cloudFetch(schema==='legacy'?'/rest/v1/project?deleted_at=is.null&select=*&order=updated_at.desc':'/rest/v1/projects?select=*&order=updated_at.desc');
+    // UI hint only; each open/write still validates with token-scoped RPC and RLS.
+    let sharedRoles=new Map();
+    try{
+      const uid=sessionUser()?.id;
+      if(uid){
+        const memberships=await cloudFetch('/rest/v1/project_members?user_id=eq.'+encodeURIComponent(uid)+'&select=project_id,role');
+        sharedRoles=new Map((memberships||[]).map(m=>[m.project_id,m.role]));
+      }
+    }catch(e){console.warn('No se pudo leer la lista de proyectos compartidos',e);}
     if(!Array.isArray(rows))throw new Error('Respuesta de proyectos no válida');
     for(const row of rows){
       const cloudId=schema==='legacy'?row.id_project:row.id,extra=schema==='legacy'?row:(row.metadata&&typeof row.metadata==='object'?row.metadata:{});
@@ -504,7 +516,7 @@ async function cloudRefreshProjectCatalog({quiet=true}={}){
       const localId=existing?.id||cloudId,hasLocal=!!localStorage.getItem(projectStateKey(localId)),remoteUpdatedAt=Date.parse(row.updated_at||0)||0;
       const meta={id:localId,cloudProjectId:cloudId,name:row.name||'Proyecto',zone:(schema==='legacy'?row.zona:row.zone)||'',torrent:row.torrent||'',author:(schema==='legacy'?row.autor:extra.author)||'',institution:extra.institution||'',startDate:(schema==='legacy'?row.start_date:extra.startDate)||'',crs:row.crs||'EPSG:25831',objective:extra.objective||'',methodology:extra.methodology||'',notes:extra.notes||'',dbName:existing?.dbName||`GeoCauceDB_${localId}`,ownerUserId:(schema==='legacy'?row.owner_user_id:row.owner_id),createdAt:Date.parse(row.created_at||0)||existing?.createdAt||0,updatedAt:remoteUpdatedAt,_cloudCatalogUpdatedAt:remoteUpdatedAt,_cloudOnly:!hasLocal};
       meta._roleUser=sessionUser()?.id||null;
-      meta._sharedRole=meta.ownerUserId===meta._roleUser?'owner':(existing?._roleUser===meta._roleUser?existing?._sharedRole:null)||'viewer';
+      meta._sharedRole=meta.ownerUserId===meta._roleUser?'owner':sharedRoles.get(cloudId)||(existing?._roleUser===meta._roleUser?existing?._sharedRole:null)||'viewer';
       if(!existing)projectCatalog.push(meta);
       else{
         const i=projectCatalog.indexOf(existing);
@@ -1544,6 +1556,7 @@ function renderProjectHome(){
 function hideMainScreens(){['splash','projectScreen','projectCreateScreen','settingsScreen','mapScreen'].forEach(id=>$('#'+id)?.classList.add('hidden'));}
 let projectCreateReturn='splash';
 function showProjectHome({skipHistory=false}={}){
+  document.body.classList.remove('geocauce-read-only');
   if(!skipHistory&&window.GeoCauceProjectAccess){
    const url=window.GeoCauceProjectAccess.projectsUrl(window.location);
    if(url!==window.location.pathname+window.location.search+window.location.hash)window.history.pushState({screen:'projects'},'',url);
