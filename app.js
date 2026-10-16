@@ -695,6 +695,40 @@ function refreshAccountUi(){
   if(sync){sync.classList.toggle('hidden',a.kind!=='account');sync.onclick=syncNow;}
   renderAccountManageBody();if(state.screen==='settings')renderSettings();
 }
+
+const CLOUD_CHANGE_QUEUE_PREFIX='geocauce-pending-sync-v1:';
+let cloudApplyingRemote=false,cloudDeltaRunning=false;
+function cloudQueueKey(projectId){return CLOUD_CHANGE_QUEUE_PREFIX+projectId;}
+function cloudPendingChanges(projectId=state.projectId){
+ try{const a=JSON.parse(localStorage.getItem(cloudQueueKey(projectId))||'[]');return Array.isArray(a)?a:[];}catch{return [];}
+}
+function cloudQueueChange(projectId,kind,path){
+ if(!projectId||cloudApplyingRemote)return;
+ try{
+  const entries=cloudPendingChanges(projectId),next=entries.filter(x=>!(x.kind===kind&&x.path===path));
+  next.push({id:cloudUuid(),kind,path,createdAt:Date.now()});
+  localStorage.setItem(cloudQueueKey(projectId),JSON.stringify(next.slice(-5000)));
+  scheduleCloudSync(1800);
+ }catch(e){cloudLastError='No se pudo guardar la cola de sincronización';console.error(cloudLastError,e);refreshAccountUi();}
+}
+function cloudQueueStateDiff(projectId,previousJson,next){
+ if(cloudApplyingRemote||!window.GeoCauceDeltaSync)return;
+ try{
+  const before=previousJson?JSON.parse(previousJson):{};
+  for(const op of window.GeoCauceDeltaSync.diff(before,next))cloudQueueChange(projectId,'data',op.path);
+ }catch(e){console.warn('Cloud pending state queue',e);cloudQueueChange(projectId,'data','/campaigns');}
+}
+function cloudQueueAssetChange(store,id,operation){
+ if(!state.projectId||id==null)return;
+ cloudQueueChange(state.projectId,store,operation+':'+id);
+}
+function cloudClearAcknowledgedChanges(projectId,acknowledged){
+ if(!projectId||!acknowledged?.length)return;
+ const confirmed=new Set(acknowledged.map(x=>x.id));
+ try{localStorage.setItem(cloudQueueKey(projectId),JSON.stringify(cloudPendingChanges(projectId).filter(x=>!confirmed.has(x.id))));}
+ catch(e){console.warn('No se ha podido limpiar la cola, se comprobará en el próximo ciclo',e);}
+}
+
 function lastKnownCloudSyncAt(){
   const p=state.project||projectById(localStorage.getItem(ACTIVE_PROJECT_KEY));
   return cloudLastSyncAt||p?._cloudSyncedAt||0;
@@ -864,7 +898,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
 }
 function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);/* Subidas solo manuales: evita pisar cambios de otro dispositivo. */}
 function persistStateLocalOnly(){
-  if(!state.projectId)return;syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));touchProject();nativeSyncProject(payload);return payload;
+  if(!state.projectId)return;const previousCloudPayload=localStorage.getItem(projectStateKey(state.projectId));syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));cloudQueueStateDiff(state.projectId,previousCloudPayload,payload);touchProject();nativeSyncProject(payload);return payload;
 }
 window.addEventListener('online',()=>{refreshAccountUi();cloudRefreshProjectCatalog().catch(()=>{});scheduleCloudSync(800);});window.addEventListener('offline',refreshAccountUi);
 
@@ -4017,12 +4051,12 @@ async function downloadBlob(blob,name){
 async function clearProject(){if(!state.projectId||!confirm(`¿Vaciar todos los mapas, fotos, campañas y dibujos de “${state.project?.name||'este proyecto'}”? La información general del proyecto se conservará.`))return;localStorage.removeItem(projectStateKey(state.projectId));await dbClear('rasters');await dbClear('photos');await dbClear('rasterStyleTiles');await dbClear('vectorLayers');resetStateForProject(state.project);hideFeatureCard();updateCampaignUi();renderLayers();renderSectionList();drawAll();persistState();toast('Datos del proyecto vaciados');}
 
 let dbp=null,dbpName=null;
-function db(){const name=state.project?.dbName||'GeoCauceDB_scratch';if(dbp&&dbpName===name)return dbp;if(dbp){dbp.then(d=>{try{d.close();}catch{}}).catch(()=>{});dbp=null;}dbpName=name;dbp=new Promise((resolve,reject)=>{const req=indexedDB.open(name,4);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains('rasters'))d.createObjectStore('rasters',{keyPath:'id'});if(!d.objectStoreNames.contains('photos'))d.createObjectStore('photos',{keyPath:'id'});if(!d.objectStoreNames.contains('rasterStyleTiles')){const st=d.createObjectStore('rasterStyleTiles',{keyPath:'key'});st.createIndex('rasterId','rasterId',{unique:false});}if(!d.objectStoreNames.contains('vectorLayers'))d.createObjectStore('vectorLayers',{keyPath:'id'});if(!d.objectStoreNames.contains('cloudStaging'))d.createObjectStore('cloudStaging',{keyPath:'key'});if(!d.objectStoreNames.contains('cloudRecovery'))d.createObjectStore('cloudRecovery',{keyPath:'key'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});return dbp;}
-async function dbPut(store,obj){const d=await db();return new Promise((res,rej)=>{const tx=d.transaction(store,'readwrite');tx.objectStore(store).put(obj);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
+function db(){const name=state.project?.dbName||'GeoCauceDB_scratch';if(dbp&&dbpName===name)return dbp;if(dbp){dbp.then(d=>{try{d.close();}catch{}}).catch(()=>{});dbp=null;}dbpName=name;dbp=new Promise((resolve,reject)=>{const req=indexedDB.open(name,5);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains('rasters'))d.createObjectStore('rasters',{keyPath:'id'});if(!d.objectStoreNames.contains('photos'))d.createObjectStore('photos',{keyPath:'id'});if(!d.objectStoreNames.contains('rasterStyleTiles')){const st=d.createObjectStore('rasterStyleTiles',{keyPath:'key'});st.createIndex('rasterId','rasterId',{unique:false});}if(!d.objectStoreNames.contains('vectorLayers'))d.createObjectStore('vectorLayers',{keyPath:'id'});if(!d.objectStoreNames.contains('cloudStaging'))d.createObjectStore('cloudStaging',{keyPath:'key'});if(!d.objectStoreNames.contains('cloudRecovery'))d.createObjectStore('cloudRecovery',{keyPath:'key'});if(!d.objectStoreNames.contains('cloudSyncBase'))d.createObjectStore('cloudSyncBase',{keyPath:'key'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});return dbp;}
+async function dbPut(store,obj){const d=await db();return new Promise((res,rej)=>{const tx=d.transaction(store,'readwrite');tx.objectStore(store).put(obj);tx.oncomplete=()=>{if(['photos','rasters','vectorLayers'].includes(store)&&!cloudApplyingRemote)cloudQueueAssetChange(store,obj?.id,'put');res();};tx.onerror=()=>rej(tx.error);});}
 async function dbGet(store,key){const d=await db();return new Promise((res,rej)=>{const r=d.transaction(store).objectStore(store).get(key);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
 async function dbAll(store){const d=await db();return new Promise((res,rej)=>{const r=d.transaction(store).objectStore(store).getAll();r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
 async function dbClear(store){const d=await db();return new Promise((res,rej)=>{const tx=d.transaction(store,'readwrite');tx.objectStore(store).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
-async function dbDelete(store,key){const d=await db();return new Promise((res,rej)=>{const tx=d.transaction(store,'readwrite');tx.objectStore(store).delete(key);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
+async function dbDelete(store,key){const d=await db();return new Promise((res,rej)=>{const tx=d.transaction(store,'readwrite');tx.objectStore(store).delete(key);tx.oncomplete=()=>{if(['photos','rasters','vectorLayers'].includes(store)&&!cloudApplyingRemote)cloudQueueAssetChange(store,key,'delete');res();};tx.onerror=()=>rej(tx.error);});}
 async function dbDeleteRasterStyleTiles(rasterId){const d=await db();if(!d.objectStoreNames.contains('rasterStyleTiles'))return;return new Promise((res,rej)=>{const tx=d.transaction('rasterStyleTiles','readwrite'),st=tx.objectStore('rasterStyleTiles'),idx=st.index('rasterId'),req=idx.openCursor(IDBKeyRange.only(rasterId));req.onsuccess=()=>{const cur=req.result;if(cur){cur.delete();cur.continue();}};tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
 
 
