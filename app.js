@@ -459,10 +459,10 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
   }
   return {metadata:result,steps:done,total:total+2,reused,uploaded};
 }
+function cloudStableJson(v){if(Array.isArray(v))return '['+v.map(x=>cloudStableJson(x)).join(',')+']';if(v&&typeof v==='object')return '{'+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+cloudStableJson(v[k])).join(',')+'}';return JSON.stringify(v)??'null';}
 function cloudAssetParts(path,parts){
  return Array.isArray(parts)&&parts.length?parts:[path].filter(Boolean);
 }
-function cloudStableJson(v){if(Array.isArray(v))return '['+v.map(x=>cloudStableJson(x)).join(',')+']';if(v&&typeof v==='object')return '{'+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+cloudStableJson(v[k])).join(',')+'}';return JSON.stringify(v)??'null';}
 function cloudRemoteAssetIndex(m){
  const x=new Map();
  for(const p of m?.photos||[])x.set('photo:'+p.id,{path:p.cloudBlobPath,parts:p.cloudBlobParts,hash:p.cloudBlobHash,size:p.cloudBlobSize});
