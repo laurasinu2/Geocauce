@@ -17,13 +17,18 @@
  const plain=x=>x!==MISSING&&x!==null&&typeof x==='object'&&!Array.isArray(x);
  const pathName=xs=>xs.map(x=>x.startsWith('@')?'[id='+x.slice(1)+']':(x.startsWith('/')?x:('/'+x))).join('');
  const fields=['campaigns','notebook','mapInk','mapPins','historicalPhotoPoints','materialStyles','referenceLayers','demGroups','activeDemGroupId'];
- function merge(base,local,remote){
+ function merge(base,local,remote,options={}){
+  const resolutions=options.resolutions||{};
   const conflicts=[],changed=[];
   const resolve=(b,l,r,p)=>{
    if(eq(l,r))return clone(l);
    if(eq(b,l))return clone(r);
    if(eq(b,r))return clone(l);
-   if(l===MISSING||r===MISSING){conflicts.push({path:pathName(p),local:l===MISSING?null:clone(l),remote:r===MISSING?null:clone(r),type:'delete-versus-edit'});return clone(l);}
+   if(l===MISSING||r===MISSING){
+    if(resolutions[pathName(p)]==='local')return clone(l);
+    if(resolutions[pathName(p)]==='remote')return clone(r);
+    conflicts.push({path:pathName(p),local:l===MISSING?null:clone(l),remote:r===MISSING?null:clone(r),type:'delete-versus-edit'});return clone(l);
+   }
    if(plain(l)&&plain(r)&&(plain(b)||b===MISSING)){
     const out={},keys=new Set([...Object.keys(b===MISSING?{}:b),...Object.keys(l),...Object.keys(r)]);
     for(const k of keys){const value=resolve(Object.prototype.hasOwnProperty.call(b===MISSING?{}:b,k)?b[k]:MISSING,Object.prototype.hasOwnProperty.call(l,k)?l[k]:MISSING,Object.prototype.hasOwnProperty.call(r,k)?r[k]:MISSING,[...p,k]);if(value!==MISSING)out[k]=value;}
@@ -41,6 +46,8 @@
       return [...new Set([...baseArray,...r,...l])];
     }
    }
+   if(resolutions[pathName(p)]==='local')return clone(l);
+   if(resolutions[pathName(p)]==='remote')return clone(r);
    conflicts.push({path:pathName(p),local:clone(l),remote:clone(r),type:'concurrent-edit'});
    return clone(l);
   };
