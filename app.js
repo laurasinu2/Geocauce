@@ -503,6 +503,8 @@ async function cloudRefreshProjectCatalog({quiet=true}={}){
       if(!existing)existing=matches[0]||null;
       const localId=existing?.id||cloudId,hasLocal=!!localStorage.getItem(projectStateKey(localId)),remoteUpdatedAt=Date.parse(row.updated_at||0)||0;
       const meta={id:localId,cloudProjectId:cloudId,name:row.name||'Proyecto',zone:(schema==='legacy'?row.zona:row.zone)||'',torrent:row.torrent||'',author:(schema==='legacy'?row.autor:extra.author)||'',institution:extra.institution||'',startDate:(schema==='legacy'?row.start_date:extra.startDate)||'',crs:row.crs||'EPSG:25831',objective:extra.objective||'',methodology:extra.methodology||'',notes:extra.notes||'',dbName:existing?.dbName||`GeoCauceDB_${localId}`,ownerUserId:(schema==='legacy'?row.owner_user_id:row.owner_id),createdAt:Date.parse(row.created_at||0)||existing?.createdAt||0,updatedAt:remoteUpdatedAt,_cloudCatalogUpdatedAt:remoteUpdatedAt,_cloudOnly:!hasLocal};
+      meta._roleUser=sessionUser()?.id||null;
+      meta._sharedRole=meta.ownerUserId===meta._roleUser?'owner':(existing?._roleUser===meta._roleUser?existing?._sharedRole:null)||'viewer';
       if(!existing)projectCatalog.push(meta);
       else{
         const i=projectCatalog.indexOf(existing);
@@ -720,7 +722,18 @@ function openAuthModal(context='entry',mode='signin'){
   authUiContext=context;setAuthMode(mode);$('#authModal').classList.remove('hidden');$('#authModal').setAttribute('aria-hidden','false');setTimeout(()=>$('#authEmail')?.focus(),80);
 }
 function closeAuthModal(){$('#authModal').classList.add('hidden');$('#authModal').setAttribute('aria-hidden','true');setAuthMessage('');}
-function enterAppCore(){if(projectCatalog.length)showProjectHome();else showProjectCreate(null,'splash');refreshAccountUi();}
+function enterAppCore(){
+ const route=window.GeoCauceProjectAccess?.routeFromLocation(window.location);
+ if(route){
+  showProjectHome({skipHistory:true});
+  const p=projectCatalog.find(p=>p.id===route.id||p.cloudProjectId===route.id);
+  if(p){openProject(p.id,{mode:route.mode,fromRoute:true}).catch(e=>toast(e.message));return;}
+  toast('No se encontró el proyecto o tu cuenta no tiene acceso',5500);
+  return;
+ }
+ if(projectCatalog.length)showProjectHome();else showProjectCreate(null,'splash');
+ refreshAccountUi();
+}
 async function enterApp(){
   const session=loadCloudSession(),choice=authEntryChoice();
   if(session?.access_token){setAuthEntryChoice('account');try{if(sessionExpired(session)&&navigator.onLine)await refreshCloudSession();if(navigator.onLine)await cloudRefreshProjectCatalog();}catch(e){console.warn('Cloud entry',e);}enterAppCore();refreshAccountUi();scheduleCloudSync(500);return;}
@@ -1515,8 +1528,14 @@ function renderProjectHome(){
     card.innerHTML=`<div class="project-card-head">${iconImg('icons/proyecto.png')}<div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(where)}${cloudTag}</p></div></div>
       <div class="project-card-meta"><span><b>${st.campaigns}</b> campañas</span><span><b>${st.elements}</b> elementos</span><span>Autor: <b>${escapeHtml(p.author||'—')}</b></span><span>CRS: <b>${escapeHtml(p.crs||'EPSG:25831')}</b></span></div>
       <div class="project-card-desc">${escapeHtml(desc)}</div>
-      <div class="project-card-actions"><button class="open-project icon-text">${iconImg('icons/proyecto.png')}<span>Abrir</span></button><button class="edit-project icon-text">${iconImg('icons/editar_propiedad.png')}<span>Información</span></button><button class="delete-project icon-only" title="Eliminar proyecto">${iconImg('icons/eliminar.svg')}</button></div>`;
-    card.querySelector('.open-project').onclick=()=>openProject(p.id);
+      <div class="project-card-actions"><button class="open-project icon-text">${iconImg('icons/proyecto.png')}<span>Abrir</span></button><button class="share-project icon-text" title="Compartir proyecto">Compartir</button><button class="edit-project icon-text">${iconImg('icons/editar_propiedad.png')}<span>Información</span></button><button class="delete-project icon-only" title="Eliminar proyecto">${iconImg('icons/eliminar.svg')}</button></div>`;
+    const editable=canEditProjectInUi(p);
+    card.querySelector('.open-project span').textContent=editable?'Editar':'Visualizar';
+    if(!isCurrentProjectOwner(p))card.querySelector('.share-project').hidden=true;
+    card.querySelector('.open-project').onclick=()=>openProject(p.id,{mode:editable?'edit':'view'});
+    card.querySelector('.share-project').onclick=()=>openProjectShare(p.id);
+    card.querySelector('.edit-project').hidden=!editable;
+    card.querySelector('.delete-project').hidden=!isCurrentProjectOwner(p);
     card.querySelector('.edit-project').onclick=()=>showProjectCreate(p.id,'projects');
     card.querySelector('.delete-project').onclick=()=>deleteProject(p.id);
     root.appendChild(card);
@@ -1524,13 +1543,18 @@ function renderProjectHome(){
 }
 function hideMainScreens(){['splash','projectScreen','projectCreateScreen','settingsScreen','mapScreen'].forEach(id=>$('#'+id)?.classList.add('hidden'));}
 let projectCreateReturn='splash';
-function showProjectHome(){
+function showProjectHome({skipHistory=false}={}){
+  if(!skipHistory&&window.GeoCauceProjectAccess){
+   const url=window.GeoCauceProjectAccess.projectsUrl(window.location);
+   if(url!==window.location.pathname+window.location.search+window.location.hash)window.history.pushState({screen:'projects'},'',url);
+  }
   if(state.view3d?.active)exit3DMode({quiet:true});
   hideMainScreens();$('#projectScreen').classList.remove('hidden');state.screen='projects';renderProjectHome();refreshAccountUi();
 }
 function showProjectCreate(id=null,returnTo=null){
   if(state.view3d?.active)exit3DMode({quiet:true});
   editingProjectId=id;const p=id?projectById(id):null;
+  if(p&&!canEditProjectInUi(p)){toast('No tienes permisos para modificar este proyecto');return;}
   projectCreateReturn=returnTo||(state.screen==='map'?'map':projectCatalog.length?'projects':'splash');
   $('#projectCreateHeader').textContent=p?'Información del proyecto':'Crear nuevo proyecto';
   $('#projectCreateSub').textContent=p?'Edita los metadatos generales del estudio':'Datos generales del estudio';
@@ -1548,7 +1572,7 @@ function leaveProjectCreate(){
 function readProjectForm(){return{name:$('#projectName').value.trim(),zone:$('#projectZone').value.trim(),torrent:$('#projectTorrent').value.trim(),author:$('#projectAuthor').value.trim(),institution:$('#projectInstitution').value.trim(),startDate:$('#projectStartDate').value||isoToday(),crs:$('#projectCrs').value||'EPSG:25831',objective:$('#projectObjective').value.trim(),methodology:$('#projectMethodology').value.trim(),notes:$('#projectNotes').value.trim()};}
 async function saveProjectForm(){
   const v=readProjectForm();if(!v.name){toast('Escribe un nombre para el proyecto');return;}
-  if(editingProjectId){const p=projectById(editingProjectId);if(!p)return;Object.assign(p,v,{updatedAt:Date.now()});saveProjectCatalog();if(state.projectId===p.id){state.project=p;updateProjectUi();}editingProjectId=null;if(projectCreateReturn==='map'){hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';updateProjectUi();resize();}else showProjectHome();toast('Información del proyecto actualizada');return;}
+  if(editingProjectId){const p=projectById(editingProjectId);if(!p||!canEditProjectInUi(p))return;Object.assign(p,v,{updatedAt:Date.now()});saveProjectCatalog();if(state.projectId===p.id){state.project=p;updateProjectUi();}editingProjectId=null;if(projectCreateReturn==='map'){hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';updateProjectUi();resize();}else showProjectHome();toast('Información del proyecto actualizada');return;}
   if(state.projectId)persistState();
   const id='P'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);const meta={id,...v,createdAt:Date.now(),updatedAt:Date.now(),dbName:`GeoCauceDB_${id}`};projectCatalog.push(meta);saveProjectCatalog();localStorage.setItem(ACTIVE_PROJECT_KEY,id);editingProjectId=null;
   state.projectId=id;state.project=meta;resetStateForProject(meta);persistState();await openProject(id,{skipSave:true});toast(`Proyecto “${meta.name}” creado`);
@@ -1565,6 +1589,12 @@ async function openProject(id,opt={}){
   if((cloudRestoreRunning||cloudSyncRunning||cloudDeltaRunning)&&state.projectId&&id!==state.projectId){toast('Espera a que termine la sincronización antes de cambiar de proyecto');return;}
   if(state.view3d?.active)exit3DMode({quiet:true});
   const p=projectById(id);if(!p)return;
+  let role;
+  try{role=await cloudProjectRole(p);}catch(e){toast('Acceso denegado: '+(e.message||String(e)),6000);return;}
+  if(!window.GeoCauceProjectAccess.canView(role)){toast('No tienes acceso a este proyecto',5500);return;}
+  const desiredMode=opt.mode||(role==='viewer'?'view':'edit');
+  p._accessMode=desiredMode==='edit'&&window.GeoCauceProjectAccess.canEdit(role)?'edit':'view';
+  if(desiredMode==='edit'&&p._accessMode==='view')toast('Este proyecto solo permite visualización');
   const needsCloudRestore=!localStorage.getItem(projectStateKey(id))||p._cloudOnly===true;
   if(needsCloudRestore&&(!loadCloudSession()?.access_token||!navigator.onLine)){
     toast('Proyecto en la nube: inicia sesión y conecta Internet para descargarlo.',6000);return;
@@ -1583,15 +1613,20 @@ async function openProject(id,opt={}){
   restoreState(id);state.rasters=[];
   hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';
   updateProjectUi();scheduleCloudSync(1200);renderMaterials();updateMaterialButton();updateCampaignUi();$('#eraserSize').value=state.eraseSize;$$('[data-erase-mode]').forEach(b=>b.classList.toggle('active',b.dataset.eraseMode===state.eraseMode));setTool(state.tool,{quiet:true});renderSectionList();updateCompass();updateGnssUi();setTimeout(resize,20);await loadRasters();await hydrateReferenceLayersAfterOpen();touchProject();
+  if(window.GeoCauceProjectAccess){
+   const path=window.GeoCauceProjectAccess.routeUrl(p.cloudProjectId||p.id,p._accessMode);
+   window.history[opt.fromRoute?'replaceState':'pushState']({projectId:id},'',path);
+  }
   }finally{projectOpenInProgress=false;}
 }
 function updateProjectUi(){
   refreshAccountUi();
+  document.body.classList.toggle('geocauce-read-only',!!state.project&&!canEditCurrentProject());
   const p=state.project;const label=$('#projectBtnLabel');if(label)label.textContent=p?.name||'Proyecto';
   const root=$('#projectSummary');if(!root||!p)return;const st=projectStats(p.id);root.innerHTML=`<h3>${escapeHtml(p.name)}</h3><dl><dt>Zona</dt><dd>${escapeHtml([p.torrent,p.zone].filter(Boolean).join(' · ')||'—')}</dd><dt>Autor</dt><dd>${escapeHtml(p.author||'—')}</dd><dt>Institución</dt><dd>${escapeHtml(p.institution||'—')}</dd><dt>Inicio</dt><dd>${escapeHtml(displayDate(p.startDate)||'—')}</dd><dt>CRS</dt><dd>${escapeHtml(p.crs||'EPSG:25831')}</dd><dt>Campañas</dt><dd>${st.campaigns}</dd></dl>${p.objective?`<div class="project-summary-desc"><b>Objetivo</b><br>${escapeHtml(p.objective)}</div>`:''}`;
 }
 async function deleteProject(id){
-  const p=projectById(id);if(!p||!confirm(`¿Eliminar el proyecto “${p.name}”? Se borrarán sus mapas, fotos, campañas y cartografía local.`))return;
+  const p=projectById(id);if(!p||!isCurrentProjectOwner(p)||!confirm(`¿Eliminar el proyecto “${p.name}”? Se borrarán sus mapas, fotos, campañas y cartografía local.`))return;
   if(state.projectId===id&&dbp){try{const d=await dbp;d.close();}catch{}dbp=null;dbpName=null;}
   localStorage.removeItem(projectStateKey(id));projectCatalog=projectCatalog.filter(x=>x.id!==id);saveProjectCatalog();if(localStorage.getItem(ACTIVE_PROJECT_KEY)===id)localStorage.removeItem(ACTIVE_PROJECT_KEY);
   if(ANDROID_NATIVE)nativeCall('deleteProject',id);
@@ -1607,8 +1642,9 @@ function undoLast(){if(!requireEditable('deshacer cambios'))return;if(!state.his
 function currentCampaign(){return (state.campaigns||[]).find(c=>c.id===state.campaign)||null;}
 function campaignById(id){return (state.campaigns||[]).find(c=>c.id===id)||null;}
 function campaignLabel(id){const c=campaignById(id);return c?c.name:id;}
-function isEditableCampaign(id=state.campaign){return !!id&&id===state.editableCampaign;}
+function isEditableCampaign(id=state.campaign){return !!id&&id===state.editableCampaign&&canEditCurrentProject();}
 function requireEditable(action='editar'){
+  if(!canEditCurrentProject()){toast('Proyecto de solo lectura: no tienes permiso para '+action);return false;}
   if(isEditableCampaign())return true;
   const c=currentCampaign();toast(`${c?.name||'Este día'} está bloqueado. Crea un Nuevo día para ${action}.`,3600);
   return false;
@@ -5680,6 +5716,14 @@ async function exportSelectedContents(){
 
 
 function initUi(){
+  window.addEventListener('popstate',()=>{
+   const route=window.GeoCauceProjectAccess?.routeFromLocation(window.location);
+   if(route){
+    const p=projectCatalog.find(p=>p.id===route.id||p.cloudProjectId===route.id);
+    if(p)openProject(p.id,{mode:route.mode,fromRoute:true});
+    else showProjectHome({skipHistory:true});
+   }else showProjectHome({skipHistory:true});
+  });
   $('#enterBtn').onclick=$('#openCampaignBtn').onclick=enterApp;
   $('#authCloseBtn').onclick=closeAuthModal;$('#authOfflineBtn').onclick=chooseOfflineEntry;$('#authSwitchMode').onclick=()=>setAuthMode(authUiMode==='signin'?'signup':'signin');$('#authTogglePassword').onclick=()=>{const i=$('#authPassword');i.type=i.type==='password'?'text':'password';};$('#authForm').onsubmit=e=>{e.preventDefault();submitAuth();};
   $('#projectAccountBtn').onclick=openAccountManage;if($('#projectCreateAccountBtn'))$('#projectCreateAccountBtn').onclick=openAccountManage;$('#projectSettingsBtn').onclick=()=>showSettings('projects');$('#settingsFromMapBtn').onclick=()=>{closeFloatingPanels();showSettings('map');};$('#accountManageClose').onclick=closeAccountManage;
