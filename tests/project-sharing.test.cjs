@@ -51,17 +51,28 @@ test('project invitations use protected server RPCs and never accept role from a
  assert.match(share,/textContent=text/);
  assert.doesNotMatch(share,/\.innerHTML\s*=/);
 });
-test('migration protects projects, snapshots, assets and revocations with RLS',()=>{
- assert.match(sql,/ALTER TABLE public\.project_members ENABLE ROW LEVEL SECURITY/);
+test('migration reuses the verified legacy membership schema with reversible soft deletion',()=>{
+ assert.match(sql,/public\.project_persona/);
+ assert.match(sql,/public\.personas/);
+ assert.match(sql,/public\.rol_projecte/);
+ assert.match(sql,/public\.geocauce_can_view_project/);
+ assert.match(sql,/public\.geocauce_can_edit_project/);
+ assert.match(sql,/public\.geocauce_is_project_owner/);
+ assert.match(sql,/geocauce_my_project_roles/);
+ assert.match(app,/rpc\/geocauce_my_project_roles/);
  assert.match(sql,/geocauce_project_role/);
- assert.match(sql,/geocauce_project_write_gate/);
- assert.match(sql,/geocauce_snapshot_write_gate/);
+ assert.match(sql,/geocauce_snapshot_owner_delete_gate/);
+ assert.match(sql,/geocauce_assets_read_gate/);
  assert.match(sql,/geocauce_assets_insert_gate/);
  assert.match(sql,/geocauce_assets_update_gate/);
  assert.match(sql,/geocauce_assets_delete_gate/);
  assert.match(sql,/SECURITY DEFINER SET search_path = ''/);
  assert.match(sql,/p_role NOT IN \('viewer','editor'\)/);
+ assert.match(sql,/deleted_at=now\(\)/);
  assert.match(sql,/auth\.uid\(\)/);
+ assert.doesNotMatch(sql,/CREATE TABLE IF NOT EXISTS public\.project_members/);
+ assert.doesNotMatch(sql,/DROP TABLE/);
+ assert.doesNotMatch(sql,/DELETE FROM public\.project_persona/);
  assert.doesNotMatch(sql,/service_role/);
 });
 test('PWA caches the access and sharing scripts before app.js',()=>{
