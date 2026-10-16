@@ -298,3 +298,6 @@ GRANT EXECUTE ON FUNCTION public.geocauce_list_project_members(text) TO authenti
 GRANT EXECUTE ON FUNCTION public.geocauce_remove_project_member(text,uuid) TO authenticated;
 
 COMMIT;
+
+-- Request PostgREST to discover the new RPC signatures immediately.
+NOTIFY pgrst, 'reload schema';
