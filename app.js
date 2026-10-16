@@ -715,7 +715,14 @@ function cloudQueueStateDiff(projectId,previousJson,next){
  if(cloudApplyingRemote||!window.GeoCauceDeltaSync)return;
  try{
   const before=previousJson?JSON.parse(previousJson):{};
-  for(const op of window.GeoCauceDeltaSync.diff(before,next))cloudQueueChange(projectId,'data',op.path);
+  const changes=window.GeoCauceDeltaSync.diff(before,next);
+  if(!changes.length)return;
+  const entries=cloudPendingChanges(projectId);
+  const changedPaths=new Set(changes.map(op=>op.path));
+  const pending=entries.filter(x=>!(x.kind==='data'&&changedPaths.has(x.path)));
+  for(const op of changes)pending.push({id:cloudUuid(),kind:'data',path:op.path,createdAt:Date.now()});
+  localStorage.setItem(cloudQueueKey(projectId),JSON.stringify(pending.slice(-5000)));
+  scheduleCloudSync(1800);
  }catch(e){console.warn('Cloud pending state queue',e);cloudQueueChange(projectId,'data','/campaigns');}
 }
 function cloudQueueAssetChange(store,id,operation){
