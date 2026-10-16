@@ -16,7 +16,7 @@
  const keyed=x=>Array.isArray(x)&&x.every(v=>v&&typeof v==='object'&&!Array.isArray(v)&&typeof v.id==='string'&&v.id.length>0)&&new Set(x.map(v=>v.id)).size===x.length;
  const plain=x=>x!==MISSING&&x!==null&&typeof x==='object'&&!Array.isArray(x);
  const pathName=xs=>xs.map(x=>x.startsWith('@')?'[id='+x.slice(1)+']':(x.startsWith('/')?x:('/'+x))).join('');
- const fields=['campaigns','notebook','mapInk','mapPins','historicalPhotoPoints','materialStyles','referenceLayers','demGroups','activeDemGroupId','sectionPalette','appSettings'];
+ const fields=['campaigns','notebook','mapInk','mapPins','historicalPhotoPoints','materialStyles','referenceLayers','demGroups','activeDemGroupId'];
  function merge(base,local,remote){
   const conflicts=[],changed=[];
   const resolve=(b,l,r,p)=>{
