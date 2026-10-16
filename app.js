@@ -5002,7 +5002,8 @@ function drawGeneralMapBasinBoundaries(g,bounds,tx,ty,layers){
 function drawGeneralMapCourseLabels(g,courses,colors,tx,ty,cw,ch){
  const used=[];g.save();g.textBaseline='middle';
  for(const [index,course] of courses.entries()){
-  const point=courseLabelPoint(course);if(!point)continue;
+  const f=featurePolylines(course).slice().sort((a,b)=>polylineLength(b)-polylineLength(a))[0];
+  const point=f?.length?pointAtAlong(f,polylineLength(f)/2):null;if(!point)continue;
   const label=[course.abbr,course.name].filter(Boolean).join(' · ')||String(course.id);
   const color=colors.get(course.id)||'#22577a';
   g.font='700 20px system-ui,sans-serif';
@@ -5040,11 +5041,11 @@ async function generalMapDataUrl(){
  // basin boundary even when the layer is switched off in the working view.
  drawReferenceLayersExport(g,tx,ty,bounds);
  drawGeneralMapBasinBoundaries(g,bounds,tx,ty,basins);
- const courses=hydroCourses().filter(course=>courseFragments(course).some(points=>points.length>1&&boundsIntersect(pointsBounds([points]),bounds)));
+ const courses=hydroCourses().filter(course=>featurePolylines(course).some(points=>points.length>1&&boundsIntersect(pointsBounds([points]),bounds)));
  const colors=generalMapCourseColors(courses);
  g.save();g.lineCap='round';g.lineJoin='round';g.setLineDash([]);
  for(const course of courses){
-  const color=colors.get(course.id);for(const points of courseFragments(course)){
+  const color=colors.get(course.id);for(const points of featurePolylines(course)){
    if(points.length<2)continue;g.beginPath();
    points.forEach((p,i)=>i?g.lineTo(tx(p.x),ty(p.y)):g.moveTo(tx(p.x),ty(p.y)));
    g.strokeStyle='rgba(255,255,255,.95)';g.lineWidth=9;g.stroke();
