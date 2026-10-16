@@ -821,6 +821,45 @@ async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[]){
  }
  return changed;
 }
+function cloudResolveFieldConflicts(conflicts){
+ return new Promise(resolve=>{
+  const modal=$('#cloudDeltaConflictModal'),list=$('#cloudDeltaConflictList'),
+   ok=$('#cloudDeltaConflictApply'),cancel=$('#cloudDeltaConflictCancel');
+  if(!modal||!list||!ok||!cancel){resolve(null);return;}
+  list.replaceChildren();
+  const rows=[];
+  for(const item of conflicts){
+   const wrapper=document.createElement('div');
+   wrapper.style.cssText='border:1px solid #bdc9c4;border-radius:10px;padding:12px;background:#fff';
+   const title=document.createElement('strong');title.textContent=item.path;wrapper.appendChild(title);
+   const view=(label,value)=>{
+    const box=document.createElement('div');box.style.cssText='margin:8px 0;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:100px;overflow:auto';
+    const header=document.createElement('b');header.textContent=label+': ';box.appendChild(header);
+    const details=document.createElement('span');const full=JSON.stringify(value);
+    details.textContent=(full||'Sin valor').slice(0,800)+(full?.length>800?'…':'');box.appendChild(details);wrapper.appendChild(box);
+   };
+   view('Móvil/tablet actual',item.local);view('Versión de la nube',item.remote);
+   const choice=document.createElement('select');
+   choice.setAttribute('aria-label','Resolución de '+item.path);
+   for(const [value,label] of [['','Elegir versión…'],['local','Conservar este dispositivo'],['remote','Conservar la nube']]){
+    const option=document.createElement('option');option.value=value;option.textContent=label;choice.appendChild(option);
+   }
+   choice.style.cssText='width:100%;padding:9px;min-height:42px';
+   wrapper.appendChild(choice);list.appendChild(wrapper);rows.push([item.path,choice]);
+  }
+  const finish=data=>{
+   modal.classList.add('hidden');ok.onclick=null;cancel.onclick=null;
+   resolve(data);
+  };
+  cancel.onclick=()=>finish(null);
+  ok.onclick=()=>{
+   if(rows.some(([,choice])=>!choice.value)){toast('Elige qué versión conservar en cada conflicto');return;}
+   finish(Object.fromEntries(rows.map(([path,choice])=>[path,choice.value])));
+  };
+  modal.classList.remove('hidden');
+ });
+}
+
 async function cloudBidirectionalSync({manual=false}={}){
  if(cloudDeltaRunning||cloudSyncRunning||cloudRestoreRunning||!state.projectId||!state.project)return false;
  if(!window.GeoCauceDeltaSync){if(manual)toast('Actualiza GeoCauce para activar la sincronización incremental');return false;}
@@ -871,11 +910,17 @@ async function cloudBidirectionalSync({manual=false}={}){
   }
   let merged=local;
   if(remote){
-   const result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state);
+   let result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state);
    if(result.conflicts.length){
-    const paths=result.conflicts.slice(0,4).map(c=>c.path).join(', ');
-    cloudDeltaRootError(result.conflicts.length+' conflictos en '+paths+'. No se ha sustituido ningún dato. Abre la gestión de cuenta para revisar las versiones.',manual);
-    return false;
+    if(manual){
+     const decisions=await cloudResolveFieldConflicts(result.conflicts);
+     if(decisions)result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state,{resolutions:decisions});
+    }
+    if(result.conflicts.length){
+     const paths=result.conflicts.slice(0,4).map(c=>c.path).join(', ');
+     cloudDeltaRootError(result.conflicts.length+' conflictos pendientes en '+paths+'. Los dos dispositivos conservan sus datos. Usa «Sincronizar ahora» para elegir.',manual);
+     return false;
+    }
    }
    merged={...local};
    for(const field of window.GeoCauceDeltaSync.fields){
