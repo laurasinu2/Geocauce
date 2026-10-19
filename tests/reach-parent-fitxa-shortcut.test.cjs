@@ -45,7 +45,7 @@ test('selecting TSJ2 preserves the normal reach card but exposes the whole TSJ c
  assert.equal(button.classList.contains('hidden'),false);
  assert.equal(button.classList.contains('reach-selected'),true);
  assert.equal(h.get('#activeToolBtn span').textContent,'');
- assert.equal(h.nodes.has('#hydroActiveBadge'),false);
+ assert.equal(h.get('#hydroActiveBadge').classList.contains('hidden'),true);
  assert.match(app,/else if\(f\.type==='reach'\)openReachSheet\(f\.id\)/);
  assert.match(app,/const btn=|\$\('#profileSheetFab'\)\.onclick=\(\)=>\{const id=\$\('#profileSheetFab'\)\.dataset\.courseId/);
 });
