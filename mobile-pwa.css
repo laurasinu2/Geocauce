@@ -154,3 +154,12 @@ body.mobile-map-lite{overflow:hidden!important}body.mobile-map-lite #mapScreen{l
   }
   body.mobile-map-lite #mapScreen .map-quick-actions>button:not(#fitAllBtn):not(#locateQuickBtn) { display:none!important; }
 }
+
+/* FITXA I del cauce seleccionado: visible también en mapa móvil ligero.
+   Otros estados del FAB mantienen las reglas de visibilidad originales. */
+body.mobile-map-lite #mapScreen #profileSheetFab.reach-selected:not(.hidden){
+  display:flex!important;
+  align-items:center;
+  right:calc(12px + env(safe-area-inset-right, 0px));
+  bottom:calc(92px + env(safe-area-inset-bottom, 0px));
+}
