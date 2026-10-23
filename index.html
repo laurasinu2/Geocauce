@@ -718,6 +718,18 @@ CON | Confluencia"></textarea></div>
             <table class="section-fitxa-meta">
               <tr><th>Nom torrent:</th><td id="sectionTorrentName">—</td><th>Nom tram:</th><td id="sectionReachName">—</td></tr>
               <tr><th>Nom secció:</th><td><input id="sectionNameInput" type="text" maxlength="40"></td><th>Data visita:</th><td><input id="sectionVisitDate" type="date"></td></tr>
+              <tr class="section-work-status-row"><th>Estado de la ficha:</th><td colspan="3">
+                <label class="section-work-status-select">
+                  <span id="sectionWorkStatusIndicator" class="section-status-dot" aria-hidden="true"></span>
+                  <select id="sectionWorkStatus" aria-label="Estado de la ficha de sección">
+                    <option value="">Por revisar (ficha anterior)</option>
+                    <option value="pending">🔴 Sin hacer</option>
+                    <option value="started">🟡 Comenzada</option>
+                    <option value="done">🟢 Acabada</option>
+                  </select>
+                </label>
+                <small class="section-work-status-help">Estado manual: no modifica el contenido de la ficha.</small>
+              </td></tr>
               <tr><th>Fotografia:</th><td><span class="muted">↑ (riu amunt) ↓ (riu avall)</span></td><th>Orientació:</th><td><strong id="sectionOrientationLabel">—</strong><small id="sectionOrientationEndPoints" class="section-orientation-ends">Inici: — → Final: —</small></td></tr>
             </table>
             <div class="section-fitxa-subtitle"><b>Esquema</b> <span>(geometria amb acotacions de pendent, bancs, riu)</span></div>
