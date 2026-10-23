@@ -1465,8 +1465,32 @@ function sectionZoneLabel(key=state.sectionZoneClass,custom=state.sectionZoneCus
 }
 function blankFicData(){return{ad:{score:null,note:'',noteInk:[]},bd:{score:null,note:'',noteInk:[]},cd:{score:null,note:'',noteInk:[]},dd1:{score:null,note:'',noteInk:[]},dd2:{score:null,note:'',noteInk:[]}};}
 function optionalScore(value){if(value===null||value===undefined||value==='')return null;const n=Number(value);return Number.isFinite(n)?n:null;}
-function defaultSectionSheetIII(){return{observer:'',visitDate:'',sectionName:'',sectionType:'',observations:'',table:{},tableInk:{},fic:blankFicData()};}
-function normalizeSectionSheetIII(src){const d={...defaultSectionSheetIII(),...(src||{})};d.table=d.table&&typeof d.table==='object'?d.table:{};d.tableInk=d.tableInk&&typeof d.tableInk==='object'?d.tableInk:{};d.fic=d.fic&&typeof d.fic==='object'?d.fic:blankFicData();for(const k of ['ad','bd','cd','dd1','dd2']){const o=d.fic[k]||{};d.fic[k]={score:optionalScore(o.score),note:o.note||'',noteInk:Array.isArray(o.noteInk)?o.noteInk:[]};}return d;}
+function defaultSectionSheetIII(){return{observer:'',visitDate:'',sectionName:'',sectionType:'',observations:'',workStatus:null,table:{},tableInk:{},fic:blankFicData()};}
+function normalizeSectionSheetIII(src){const d={...defaultSectionSheetIII(),...(src||{})};d.workStatus=['pending','started','done'].includes(d.workStatus)?d.workStatus:null;d.table=d.table&&typeof d.table==='object'?d.table:{};d.tableInk=d.tableInk&&typeof d.tableInk==='object'?d.tableInk:{};d.fic=d.fic&&typeof d.fic==='object'?d.fic:blankFicData();for(const k of ['ad','bd','cd','dd1','dd2']){const o=d.fic[k]||{};d.fic[k]={score:optionalScore(o.score),note:o.note||'',noteInk:Array.isArray(o.noteInk)?o.noteInk:[]};}return d;}
+// Status is manual, never inferred from whether the field sheet has content.
+// Legacy sheets remain unclassified until explicitly reviewed.
+const SECTION_WORK_STATUSES={
+  pending:{label:'Sin hacer',color:'#cf514d'},
+  started:{label:'Comenzada',color:'#e5b43d'},
+  done:{label:'Acabada',color:'#3c9964'}
+};
+const SECTION_WORK_UNCLASSIFIED={label:'Por revisar',color:'#9ca3a0'};
+function sectionWorkStatus(f){const code=f?.sheetIII?.workStatus;return Object.hasOwn(SECTION_WORK_STATUSES,code)?code:null;}
+function sectionWorkStatusInfo(f){return SECTION_WORK_STATUSES[sectionWorkStatus(f)]||SECTION_WORK_UNCLASSIFIED;}
+function updateSectionWorkStatusUi(f,readOnly=!isEditableCampaign()){
+  const picker=$('#sectionWorkStatus');if(picker){picker.value=sectionWorkStatus(f)||'';picker.disabled=readOnly;}
+  const info=sectionWorkStatusInfo(f),dot=$('#sectionWorkStatusIndicator');
+  if(dot){dot.style.backgroundColor=info.color;dot.title=info.label;}
+}
+function setSectionWorkStatus(status){
+  const f=state.features.find(x=>x.id===state.currentSection&&x.type==='section');
+  if(!f||!isEditableCampaign())return false;
+  if(status!==''&&!Object.hasOwn(SECTION_WORK_STATUSES,status))return false;
+  const data=ensureSectionSheetData(f),next=status||null;
+  if(data.workStatus===next)return true;
+  data.workStatus=next;persistState();updateSectionWorkStatusUi(f,false);renderSectionList();drawAll();
+  return true;
+}
 function ensureSectionSheetData(f){if(!f)return defaultSectionSheetIII();f.sheetIII=normalizeSectionSheetIII(f.sheetIII);if(!f.sheetIII.sectionName)f.sheetIII.sectionName=f.sectionName||f.id;return f.sheetIII;}
 function sectionReach(f){return state.features.find(x=>x.id===f?.reachId&&x.type==='reach')||null;}
 function reachSections(reachId){return state.features.filter(x=>x.type==='section'&&x.reachId===reachId).slice().sort((a,b)=>(Number.isFinite(+a.reachAlong)?+a.reachAlong:Infinity)-(Number.isFinite(+b.reachAlong)?+b.reachAlong:Infinity));}
@@ -2574,7 +2598,9 @@ function drawFeatureBase(ctx,f,{ghost=false}={}) {
       const st=featureLineStyle(f,{color:'#2464a4',width:3,dash:'dash'});ctx.lineWidth=st.width;ctx.strokeStyle=st.color;ctx.setLineDash(st.dash);ctx.stroke();ctx.setLineDash([]);
     } else if(f.type==='section'){
       ctx.lineWidth=3;ctx.strokeStyle='#752c2c';ctx.stroke();
-      const anchor=f.anchorPoint?worldToScreen(f.anchorPoint):pts[Math.floor(pts.length/2)];ctx.fillStyle='#752c2c';ctx.beginPath();ctx.arc(anchor.x,anchor.y,4.5,0,Math.PI*2);ctx.fill();ctx.font='600 13px "Segoe Print",cursive';ctx.fillText(f.sectionName||f.id,anchor.x+7,anchor.y-8);
+      const anchor=f.anchorPoint?worldToScreen(f.anchorPoint):pts[Math.floor(pts.length/2)];ctx.fillStyle='#752c2c';ctx.beginPath();ctx.arc(anchor.x,anchor.y,4.5,0,Math.PI*2);ctx.fill();ctx.font='600 13px "Segoe Print",cursive';const sectionName=f.sectionName||f.id;ctx.fillText(sectionName,anchor.x+7,anchor.y-8);
+      const statusColor=sectionWorkStatusInfo(f).color,dotX=anchor.x+13+ctx.measureText(sectionName).width,dotY=anchor.y-13;
+      ctx.beginPath();ctx.arc(dotX,dotY,5,0,Math.PI*2);ctx.fillStyle=statusColor;ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
     } else {
       ctx.lineWidth=2;ctx.strokeStyle='#252a26';ctx.stroke();
     }
@@ -3528,7 +3554,7 @@ function renderSectionFic(f){const root=$('#sectionFicTable');if(!root||!f)retur
 function saveSectionFitxaHeader(){const f=state.features.find(x=>x.id===state.currentSection);if(!f||!isEditableCampaign())return;const d=ensureSectionSheetData(f);d.sectionName=$('#sectionNameInput')?.value.trim()||f.sectionName||f.id;d.visitDate=$('#sectionVisitDate')?.value||'';d.observations=$('#sectionObservations')?.value||'';f.sectionName=d.sectionName;persistState();drawAll();renderSectionList();}
 function openCodesReference(){$('#codesReferenceModal')?.classList.remove('hidden');}
 function openSection(f){
-  if(!f)return;associateSectionIfNeeded(f);const readOnly=!isEditableCampaign();state.currentSection=f.id;sectionView(f);ensureSectionMeasurements(f);const d=ensureSectionSheetData(f),reach=sectionReach(f),course=sectionCourse(f);$('#sectionId').textContent=d.sectionName||f.sectionName||f.id;const sc=$('#sectionCampaign');sc.innerHTML=`<option>${escapeHtml(campaignLabel(state.campaign))}</option>`;$('#sectionTorrentName').textContent=course?`${course.abbr||''}, ${course.name||''}`:'—';$('#sectionReachName').textContent=reach?.reachCode||reach?.id||'—';$('#sectionNameInput').value=d.sectionName||f.sectionName||f.id;$('#sectionVisitDate').value=d.visitDate||currentCampaign()?.date||'';$('#sectionObservations').value=d.observations||'';$('#sectionModal').classList.remove('hidden');$('#sectionModal').classList.toggle('read-only',readOnly);const banner=$('#sectionReadOnlyBanner');if(banner)banner.classList.toggle('hidden',!readOnly);
+  if(!f)return;associateSectionIfNeeded(f);const readOnly=!isEditableCampaign();state.currentSection=f.id;sectionView(f);ensureSectionMeasurements(f);const d=ensureSectionSheetData(f),reach=sectionReach(f),course=sectionCourse(f);$('#sectionId').textContent=d.sectionName||f.sectionName||f.id;const sc=$('#sectionCampaign');sc.innerHTML=`<option>${escapeHtml(campaignLabel(state.campaign))}</option>`;$('#sectionTorrentName').textContent=course?`${course.abbr||''}, ${course.name||''}`:'—';$('#sectionReachName').textContent=reach?.reachCode||reach?.id||'—';$('#sectionNameInput').value=d.sectionName||f.sectionName||f.id;$('#sectionVisitDate').value=d.visitDate||currentCampaign()?.date||'';$('#sectionObservations').value=d.observations||'';updateSectionWorkStatusUi(f,readOnly);$('#sectionModal').classList.remove('hidden');$('#sectionModal').classList.toggle('read-only',readOnly);const banner=$('#sectionReadOnlyBanner');if(banner)banner.classList.toggle('hidden',!readOnly);
   $$('#sectionModal [data-section-tool]').forEach(b=>b.disabled=readOnly);for(const el of [$('#sectionNameInput'),$('#sectionVisitDate'),$('#sectionObservations')])if(el)el.disabled=readOnly;$('#sectionRebuildProfile').disabled=readOnly;$('#sectionResetProfile').disabled=readOnly;syncSectionControls(f);renderSectionFieldTable(f);renderSectionFic(f);setSectionFitxaPage(1);const c=$('#sectionCanvas');if(c){c._sectionBuilder=null;c._sectionHover=null;c._sectionObjectActive=null;c._hoverSnap=null;c._sectionSelection=null;syncSectionBuilderButtons();syncSectionSelectionUi();}
   setTimeout(()=>{const c=$('#sectionCanvas');c._readOnly=readOnly;c._inkStore=cloneAny(f.sectionInk||[]);c._profileActive=null;updateSectionProfileStatus(f);updateSectionCanvasMetricSize(f);redrawInkStore(c);ensureSectionProfile(f).then(async()=>{await ensureSectionReferenceLayersLoaded();updateSectionCanvasMetricSize(f);syncSectionControls(f);redrawInkStore(c);});},30);
 }
@@ -4394,7 +4420,16 @@ function renderLayers(){
 function renderSectionList(){
   const root=$('#sectionList');if(!root)return;const secs=state.features.filter(f=>f.type==='section');root.innerHTML='';
   if(!secs.length){root.innerHTML='<p class="muted compact-note">Aún no hay secciones.</p>';return;}
-  for(const f of secs){const row=document.createElement('div');row.className='section-list-row';const r=sectionReach(f),label=f.sectionName||f.sheetIII?.sectionName||f.id,sub=r?`${r.reachCode||r.id}`:campaignLabel(state.campaign);row.innerHTML=`${iconImg('icons/seccion.svg')}<b>${escapeHtml(label)}</b><span>${escapeHtml(sub)}</span><button class="section-open icon-only" title="Obrir FITXA III">${iconImg('icons/ficha.png')}</button><button class="section-fit icon-only" title="Anar a la secció">${iconImg('icons/centrar.png')}</button><button class="section-del icon-only danger-action" title="Eliminar">${iconImg('icons/eliminar.svg')}</button>`;
+  const total=secs.length,counts={pending:0,started:0,done:0,unclassified:0};
+  for(const f of secs)counts[sectionWorkStatus(f)||'unclassified']++;
+  const summary=document.createElement('div');summary.className='section-status-summary';
+  const ordered=[['pending',SECTION_WORK_STATUSES.pending],['started',SECTION_WORK_STATUSES.started],['done',SECTION_WORK_STATUSES.done],['unclassified',SECTION_WORK_UNCLASSIFIED]];
+  const bar=document.createElement('div');bar.className='section-status-progress';bar.setAttribute('role','img');bar.setAttribute('aria-label',ordered.map(([k,info])=>info.label+': '+counts[k]).join('; '));
+  for(const [key,info] of ordered)if(counts[key]){const part=document.createElement('span');part.style.backgroundColor=info.color;part.style.flexGrow=String(counts[key]);part.style.flexBasis='0';bar.appendChild(part);}
+  const legend=document.createElement('div');legend.className='section-status-legend';
+  for(const [key,info] of ordered){const item=document.createElement('span');item.className='section-status-summary-item';const dot=document.createElement('i');dot.style.backgroundColor=info.color;const txt=document.createElement('span');txt.textContent=info.label+' '+counts[key];item.append(dot,txt);legend.appendChild(item);}
+  summary.append(bar,legend);root.appendChild(summary);
+  for(const f of secs){const row=document.createElement('div');row.className='section-list-row';const r=sectionReach(f),label=f.sectionName||f.sheetIII?.sectionName||f.id,sub=r?`${r.reachCode||r.id}`:campaignLabel(state.campaign),status=sectionWorkStatusInfo(f);row.innerHTML=`${iconImg('icons/seccion.svg')}<b>${escapeHtml(label)}</b><span class="section-status-dot" aria-label="${escapeHtml(status.label)}" title="${escapeHtml(status.label)}" style="background:${status.color}"></span><span>${escapeHtml(sub)}</span><button class="section-open icon-only" title="Obrir FITXA III">${iconImg('icons/ficha.png')}</button><button class="section-fit icon-only" title="Anar a la secció">${iconImg('icons/centrar.png')}</button><button class="section-del icon-only danger-action" title="Eliminar">${iconImg('icons/eliminar.svg')}</button>`;
     row.querySelector('.section-open').onclick=()=>{state.selectedId=f.id;openSection(f);$('#layersPanel').classList.add('hidden');};
     row.querySelector('.section-fit').onclick=()=>{fitBounds(featureBounds(f),.72);state.selectedId=f.id;showFeatureCard(f);$('#layersPanel').classList.add('hidden');drawAll();};
     const del=row.querySelector('.section-del');del.disabled=!isEditableCampaign();del.onclick=()=>deleteFeature(f.id,true);root.appendChild(row);
@@ -4775,7 +4810,7 @@ function nextSectionNameForReach(reach,ratio=.5){
   if(ratio<=.18&&!used.has('S1'))return'S1';if(ratio>=.82&&!used.has('S2'))return'S2';let n=3;while(used.has('S'+n))n++;return'S'+n;
 }
 function createSectionFeature(a,b,assoc=null){
-  const f={id:uid('section'),type:'section',points:[a,b],closed:false,material:null,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[],sectionInk:[],sectionObjects:[],sectionProfile:null,sectionView:{gridStep:1,verticalScale:'1',zoomX:1,centerD:null},sectionMeasurements:{width:'',depth:'',note:'',widthInk:[],depthInk:[],noteInk:[]},sheetIII:defaultSectionSheetIII()};
+  const f={id:uid('section'),type:'section',points:[a,b],closed:false,material:null,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[],sectionInk:[],sectionObjects:[],sectionProfile:null,sectionView:{gridStep:1,verticalScale:'1',zoomX:1,centerD:null},sectionMeasurements:{width:'',depth:'',note:'',widthInk:[],depthInk:[],noteInk:[]},sheetIII:{...defaultSectionSheetIII(),workStatus:'pending'}};
   if(assoc?.reach){f.reachId=assoc.reach.id;f.courseId=assoc.reach.courseId;f.reachAlong=assoc.projection?.along??null;f.anchorPoint=assoc.point?{...assoc.point}:null;f.sectionName=nextSectionNameForReach(assoc.reach,assoc.ratio);f.sheetIII.sectionName=f.sectionName;const old=assoc.reach.sheetII?.fic;if(old&&!state.features.some(x=>x.type==='section'&&x.reachId===assoc.reach.id&&x.sheetIII?.fic)){f.sheetIII.fic=cloneAny(normalizeSectionSheetIII({fic:old}).fic);}}
   else{f.sectionName=f.id;f.sheetIII.sectionName=f.id;}
   state.features.push(f);state.selectedId=f.id;persistState();drawAll();renderSectionList();openSection(f);return f;
@@ -6030,6 +6065,7 @@ function initUi(){
   $('#sheetClose').onclick=closeSheet;$('#sheetUndo').onclick=()=>{const c=$('#sheetCanvas');if(c._readOnly){toast('Ficha en solo lectura');return;}c._inkStore?.pop();redrawInkStore(c);};
   $$('[data-sheet-tool]').forEach(b=>b.onclick=()=>{if($('#sheetCanvas')._readOnly)return;state.sheetTool=b.dataset.sheetTool;$$('[data-sheet-tool]').forEach(x=>x.classList.toggle('active',x===b));});
   $('#sectionClose').onclick=closeSection;
+  if($('#sectionWorkStatus'))$('#sectionWorkStatus').onchange=e=>setSectionWorkStatus(e.target.value);
   $('#sectionZoomReset').onclick=()=>{const f=state.features.find(x=>x.id===state.currentSection),c=$('#sectionCanvas');if(!f||!c)return;const oldVw=sectionVisibleWindow(f),oldRg=sectionDisplayRange(f,c),v=sectionView(f);v.zoomX=1;v.centerD=(f.sectionProfile?.length||featureLength(f)||1)/2;const newVw=sectionVisibleWindow(f),newRg=sectionDisplayRange(f,c);remapSectionDrawingForWindow(f,c,oldVw,newVw);remapSectionDrawingForRange(f,c,oldRg,newRg);updateSectionZoomUi(f);redrawInkStore(c);if(isEditableCampaign())persistState();};
   $$('[data-section-tool]').forEach(b=>b.onclick=()=>{if($('#sectionCanvas')._readOnly)return;const next=b.dataset.sectionTool;if(state.sectionTool!==next)cancelSectionBuilder();state.sectionTool=next;const c=$('#sectionCanvas');if(c&&!['select','profile'].includes(next))c._sectionSelection=null;syncSectionSelectionUi();$$('[data-section-tool]').forEach(x=>x.classList.toggle('active',x===b));const f=state.features.find(x=>x.id===state.currentSection);if(f)syncSectionControls(f);else updateSectionToolHint();});
   $('#sectionPage1Btn').onclick=()=>setSectionFitxaPage(1);$('#sectionPage2Btn').onclick=()=>setSectionFitxaPage(2);$('#sectionPage3Btn').onclick=()=>setSectionFitxaPage(3);
