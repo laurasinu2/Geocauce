@@ -2398,6 +2398,34 @@ function showMapContextMenu(sp){
 }
 function nextStopLabel(){const n=(state.mapPins||[]).filter(p=>p.kind==='stop').length+1;return`Parada ${String(n).padStart(2,'0')}`;}
 function addMapStopAt(point){if(!point||!requireEditable('afegir un punt de parada'))return;const def=nextStopLabel(),label=(prompt('Nom del punt de parada',def)||def).trim()||def;state.mapPins=state.mapPins||[];state.mapPins.push({id:'mp'+Date.now().toString(36),kind:'stop',x:point.x,y:point.y,label,campaignId:state.campaign,createdAt:Date.now()});persistState();drawAll();toast(`${label} afegida`);}
+function beginPointRelocation(kind){
+  const id=kind==='stop'?state.currentStopId:state.currentHistoricalPointId;
+  const point=kind==='stop'?mapStopById(id):historicalPointById(id);
+  if(!point||!requireEditable('reubicar un punt'))return;
+  state.relocatingPoint={kind,id};
+  if(kind==='stop')closeMapStop();else closeHistoricalPhotoPoint();
+  setTool('select',{quiet:true});
+  toast('Toca la nova ubicació al mapa per moure el punt',4500);
+}
+function finishPointRelocation(sp){
+  const moving=state.relocatingPoint;
+  if(!moving)return false;
+  if(!isEditableCampaign()){state.relocatingPoint=null;toast('No es pot modificar aquest dia');return true;}
+  const point=moving.kind==='stop'?mapStopById(moving.id):historicalPointById(moving.id);
+  state.relocatingPoint=null;
+  if(!point){toast('No s’ha trobat el punt');return true;}
+  const pos=screenToWorld(sp);
+  if(moving.kind==='historical'&&point.linkedStopId){
+    if(!confirm('Aquest punt està vinculat a una parada. Reubicar-lo el desvincularà. Continuar?'))return true;
+    delete point.linkedStopId;
+  }
+  point.x=pos.x;point.y=pos.y;
+  if(moving.kind==='historical')point.crs=workingMapEpsg();
+  else for(const historical of state.historicalPhotoPoints||[]){if(historical.linkedStopId===point.id){historical.x=pos.x;historical.y=pos.y;historical.crs=workingMapEpsg();}}
+  persistState();drawAll();toast('Punt reubicat correctament');
+  if(moving.kind==='stop')openMapStop(point.id);else openHistoricalPhotoPoint(point.id);
+  return true;
+}
 function mapStopById(id){return (state.mapPins||[]).find(p=>p.id===id&&p.kind==='stop')||null;}
 function openMapStop(id){const pin=mapStopById(id);if(!pin)return;state.currentStopId=id;const linked=(state.historicalPhotoPoints||[]).filter(p=>p.linkedStopId===id);$('#mapStopTitle').textContent=pin.label||'Punt de parada';$('#mapStopSubtitle').textContent=linked.length?`${linked.length} punt${linked.length===1?'':'s'} històric${linked.length===1?'':'s'} vinculat${linked.length===1?'':'s'}`:'Sense punts històrics vinculats';$('#mapStopModal').classList.remove('hidden');}
 function closeMapStop(){state.currentStopId=null;$('#mapStopModal').classList.add('hidden');}
@@ -2685,6 +2713,7 @@ function movePan(p){if(!state.pointerPan)return;markMapMotion();const dx=p.x-sta
 function endPan(){if(state.pointerPan){state.pointerPan=null;inkCanvas.style.cursor=state.tool==='pan'?'grab':'crosshair';persistState();}}
 
 function selectAt(sp){
+  if(state.relocatingPoint){finishPointRelocation(sp);return;}
   if(state.historicalLinkPointId){handleHistoricalLinkTap(sp);return;}
   const hp=nearestHistoricalPhotoPoint(sp);if(hp){openHistoricalPhotoPoint(hp.id);return;}
   const pin=nearestMapPin(sp);if(pin){if(pin.kind==='photo'&&pin.photoId){openPhotoEditor(pin.photoId);return;}if(pin.kind==='note'){alert(pin.text||'Nota ràpida');return;}if(pin.kind==='stop'){openMapStop(pin.id);return;}}
@@ -2693,6 +2722,7 @@ function selectAt(sp){
   const f=nearestFeature(screenToWorld(sp),false);if(f){state.selectedId=f.id;if(f.type==='watercourse')state.activeCourseId=f.id;else if(f.type==='reach')state.activeCourseId=f.courseId||state.activeCourseId;updateHydroFab();showFeatureCard(f);}else{state.selectedId=null;hideFeatureCard();}drawAll();
 }
 function startMapAction(e,p){
+  if(state.relocatingPoint){finishPointRelocation(p);return;}
   if(state.historicalLinkPointId){handleHistoricalLinkTap(p);return;}
   if(state.vectorExtract){if(beginVectorEndpointDrag(p,e.pointerId))return;handleVectorExtractTap(p);return;}
   if(state.tool==='pan' || e.button===1 || e.button===2){beginPan(p,e.pointerId);return;}
@@ -5670,7 +5700,7 @@ function initUi(){
   $('#featurePhotoBtn').onclick=()=>openPhotoGallery(state.selectedId);$('#featurePreviewOpen').onclick=()=>openPhotoGallery(state.selectedId);$('#photoGalleryClose').onclick=()=>$('#photoGalleryModal').classList.add('hidden');$('#addFeaturePhotoBtn').onclick=()=>{if(!requireEditable('añadir fotografías'))return;state.pendingPhotoFor=state.selectedId;$('#photoInput').click();};$('#photoEditorClose').onclick=()=>closePhotoEditor({save:true});$('#photoEditorSave').onclick=async()=>{if(await savePhotoEditor())toast('Anotacions de la fotografia guardades');};$('#photoEditorPen').onclick=()=>{const st=ensurePhotoEditorState();st.tool='pen';syncPhotoEditorToolbar();};$('#photoEditorEraser').onclick=()=>{const st=ensurePhotoEditorState();st.tool='eraser';syncPhotoEditorToolbar();};$('#photoEditorUndo').onclick=()=>{const c=$('#photoEditorCanvas');if(!c?._inkStore?.length)return;c._redoStore=c._redoStore||[];c._redoStore.push(c._inkStore.pop());redrawPhotoEditorCanvas();};$('#photoEditorRedo').onclick=()=>{const c=$('#photoEditorCanvas');if(!c?._redoStore?.length)return;c._inkStore=c._inkStore||[];c._inkStore.push(c._redoStore.pop());redrawPhotoEditorCanvas();};$('#photoEditorFullColorBtn').onclick=()=>{const st=ensurePhotoEditorState(),pick=$('#photoEditorColorPicker');pick.value=st.color||'#1f2b31';pick.click();};$('#photoEditorColorPicker').oninput=e=>{const st=ensurePhotoEditorState();st.color=e.target.value;st.tool='pen';syncPhotoEditorToolbar();renderPhotoEditorColors();};installPhotoEditorInteractions();
   $$('#mapContextMenu [data-map-context-action]').forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();handleMapContextAction(b.dataset.mapContextAction);});
   $('#historicalPhotoToggle').onclick=()=>{state.showHistoricalPhotoPoints=state.showHistoricalPhotoPoints===false;syncHistoricalPhotoToggle();persistState();drawAll();};syncHistoricalPhotoToggle();
-  $('#historicalPhotoClose').onclick=closeHistoricalPhotoPoint;const historicalBackdrop=$('#historicalPhotoModal .modal-backdrop');if(historicalBackdrop)historicalBackdrop.onclick=closeHistoricalPhotoPoint;$('#historicalPhotoCamera').onclick=()=>chooseHistoricalPhoto('camera');$('#historicalPhotoImport').onclick=()=>chooseHistoricalPhoto('import');$('#historicalPhotoLinkStop').onclick=beginHistoricalStopLink;$('#historicalPhotoDelete').onclick=()=>deleteHistoricalPhotoPoint();$('#historicalPhotoCameraInput').onchange=e=>{historicalPhotoChosen(e.target.files[0],'camera');e.target.value='';};$('#historicalPhotoImportInput').onchange=e=>{historicalPhotoChosen(e.target.files[0],'import');e.target.value='';};$('#mapStopClose').onclick=closeMapStop;const stopBackdrop=$('#mapStopModal .modal-backdrop');if(stopBackdrop)stopBackdrop.onclick=closeMapStop;$('#mapStopDelete').onclick=()=>deleteMapStop();
+  $('#historicalPhotoClose').onclick=closeHistoricalPhotoPoint;const historicalBackdrop=$('#historicalPhotoModal .modal-backdrop');if(historicalBackdrop)historicalBackdrop.onclick=closeHistoricalPhotoPoint;$('#historicalPhotoCamera').onclick=()=>chooseHistoricalPhoto('camera');$('#historicalPhotoImport').onclick=()=>chooseHistoricalPhoto('import');$('#historicalPhotoLinkStop').onclick=beginHistoricalStopLink;$('#historicalPhotoRelocate').onclick=()=>beginPointRelocation('historical');$('#mapStopRelocate').onclick=()=>beginPointRelocation('stop');$('#historicalPhotoDelete').onclick=()=>deleteHistoricalPhotoPoint();$('#historicalPhotoCameraInput').onchange=e=>{historicalPhotoChosen(e.target.files[0],'camera');e.target.value='';};$('#historicalPhotoImportInput').onchange=e=>{historicalPhotoChosen(e.target.files[0],'import');e.target.value='';};$('#mapStopClose').onclick=closeMapStop;const stopBackdrop=$('#mapStopModal .modal-backdrop');if(stopBackdrop)stopBackdrop.onclick=closeMapStop;$('#mapStopDelete').onclick=()=>deleteMapStop();
   $('#vectorTraceConnect').onclick=()=>chooseVectorTraceAction('connect');$('#vectorTraceSame').onclick=()=>chooseVectorTraceAction('same');$('#vectorTraceNew').onclick=()=>chooseVectorTraceAction('new');$('#vectorTracePick').onclick=()=>chooseVectorTraceAction('pick');$('#vectorTraceCancel').onclick=()=>{$('#vectorTraceChoiceModal').classList.add('hidden');if(state.vectorExtract)state.vectorExtract.pendingMapTrace=null;};
   $('#mapInkWidth').oninput=e=>{state.mapInkWidth=Math.max(1,+e.target.value||4);persistState();};$('#mapInkColor').oninput=e=>{state.mapInkColor=e.target.value;state.mapInkMode='pen';syncMapInkPanel();persistState();};$$('[data-map-ink-color]').forEach(b=>b.onclick=()=>{state.mapInkColor=b.dataset.mapInkColor;state.mapInkMode='pen';syncMapInkPanel();persistState();});$$('[data-map-ink-mode]').forEach(b=>b.onclick=()=>{state.mapInkMode=b.dataset.mapInkMode;syncMapInkPanel();persistState();});$('#mapInkUndo').onclick=()=>{if(!(state.mapInk||[]).length)return;state.mapInk.pop();persistState();drawAll();};$('#mapInkClear').onclick=()=>{if(!(state.mapInk||[]).length||!confirm('Esborrar totes les anotacions dibuixades sobre el mapa?'))return;state.mapInk=[];persistState();drawAll();};
   $('#notesBtn').onclick=openNotesForSelected;$('#featureMoreBtn').onclick=()=>{const menu=$('#featureMoreMenu'),open=menu.classList.contains('hidden');menu.classList.toggle('hidden',!open);$('#featureMoreBtn').setAttribute('aria-expanded',String(open));};$('#editContourBtn').onclick=()=>{const f=state.features.find(x=>x.id===state.selectedId);if(f?.type==='reach'){openReachEditModal(f);$('#featureMoreMenu').classList.add('hidden');return;}if(!f?.closed){toast('La edición de contorno necesita un polígono cerrado');return;}$('#featureMoreMenu').classList.add('hidden');setTool('editContour');};
