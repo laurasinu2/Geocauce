@@ -1368,3 +1368,21 @@ body > .modal > .modal-backdrop{position:absolute;inset:0}
   border:1px solid #d9ddd3!important;
 }
 #featureCard.feature-card-material-only .close-x img{width:15px!important;height:15px!important}
+
+/* r28: progreso de FITXA III. El indicador es independiente de la simbología geológica. */
+.section-status-dot{display:inline-block;flex:0 0 auto;width:11px;height:11px;min-width:11px;border-radius:50%;border:1.5px solid rgba(255,255,255,.95);box-shadow:0 0 0 1px rgba(25,36,30,.14);vertical-align:middle}
+.section-work-status-select{display:inline-flex;align-items:center;gap:9px;max-width:100%}
+.section-work-status-select .section-status-dot{width:14px;height:14px;min-width:14px}
+.section-fitxa-meta .section-work-status-select select{
+ min-width:180px;max-width:100%;width:min(260px,100%);border:1px solid #d3d3ca;
+ border-radius:8px;background:#fff;padding:7px 9px;font:inherit;color:#25372a;
+}
+.section-fitxa-meta .section-work-status-select select:disabled{color:#69716b;background:#f1f1ed}
+.section-work-status-help{display:block;color:#68746d;margin-top:5px;font-size:11px}
+.section-list-row .section-status-dot{margin-inline:0 5px}
+.section-status-summary{margin:0 0 12px;padding:10px 11px;border:1px solid #e0e4dc;border-radius:10px;background:#fbfaf6}
+.section-status-progress{display:flex;height:9px;overflow:hidden;border-radius:99px;background:#e7e9e3;gap:2px}
+.section-status-legend{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:9px}
+.section-status-summary-item{display:inline-flex;align-items:center;gap:5px;color:#46524a;font-size:11px}
+.section-status-summary-item i{width:9px;height:9px;border-radius:50%;display:inline-block}
+@media(max-width:620px){.section-fitxa-meta .section-work-status-select select{min-width:0;width:100%}}
