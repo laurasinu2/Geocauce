@@ -6042,7 +6042,7 @@ function fieldReportPhotoMetadata(rec){
  if(fieldReportHas(rec.name))fields.push('Fotografia: '+rec.name);
  if(rec.date)fields.push('Data: '+new Date(rec.date).toLocaleDateString('ca-ES'));
  if(Number.isFinite(rec.heading))fields.push('Orientació: '+rec.heading.toFixed(0)+'º');
- if(Number.isFinite(rec.gnss?.accuracy))fields.push('Precisió GNSS: ±'+rec.gnss.accuracy.toFixed(1)+' m');
+ if(rec.gnss?.source!=='historicalPoint'&&Number.isFinite(rec.gnss?.accuracy))fields.push('Precisió GNSS: ±'+rec.gnss.accuracy.toFixed(1)+' m');
  if(fieldReportHas(rec.caption||rec.observation||rec.note))fields.push('Observació: '+(rec.caption||rec.observation||rec.note));
  return fields.join(' · ');
 }
@@ -6050,7 +6050,7 @@ function fieldReportPhoto(rec){
  let html='<figure style="break-inside:avoid;margin:10px 0 18px">';
  if(rec.blob){const url=URL.createObjectURL(rec.blob);fieldReportPhotoUrls.push(url);html+='<img src="'+fieldReportEsc(url)+'" style="display:block;max-width:100%;max-height:350px;object-fit:contain">';}
  html+='<figcaption contenteditable="true">'+fieldReportEsc(fieldReportPhotoMetadata(rec))+'</figcaption>';
- if(rec.gnss)html+=fieldReportCoords(rec.gnss);
+ if(rec.gnss)html+=fieldReportCoords(rec.gnss.source==='historicalPoint'?{x:rec.gnss.x,y:rec.gnss.y,crs:rec.gnss.crs}:rec.gnss);
  return html+'</figure>';
 }
 function fieldReportHistorical(point,photos){
@@ -6090,10 +6090,11 @@ function fieldReportSummary(items){
 }
 function fieldReportItems(stops,photos){
  const items=[],assignedPhoto=new Set();
- for(const f of state.features.filter(x=>x.type==='reach'||x.type==='section'||x.type==='deposit')){
+ const stopIds=new Set(stops.map(x=>x.id));
+ for(const f of state.features.filter(x=>['reach','section','deposit'].includes(x.type)&&(x.campaign===state.campaign||stopIds.has(x.stopId)))){
   items.push({kind:f.type,obj:f,stop:fieldReportStopFor(f,stops),course:fieldReportCourse(f)});
  }
- for(const p of state.mapPins.filter(x=>x.kind==='note'))items.push({kind:'note',obj:p,stop:fieldReportStopFor(p,stops),course:fieldReportCourse(p)});
+ for(const p of state.mapPins.filter(x=>x.kind==='note'&&(x.campaignId===state.campaign||stopIds.has(x.stopId))))items.push({kind:'note',obj:p,stop:fieldReportStopFor(p,stops),course:fieldReportCourse(p)});
  for(const point of state.historicalPhotoPoints){
   const records=photos.filter(p=>p.historicalPointId===point.id||point.photos?.includes(p.id));
   if(point.campaignId!==state.campaign&&!records.length)continue;
@@ -6106,6 +6107,11 @@ function fieldReportItems(stops,photos){
   if(assignedPhoto.has(p.id))continue;
   const attached=state.features.find(f=>f.id===p.featureId)||null;
   items.push({kind:'photo',obj:p,stop:fieldReportStopFor(p,stops),course:fieldReportCourse(p)||fieldReportCourse(attached),featureId:p.featureId});
+ }
+ for(const page of state.notebook?.pages||[]){
+  if(page.campaignId!==state.campaign&&!stopIds.has(page.stopId))continue;
+  if(!fieldReportHas(page.text||page.observations)&&!(page.ink||[]).length)continue;
+  items.push({kind:'notebook',obj:page,stop:fieldReportStopFor(page,stops),course:fieldReportCourse(page)});
  }
  return items;
 }
@@ -6135,6 +6141,7 @@ async function fieldReportBuild(){
     if(item.kind==='reach'){html+=fieldReportReach(item.obj);for(const p of ordered.filter(x=>x.kind==='photo'&&x.featureId===item.obj.id)){if(usedPhotos.has(p.obj.id))continue;usedPhotos.add(p.obj.id);html+=fieldReportHeading('FOTOGRAFIES DEL TRAM',5)+fieldReportPhoto(p.obj);}}
     if(item.kind==='section'){html+=fieldReportSection(item.obj);for(const p of ordered.filter(x=>x.kind==='photo'&&x.featureId===item.obj.id)){if(usedPhotos.has(p.obj.id))continue;usedPhotos.add(p.obj.id);html+=fieldReportHeading('FOTOGRAFIES DE LA SECCIÓ',5)+fieldReportPhoto(p.obj);}}
     if(item.kind==='note')html+=fieldReportHeading('OBSERVACIONS',4)+fieldReportParagraph(item.obj.text);
+    if(item.kind==='notebook')html+=fieldReportHeading('QUADERN DE CAMP · '+(item.obj.id||''),4)+fieldReportParagraph(item.obj.text||item.obj.observations)+fieldReportInkImage(item.obj.ink);
     if(item.kind==='deposit')html+=fieldReportHeading('DIPÒSIT '+(item.obj.name||item.obj.id),4)+fieldReportParagraph(fieldReportEntries(item.obj,[['material','Material'],['observations','Observacions']]).join(' '));
     if(item.kind==='photo'){
      if(usedPhotos.has(item.obj.id))continue;usedPhotos.add(item.obj.id);
