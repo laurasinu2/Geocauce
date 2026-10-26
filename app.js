@@ -2508,7 +2508,7 @@ function addMapStopAt(point){
  state.stopCreationPending=true;persistState();drawAll();toast(label+' · comprovant coordenades GNSS…',4500);
  fieldFreshGnssForStop().then(gnss=>{
   if(state.projectId!==projectId||state.campaign!==campaignId||!isEditableCampaign())return;
-  const current=mapStopById(pin.id);if(!current)return;
+  const current=mapStopById(pin.id);if(!current||!current.gnssPending)return;
   current.gnssPending=false;
   if(gnss){
    const gps=fieldStopPosition(point,gnss);
@@ -2540,7 +2540,7 @@ function finishPointRelocation(sp){
     delete point.linkedStopId;
   }
   point.x=pos.x;point.y=pos.y;
-  if(moving.kind==='stop'){const newPosition=fieldStopPosition(pos,null);point.position=newPosition.position;point.crs=newPosition.position.crs;}
+  if(moving.kind==='stop'){const newPosition=fieldStopPosition(pos,null);point.position=newPosition.position;point.crs=newPosition.position.crs;point.gnssPending=false;}
   if(moving.kind==='historical'){point.crs=workingMapEpsg();point.photoPointPosition={x:pos.x,y:pos.y,crs:workingMapEpsg()};}
   else for(const historical of state.historicalPhotoPoints||[]){if(historical.linkedStopId===point.id){historical.x=pos.x;historical.y=pos.y;historical.crs=workingMapEpsg();}}
   persistState();drawAll();toast('Punt reubicat correctament');
@@ -4591,6 +4591,7 @@ function fieldSectionIntersection(section){
  const crs=workingMapEpsg(),epsg=projectCrsEpsg();
  const result={x:point.x,y:point.y,crs};
  if(crs===epsg&&utmZoneForEpsg(epsg)){result.utmX=point.x;result.utmY=point.y;result.utmCrs=epsg;}
+ if(utmZoneForEpsg(crs)){const ll=fieldUtmToLonLat(point.x,point.y,crs);if(ll){result.lat=ll.lat;result.lon=ll.lon;if(crs!==epsg&&utmZoneForEpsg(epsg)){const utm=lonLatToMapCoords(ll.lon,ll.lat,epsg);result.utmX=utm.x;result.utmY=utm.y;result.utmCrs=epsg;}}}
  if((crs===4326||crs===4258)){result.lon=point.x;result.lat=point.y;if(utmZoneForEpsg(epsg)){const p=lonLatToMapCoords(point.x,point.y,epsg);result.utmX=p.x;result.utmY=p.y;result.utmCrs=epsg;}}
  return result;
 }
@@ -5978,7 +5979,7 @@ function fieldUtmToLonLat(x,y,epsg){
 }
 function fieldReportCoords(p){
  if(!p)return '';
- if(!Number.isFinite(p.utmX)&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&utmZoneForEpsg(Number(p.crs)))p={...p,utmX:p.x,utmY:p.y,utmCrs:Number(p.crs)};
+ if(!Number.isFinite(p.utmX)&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&utmZoneForEpsg(Number(p.crs))){const crs=Number(p.crs),project=projectCrsEpsg(),ll=fieldUtmToLonLat(p.x,p.y,crs);if(ll&&utmZoneForEpsg(project)){const q=crs===project?{x:p.x,y:p.y}:lonLatToMapCoords(ll.lon,ll.lat,project);p={...p,lat:Number.isFinite(p.lat)?p.lat:ll.lat,lon:Number.isFinite(p.lon)?p.lon:ll.lon,utmX:q.x,utmY:q.y,utmCrs:project};}else p={...p,utmX:p.x,utmY:p.y,utmCrs:crs};}
  let parts=[];
  if(Number.isFinite(p.utmX)&&Number.isFinite(p.utmY))parts.push('Coordenades: X '+p.utmX.toFixed(1)+' m · Y '+p.utmY.toFixed(1)+' m (EPSG:'+p.utmCrs+')');
  else if(Number.isFinite(p.x)&&Number.isFinite(p.y)&&p.crs&&p.crs!==4326&&p.crs!==4258)parts.push('Coordenades del punt: X '+p.x.toFixed(1)+' · Y '+p.y.toFixed(1)+' (EPSG:'+p.crs+')');
