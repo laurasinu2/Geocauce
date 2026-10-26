@@ -6082,6 +6082,8 @@ function fieldReportPhoto(rec){
 function fieldReportHistorical(point,photos){
  let html=fieldReportHeading('PUNT FOTOGRÀFIC HISTÒRIC '+(point.name||point.code||point.id),4);
  html+=fieldReportCoords({x:point.x,y:point.y,crs:point.crs||workingMapEpsg(),lat:point.lat,lon:point.lon,utmX:point.utmX,utmY:point.utmY,utmCrs:point.utmCrs});
+ if(Number.isFinite(point.heading))html+=fieldReportParagraph('Orientació del punt: '+point.heading.toFixed(0)+'°');
+ if(Number.isFinite(point.accuracy))html+=fieldReportParagraph('Precisió GNSS del punt: ±'+point.accuracy.toFixed(1)+' m');
  if(fieldReportHas(point.observation||point.note))html+=fieldReportParagraph(point.observation||point.note);
  const list=photos.slice().sort((a,b)=>{const t=x=>x.historicalDate?Date.parse(x.historicalDate):Number(x.date||0);return t(a)-t(b)});
  for(const p of list){html+=fieldReportParagraph(p.historicalDate?'Fotografia de '+p.historicalDate:'Fotografia actual');html+=fieldReportPhoto(p);}
@@ -6114,7 +6116,7 @@ function fieldReportSummary(items){
  if(historical)words.push(historical+' punt'+(historical!==1?'s':'')+' fotogràfic'+(historical!==1?'s':'')+' històric'+(historical!==1?'s':''));
  return words.length?'Durant aquesta parada s’han registrat '+words.join(', ')+'.':'No hi ha elements documentats vinculats a aquesta parada.';
 }
-function fieldReportItems(stops,photos){
+function fieldReportItems(stops,photos,allHistoricalPhotos=photos){
  const items=[],assignedPhoto=new Set();
  const stopIds=new Set(stops.map(x=>x.id));
  for(const f of state.features.filter(x=>['reach','section','deposit'].includes(x.type)&&(x.campaign===state.campaign||stopIds.has(x.stopId)))){
@@ -6122,11 +6124,12 @@ function fieldReportItems(stops,photos){
  }
  for(const p of state.mapPins.filter(x=>x.kind==='note'&&(x.campaignId===state.campaign||stopIds.has(x.stopId))))items.push({kind:'note',obj:p,stop:fieldReportStopFor(p,stops),course:fieldReportCourse(p)});
  for(const point of state.historicalPhotoPoints){
-  const records=photos.filter(p=>p.historicalPointId===point.id||point.photos?.includes(p.id));
-  if(point.campaignId!==state.campaign&&!records.length)continue;
+  const records=allHistoricalPhotos.filter(p=>p.historicalPointId===point.id||point.photos?.includes(p.id));
+  const updates=photos.filter(p=>p.historicalPointId===point.id||point.photos?.includes(p.id));
+  if(point.campaignId!==state.campaign&&!updates.length)continue;
   for(const rec of records)assignedPhoto.add(rec.id);
-  const recent=records.slice().sort((a,b)=>(b.date||0)-(a.date||0))[0];const explicit=recent?.stopId||point.stopId||point.linkedStopId;const owner=explicit?{...point,stopId:explicit}:point;
-  const stamp=records.reduce((v,r)=>Math.max(v,r.date||0),point.createdAt||0);
+  const recent=updates.slice().sort((a,b)=>(b.date||0)-(a.date||0))[0];const explicit=recent?.stopId||point.stopId||point.linkedStopId;const owner=explicit?{...point,stopId:explicit}:point;
+  const stamp=updates.reduce((v,r)=>Math.max(v,r.date||0),point.createdAt||0);
   items.push({kind:'historical',obj:point,photos:records,stop:fieldReportStopFor({...owner,createdAt:stamp},stops,{historical:true}),course:fieldReportCourse(point)});
  }
  for(const p of photos){
@@ -6145,7 +6148,7 @@ async function fieldReportBuild(){
  fieldReportClearPhotoUrls();
  const stops=state.mapPins.filter(x=>x.kind==='stop'&&x.campaignId===state.campaign).slice().sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
  const allPhotos=await dbAll('photos'),photos=allPhotos.filter(p=>p.campaignId===state.campaign);
- const items=fieldReportItems(stops,photos),usedPhotos=new Set();
+ const items=fieldReportItems(stops,photos,allPhotos),usedPhotos=new Set();
  let html='<article class="field-report-page">'+fieldReportHeading('INFORME DE CARACTERITZACIÓ GEOMORFOLÒGICA DE CAMP',2);
  const campaign=currentCampaign();
  for(const [label,value] of [['Projecte',state.project?.name],['Campanya',campaign?.name],['Data',campaign?.date],['Observador',campaign?.author||state.project?.author],['Zona',state.project?.zone],['Torrent principal',state.project?.torrent]])if(fieldReportHas(value))html+=fieldReportParagraph(label+': '+value);
