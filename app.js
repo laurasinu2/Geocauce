@@ -6090,8 +6090,8 @@ function fieldReportHistorical(point,photos){
  return html;
 }
 function fieldReportMap(stops,historical,courseIds){
- const lines=state.features.filter(x=>x.type==='watercourse'&&courseIds.has(x.id)&&courseFragments(x).some(p=>p.length>1)),secs=state.features.filter(x=>x.type==='section'&&courseIds.has(x.courseId||x.watercourseId));
- const all=[...stops,...historical,...lines.flatMap(c=>courseFragments(c).flat()),...secs.flatMap(s=>s.points||[])].filter(p=>Number.isFinite(p?.x)&&Number.isFinite(p?.y));
+ const lines=state.features.filter(x=>x.type==='watercourse'&&courseIds.has(x.id)&&courseFragments(x).some(p=>p.length>1)),secs=state.features.filter(x=>x.type==='section'&&courseIds.has(x.courseId||x.watercourseId)),deposits=state.features.filter(x=>x.type==='deposit'&&x.campaign===state.campaign&&x.points?.length>0);
+ const all=[...stops,...historical,...lines.flatMap(c=>courseFragments(c).flat()),...secs.flatMap(s=>s.points||[]),...deposits.flatMap(d=>d.points||[])].filter(p=>Number.isFinite(p?.x)&&Number.isFinite(p?.y));
  if(!all.length)return '';
  const xs=all.map(p=>p.x),ys=all.map(p=>p.y),minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
  const span=Math.max(maxx-minx,maxy-miny,1),pad=span*.07,w=1100,h=740,scale=Math.min((w-60)/(maxx-minx+pad*2),(h-60)/(maxy-miny+pad*2));
@@ -6099,6 +6099,7 @@ function fieldReportMap(stops,historical,courseIds){
  const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');
  g.fillStyle='#f7f8f5';g.fillRect(0,0,w,h);g.lineWidth=2;
  for(const watercourse of lines)for(const fragment of courseFragments(watercourse)){g.beginPath();let first=true;for(const p of fragment){const v=xy(p);if(first){g.moveTo(v.x,v.y);first=false;}else g.lineTo(v.x,v.y);}g.strokeStyle='#2277a4';g.stroke();}
+ for(const deposit of deposits){if(!deposit.points?.length)continue;g.beginPath();let first=true;for(const pt of deposit.points){const p=xy(pt);if(first){g.moveTo(p.x,p.y);first=false;}else g.lineTo(p.x,p.y);}if(deposit.closed)g.closePath();g.fillStyle='rgba(172,119,56,.16)';if(deposit.closed)g.fill();g.strokeStyle='#96713d';g.stroke();}
  for(const section of secs){if(section.points?.length<2)continue;g.beginPath();let first=true;for(const p of section.points){const v=xy(p);if(first){g.moveTo(v.x,v.y);first=false;}else g.lineTo(v.x,v.y);}g.strokeStyle='#b97924';g.stroke();const it=fieldSectionIntersection(section);if(it){const p=xy(it);g.fillStyle='#b97924';g.fillRect(p.x-4,p.y-4,8,8);}}
  for(let i=0;i<stops.length;i++){const stop=stops[i],p=xy(stop);g.beginPath();g.arc(p.x,p.y,11,0,Math.PI*2);g.fillStyle='#58339f';g.fill();g.fillStyle='#fff';g.font='bold 13px sans-serif';g.textAlign='center';g.fillText(String(i+1),p.x,p.y+4);const coord=stop.position;g.font='11px sans-serif';g.fillStyle='#333';g.textAlign='left';if(Number.isFinite(coord?.utmX)&&Number.isFinite(coord?.utmY))g.fillText(Math.round(coord.utmX)+' / '+Math.round(coord.utmY),p.x+13,p.y+16);}
  for(const hp of historical){const p=xy(hp);g.fillStyle='#216c50';g.beginPath();g.moveTo(p.x,p.y-10);g.lineTo(p.x+10,p.y+8);g.lineTo(p.x-10,p.y+8);g.closePath();g.fill();}
