@@ -5938,6 +5938,7 @@ function fieldUtmToLonLat(x,y,epsg){
 }
 function fieldReportCoords(p){
  if(!p)return '';
+ if(!Number.isFinite(p.utmX)&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&utmZoneForEpsg(Number(p.crs)))p={...p,utmX:p.x,utmY:p.y,utmCrs:Number(p.crs)};
  let parts=[];
  if(Number.isFinite(p.utmX)&&Number.isFinite(p.utmY))parts.push('Coordenades: X '+p.utmX.toFixed(1)+' m · Y '+p.utmY.toFixed(1)+' m (EPSG:'+p.utmCrs+')');
  else if(Number.isFinite(p.x)&&Number.isFinite(p.y)&&p.crs&&p.crs!==4326&&p.crs!==4258)parts.push('Coordenades del punt: X '+p.x.toFixed(1)+' · Y '+p.y.toFixed(1)+' (EPSG:'+p.crs+')');
@@ -5965,6 +5966,27 @@ function fieldReportStopFor(item,stops,{historical=false}={}){
 function fieldReportSections(reach){return state.features.filter(x=>x.type==='section'&&x.reachId===reach.id);}
 function fieldReportEntries(d,defs){
  return defs.filter(([key])=>fieldReportHas(d?.[key])).map(([key,label])=>label+': '+fieldReportText(d[key])+'.');
+}
+function fieldReportNaturalValue(row,value){
+ const str=String(value??'').trim();
+ if(row==='vegetationCover'){
+  const match=str.match(/^[0-4]\s*[·.]\s*(.+)/);
+  return match?'La cobertura vegetal correspon a '+match[1]+'.':'Cobertura vegetal: '+str+'.';
+ }
+ if(row==='erosionCertainty'||row==='accumulationCertainty'||row==='thicknessCertainty'||row==='shapeCertainty'){
+  const code=str.match(/^([ABCDX])(?:\b|\s*[·.])/);
+  const known=FIELD_CERTAINTY.find(([c])=>c===code?.[1]);
+  return 'Certesa: '+(known?known[0]+' · '+known[1]:str)+'.';
+ }
+ const entry=SECTION_TABLE_ROWS.find(x=>x.key===row);
+ return (entry?.label||row)+': '+str+'.';
+}
+function fieldReportInkImage(records){
+ if(!Array.isArray(records)||!records.length)return '';
+ const canvas=document.createElement('canvas');canvas.width=520;canvas.height=116;
+ const g=canvas.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,canvas.width,canvas.height);
+ for(const stroke of records)drawInkRecord(g,{width:520,height:116},stroke,1,false);
+ return '<figure style="margin:4px 0"><img src="'+canvas.toDataURL('image/png')+'" style="max-width:100%;height:auto" alt="Anotació manuscrita històrica"></figure>';
 }
 function fieldReportReach(reach){
  const d=reach.sheetII||{},course=fieldReportCourse(reach),name=reach.reachCode||reach.id;
@@ -6007,10 +6029,11 @@ function fieldReportSection(section){
   const entries=[];
   for(const row of SECTION_TABLE_ROWS){
    const val=d.table?.[row.key]?.[col],note=d.tableNotes?.[row.key]?.[col];
-   if(fieldReportHas(val))entries.push(row.label+': '+val+'.');
+   if(fieldReportHas(val))entries.push(fieldReportNaturalValue(row.key,val));
    if(fieldReportHas(note))entries.push('Observació ('+row.label+'): '+note+'.');
   }
   if(entries.length)html+=fieldReportParagraph(label+'. '+entries.join(' '));
+  for(const row of SECTION_TABLE_ROWS){const ink=d.tableInk?.[row.key]?.[col];if(Array.isArray(ink)&&ink.length)html+=fieldReportParagraph('Anotació manuscrita de '+row.label+' ('+label+'):')+fieldReportInkImage(ink);}
  }
  return html+fieldReportFic(section);
 }
@@ -6038,8 +6061,8 @@ function fieldReportHistorical(point,photos){
  for(const p of list){html+=fieldReportParagraph(p.historicalDate?'Fotografia de '+p.historicalDate:'Fotografia actual');html+=fieldReportPhoto(p);}
  return html;
 }
-function fieldReportMap(stops,historical){
- const lines=state.features.filter(x=>x.type==='watercourse'&&courseFragments(x).some(p=>p.length>1)),secs=state.features.filter(x=>x.type==='section');
+function fieldReportMap(stops,historical,courseIds){
+ const lines=state.features.filter(x=>x.type==='watercourse'&&courseIds.has(x.id)&&courseFragments(x).some(p=>p.length>1)),secs=state.features.filter(x=>x.type==='section'&&courseIds.has(x.courseId||x.watercourseId));
  const all=[...stops,...historical,...lines.flatMap(c=>courseFragments(c).flat()),...secs.flatMap(s=>s.points||[])].filter(p=>Number.isFinite(p?.x)&&Number.isFinite(p?.y));
  if(!all.length)return '';
  const xs=all.map(p=>p.x),ys=all.map(p=>p.y),minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
@@ -6095,7 +6118,7 @@ async function fieldReportBuild(){
  const campaign=currentCampaign();
  for(const [label,value] of [['Projecte',state.project?.name],['Campanya',campaign?.name],['Data',campaign?.date],['Observador',campaign?.author||state.project?.author],['Zona',state.project?.zone],['Torrent principal',state.project?.torrent]])if(fieldReportHas(value))html+=fieldReportParagraph(label+': '+value);
  html+='</article>';
- const map=fieldReportMap(stops,state.historicalPhotoPoints);
+ const map=fieldReportMap(stops,items.filter(x=>x.kind==='historical').map(x=>x.obj),new Set(items.filter(x=>x.course).map(x=>x.course.id)));
  if(map)html+='<article class="field-report-page">'+fieldReportHeading('MAPA GENERAL DE LA SORTIDA',2)+'<img src="'+map+'" style="width:100%;height:auto;max-height:630px;object-fit:contain"></article>';
  for(let i=0;i<stops.length+1;i++){
   const stop=stops[i]||null,stopItems=items.filter(x=>x.stop?.id===(stop?.id||null));
