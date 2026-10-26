@@ -2499,20 +2499,25 @@ async function fieldFreshGnssForStop(){
   },()=>resolve(null),{enableHighAccuracy:true,maximumAge:0,timeout:8000});
  });
 }
-async function addMapStopAt(point){
+function addMapStopAt(point){
  if(!point||!requireEditable('afegir un punt de parada')||state.stopCreationPending)return;
- const campaignId=state.campaign,def=nextStopLabel(),label=(prompt('Nom del punt de parada',def)||def).trim()||def;
- state.stopCreationPending=true;toast('Registrant la posició GNSS de la parada…');
- try{
-  const gnss=await fieldFreshGnssForStop();
-  if(state.campaign!==campaignId||!isEditableCampaign())return;
-  state.mapPins=state.mapPins||[];
-  const loc=fieldStopPosition(point,gnss),pin={id:'mp'+Date.now().toString(36),kind:'stop',x:loc.mapPoint.x,y:loc.mapPoint.y,crs:loc.position.crs,position:loc.position,creationPosition:cloneAny(loc.position),label,campaignId:state.campaign,createdAt:Date.now()};
-  state.mapPins.push(pin);state.activeFieldStopId=pin.id;persistState();drawAll();
-  toast(gnss?label+' · GNSS registrat':label+' · GNSS no disponible, posició del mapa registrada',4500);
- }finally{state.stopCreationPending=false;}
+ const projectId=state.projectId,campaignId=state.campaign,def=nextStopLabel(),label=(prompt('Nom del punt de parada',def)||def).trim()||def;
+ const loc=fieldStopPosition(point,null);
+ const pin={id:'mp'+Date.now().toString(36),kind:'stop',x:loc.mapPoint.x,y:loc.mapPoint.y,crs:loc.position.crs,position:loc.position,creationPosition:cloneAny(loc.position),label,campaignId,createdAt:Date.now(),gnssPending:true};
+ state.mapPins=state.mapPins||[];state.mapPins.push(pin);state.activeFieldStopId=pin.id;
+ state.stopCreationPending=true;persistState();drawAll();toast(label+' · comprovant coordenades GNSS…',4500);
+ fieldFreshGnssForStop().then(gnss=>{
+  if(state.projectId!==projectId||state.campaign!==campaignId||!isEditableCampaign())return;
+  const current=mapStopById(pin.id);if(!current)return;
+  current.gnssPending=false;
+  if(gnss){
+   const gps=fieldStopPosition(point,gnss);
+   current.x=gps.mapPoint.x;current.y=gps.mapPoint.y;current.crs=gps.position.crs;current.position=gps.position;current.creationPosition=cloneAny(gps.position);
+  }
+  persistState();drawAll();
+  toast(gnss?label+' · posició GNSS registrada':label+' · GNSS no disponible; es manté el punt del mapa',4500);
+ }).catch(e=>{console.warn('GNSS de la parada',e);const current=mapStopById(pin.id);if(current){current.gnssPending=false;persistState();}toast('La parada s’ha guardat sense posició GNSS',4500);}).finally(()=>{state.stopCreationPending=false;});
 }
-
 function beginPointRelocation(kind){
   const id=kind==='stop'?state.currentStopId:state.currentHistoricalPointId;
   const point=kind==='stop'?mapStopById(id):historicalPointById(id);
