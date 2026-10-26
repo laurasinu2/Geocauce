@@ -3039,7 +3039,7 @@ function endTouchNavigation(e){
 function onMapPointerDown(e){
   if($('#mapScreen').classList.contains('hidden'))return;if(!$('#mapContextMenu')?.classList.contains('hidden'))hideMapContextMenu();
   const p=eventPoint(e,inkCanvas);
-  if(e.pointerType==='touch' && appSettings.inputMode==='pen'){beginTouchNavigation(e,p);return;}
+  if(e.pointerType==='touch' && appSettings.inputMode==='pen' && state.tool!=='stop'){beginTouchNavigation(e,p);return;}
   if(e.pointerType==='touch' && appSettings.inputMode==='finger' && state.tool==='pan'){beginTouchNavigation(e,p);return;}
   startMapAction(e,p);
 }
