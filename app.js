@@ -6595,16 +6595,46 @@ function fieldReportInit(){
  modal.innerHTML='<div class="modal-card" style="width:min(96vw,1100px);height:94vh;display:flex;flex-direction:column;padding:16px"><header style="display:flex;justify-content:space-between;align-items:center"><h2>Informe de camp · previsualització</h2><button type="button" id="fieldReportClose">Tancar</button></header><p style="font-size:12px">Pots editar els textos d’aquesta còpia sense modificar les fitxes originals.</p><div id="fieldReportContent" style="flex:1;overflow:auto;background:#ecefec;padding:12px"></div><footer style="display:flex;justify-content:flex-end;gap:12px;padding-top:10px"><button type="button" id="fieldReportAddGeneral">Afegir observacions generals</button><button type="button" id="fieldReportRegenerate">Regenerar</button><button type="button" id="fieldReportPdf">Exportar PDF</button></footer></div>';
  document.body.appendChild(modal);
  const preview=$('#fieldReportContent');
+ // Manual text revisions live outside the underlying field-sheet data.
+ const draftKey=()=>['geocauce-field-report-edits',state.projectId,state.campaign].join(':');
+ const readDraft=()=>{try{return JSON.parse(localStorage.getItem(draftKey())||'{}')||{};}catch{return {};}};
+ const saveDraft=()=>{
+  try{
+   const edits={};
+   preview.querySelectorAll('[data-report-edit-index]').forEach(el=>{
+    const original=el.dataset.reportOriginal||'';
+    if(el.textContent!==original)edits[el.dataset.reportEditIndex]={original,text:el.textContent};
+   });
+   const general=preview.querySelector('[data-field-report-general-note]')?.textContent||'';
+   localStorage.setItem(draftKey(),JSON.stringify({edits,general}));
+  }catch(e){console.warn('No s’han pogut desar els canvis locals de l’informe',e);}
+ };
+ const restoreDraft=()=>{
+  const draft=readDraft();
+  preview.querySelectorAll('[contenteditable]').forEach((el,i)=>{
+   el.dataset.reportEditIndex=String(i);
+   el.dataset.reportOriginal=el.textContent;
+   const saved=draft.edits?.[i];
+   if(saved&&saved.original===el.textContent)el.textContent=saved.text;
+  });
+  if(draft.general){
+   const article=document.createElement('article');article.className='field-report-page';article.dataset.fieldReportGeneralManual='true';
+   article.innerHTML=fieldReportHeading('OBSERVACIONS GENERALS DE LA SORTIDA',2)+'<p contenteditable="true" data-field-report-general-note="true"></p>';
+   article.querySelector('[data-field-report-general-note]').textContent=draft.general;
+   preview.appendChild(article);
+  }
+ };
+ preview.addEventListener('input',e=>{if(e.target.closest('[contenteditable]'))saveDraft();});
  const close=()=>{modal.classList.add('hidden');fieldReportClearPhotoUrls();};
  $('#fieldReportClose').onclick=close;
- const generate=async()=>{preview.textContent='Generant informe local…';try{preview.innerHTML=await fieldReportBuild();}catch(e){preview.textContent='No s’ha pogut generar l’informe: '+(e.message||e);console.error(e);}};
+ const generate=async()=>{preview.textContent='Generant informe local…';try{preview.innerHTML=await fieldReportBuild();restoreDraft();}catch(e){preview.textContent='No s’ha pogut generar l’informe: '+(e.message||e);console.error(e);}};
  button.onclick=async()=>{if(!state.projectId)return;modal.classList.remove('hidden');await generate();};
  $('#fieldReportAddGeneral').onclick=()=>{
   let page=preview.querySelector('[data-field-report-general-manual]');
   if(!page){page=document.createElement('article');page.className='field-report-page';page.dataset.fieldReportGeneralManual='true';page.innerHTML=fieldReportHeading('OBSERVACIONS GENERALS DE LA SORTIDA',2)+'<p contenteditable="true" data-field-report-general-note="true"></p>';preview.appendChild(page);}
   page.querySelector('[data-field-report-general-note]').focus();
  };
- $('#fieldReportRegenerate').onclick=()=>{if(confirm('Regenerar el text? Es perdran les modificacions manuals de la previsualització.'))generate();};
+ $('#fieldReportRegenerate').onclick=()=>{if(confirm('Regenerar el text? Es perdran les modificacions manuals de la previsualització.')){localStorage.removeItem(draftKey());generate();}};
  $('#fieldReportPdf').onclick=async()=>{
   if(!window.GeoCauceFieldPdf){toast('Generador PDF local no disponible');return;}
   const btn=$('#fieldReportPdf');btn.disabled=true;
