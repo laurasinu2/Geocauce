@@ -5462,15 +5462,15 @@ async function localPdfReachSheet(reach,stage){
  return [...pages,appendix];
 }
 function localPdfSectionTable(section,root){
- const d=ensureSectionSheetData(section),target=root.querySelector('#sectionFieldTable');
- if(!target)return [];
+ const d=ensureSectionSheetData(section),target=root.querySelector('#sectionFieldTable');if(!target)return [];
  let html='<table><thead><tr><th></th>'+SECTION_TABLE_COLS.map(([col,label])=>'<th>'+escapeHtml(label)+(sectionColumnAbsent(d,col)?'<div>No hi ha</div>':'')+'</th>').join('')+'</tr></thead><tbody>';
  for(const row of SECTION_TABLE_ROWS){
   html+='<tr><th>'+escapeHtml(row.label)+'</th>';
   for(const [col] of SECTION_TABLE_COLS){
    const absent=sectionColumnAbsent(d,col),value=absent?'No hi ha':String(d.table?.[row.key]?.[col]??'');
-   html+='<td'+(absent?' style="background:#e6e8e9"':'')+'><div class="section-table-cell-editor"><div class="field-table-quick-select">'+escapeHtml(value||'—')+'</div>'+
-     (absent?'':'<canvas class="section-table-ink-canvas '+(['erosionEvidence','accumulationEvidence','grainClasses'].includes(row.key)?'tall':'')+'" data-pdf-table-ink="'+escapeHtml(row.key)+'" data-pdf-col="'+escapeHtml(col)+'"></canvas>')+'</div></td>';
+   const note=absent?'':String(d.tableNotes?.[row.key]?.[col]||''),ink=d.tableInk?.[row.key]?.[col]||[];
+   const oldInk=!absent&&ink.length?'<canvas class="section-table-ink-canvas" data-pdf-table-ink="'+escapeHtml(row.key)+'" data-pdf-col="'+escapeHtml(col)+'"></canvas>':'';
+   html+='<td'+(absent?' style="background:#e6e8e9"':'')+'><div class="section-table-cell-editor"><div class="field-table-quick-select">'+escapeHtml(value||'—')+'</div>'+(note?'<div style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px">'+escapeHtml(note)+'</div>':'')+oldInk+'</div></td>';
   }
   html+='</tr>';
  }
