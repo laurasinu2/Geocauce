@@ -5906,7 +5906,236 @@ async function renderFitxaIIPage2(reach){
 function renderFitxaIIPage3(reach){const d=ensureReachSheetData(reach),c=document.createElement('canvas');c.width=1240;c.height=2050;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.fillStyle='#111';g.font='700 28px sans-serif';g.fillText('FIC (field index Connectivity)',55,60);let y=90;const x=[40,430,790,930,1200];g.lineWidth=3;g.strokeStyle='#222';const headerH=42;for(let i=0;i<4;i++)g.strokeRect(x[i],y,x[i+1]-x[i],headerH);g.font='700 18px sans-serif';g.fillText('Criteri',x[0]+8,y+27);g.fillText('Rang',x[1]+8,y+27);g.fillText('Puntuació',x[2]+8,y+27);g.fillText('notes',x[3]+8,y+27);y+=headerH;for(const row of REACH_FIC_ROWS){if(row.group){g.strokeRect(x[0],y,x[4]-x[0],42);g.fillText(row.group,x[0]+8,y+27);y+=42;continue;}const rec=d.fic[row.key],h=150;for(let i=0;i<4;i++)g.strokeRect(x[i],y,x[i+1]-x[i],h);g.font='700 16px sans-serif';simpleWrapCanvas(g,(row.prefix?row.prefix+' ':'')+row.label,x[0]+8,y+24,x[1]-x[0]-16,20,6);if(row.note){g.font='italic 14px sans-serif';simpleWrapCanvas(g,row.note,x[0]+8,y+115,x[1]-x[0]-16,18,3);}g.font='16px sans-serif';simpleWrapCanvas(g,row.options.find(o=>o.score===optionalScore(rec.score))?.text||'—',x[1]+8,y+30,x[2]-x[1]-16,22,4);g.font='700 26px sans-serif';g.textAlign='center';g.fillText(optionalScore(rec.score)!==null?String(rec.score):'—',(x[2]+x[3])/2,y+h/2);g.textAlign='left';const nc=document.createElement('canvas');nc.width=x[4]-x[3]-10;nc.height=h-10;const ng=nc.getContext('2d');ng.fillStyle='#fff';ng.fillRect(0,0,nc.width,nc.height);const nrr={width:nc.width,height:nc.height};for(const st of rec.noteInk||[])drawInkRecord(ng,nrr,st,1,false);g.drawImage(nc,x[3]+5,y+5);y+=h;}g.strokeRect(x[0],y,x[4]-x[0],88);g.font='italic 16px sans-serif';g.fillText('Total, puntuació del component pendent avall **',x[0]+8,y+25);g.font='14px sans-serif';simpleWrapCanvas(g,'Notes: ** Es proporciona la puntuació total del component de pendent ascendent. per: Sd=Ad+ Bd+Cd+ WdDd1 +(1 − Wa)Dd2',x[0]+8,y+48,x[2]-x[0]-15,18,2);g.font='700 26px sans-serif';g.fillText(String(calcReachFicTotal(reach)??'—'),x[2]+35,y+52);y+=88;g.fillStyle='#ddd';g.fillRect(x[0],y,x[4]-x[0],48);g.strokeRect(x[0],y,x[4]-x[0],48);g.fillStyle='#111';g.font='18px sans-serif';g.fillText('L’índex de connectivitat del camp ve donat per FIC=(Su+Sd)/2',x[0]+8,y+31);return c.toDataURL('image/png');}
 async function buildReachSheetExportPayload(reach){const course=reachCourse(reach);await ensureReachMdeStats(reach);return{title:'FITXA II - PERFIL LONGITUDINAL TRAM',filePrefix:'FITXA_II',projectName:state.project?.name||'',torrentName:course?.name||'',abbr:course?.abbr||'',reachCode:reach.reachCode||reach.id,page1Png:await renderFitxaIIPage1(reach),page2Png:await renderFitxaIIPage2(reach),page3Png:'',page4Png:''};}
 
-loadSectionPalette();loadProjectCatalog();initUi();initNativeAndroidUi();refreshAccountUi();applyAppSettings();renderMaterials();renderSectionColorChips();updateMaterialButton();$('#eraserSize').value=state.eraseSize;$$('[data-erase-mode]').forEach(b=>b.classList.toggle('active',b.dataset.eraseMode===state.eraseMode));setTool(state.tool,{quiet:true});updateCompass();renderProjectHome();window.addEventListener('beforeunload',()=>{if(state.projectId)persistState();});
+
+// ---------- Informe de camp determinista · organització per parades ----------
+let fieldReportPhotoUrls=[];
+function fieldReportClearPhotoUrls(){for(const u of fieldReportPhotoUrls)URL.revokeObjectURL(u);fieldReportPhotoUrls=[];}
+function fieldReportEsc(v){return escapeHtml(String(v??''));}
+function fieldReportHas(v){return v!==null&&v!==undefined&&String(v).trim()!=='';}
+function fieldReportText(v){return String(v??'').trim();}
+function fieldReportHeading(value,level=3){return '<h'+level+' contenteditable="true">'+fieldReportEsc(value)+'</h'+level+'>';}
+function fieldReportParagraph(value){return fieldReportHas(value)?'<p contenteditable="true">'+fieldReportEsc(value)+'</p>':'';}
+function fieldReportCoords(p){
+ if(!p)return '';
+ let parts=[];
+ if(Number.isFinite(p.utmX)&&Number.isFinite(p.utmY))parts.push('Coordenades: X '+p.utmX.toFixed(1)+' m · Y '+p.utmY.toFixed(1)+' m (EPSG:'+p.utmCrs+')');
+ else if(Number.isFinite(p.x)&&Number.isFinite(p.y)&&p.crs&&p.crs!==4326&&p.crs!==4258)parts.push('Coordenades del punt: X '+p.x.toFixed(1)+' · Y '+p.y.toFixed(1)+' (EPSG:'+p.crs+')');
+ if(Number.isFinite(p.lat)&&Number.isFinite(p.lon))parts.push('Lat/Lon: '+p.lat.toFixed(6)+', '+p.lon.toFixed(6));
+ if(Number.isFinite(p.altitude))parts.push('Altitud: '+p.altitude.toFixed(1)+' m');
+ if(Number.isFinite(p.accuracy))parts.push('Precisió GNSS: ±'+p.accuracy.toFixed(1)+' m');
+ return parts.map(x=>fieldReportParagraph(x)).join('');
+}
+function fieldReportCourse(feature){
+ let courseId=feature?.watercourseId||feature?.courseId||null;
+ if(!courseId&&feature?.reachId)courseId=state.features.find(x=>x.id===feature.reachId)?.courseId||null;
+ if(!courseId&&feature?.featureId){const f=state.features.find(x=>x.id===feature.featureId);return f?fieldReportCourse(f):null;}
+ if(!courseId)return null;
+ return state.features.find(x=>x.id===courseId&&x.type==='watercourse')||{id:courseId,name:feature.watercourseName||courseId};
+}
+function fieldReportStopFor(item,stops,{historical=false}={}){
+ if(item?.stopId)return stops.find(s=>s.id===item.stopId)||null;
+ if(!historical)return null;
+ const stamp=Number(item?.createdAt||item?.date||0);
+ if(!Number.isFinite(stamp)||!stamp)return null;
+ return stops.filter(s=>Number(s.createdAt)<=stamp).sort((a,b)=>b.createdAt-a.createdAt)[0]||null;
+}
+function fieldReportSections(reach){return state.features.filter(x=>x.type==='section'&&x.reachId===reach.id);}
+function fieldReportEntries(d,defs){
+ return defs.filter(([key])=>fieldReportHas(d?.[key])).map(([key,label])=>label+': '+fieldReportText(d[key])+'.');
+}
+function fieldReportReach(reach){
+ const d=reach.sheetII||{},course=fieldReportCourse(reach),name=reach.reachCode||reach.id;
+ let html=fieldReportHeading('FITXA II · PERFIL LONGITUDINAL '+name,4);
+ html+=fieldReportParagraph('Cauce: '+(course?.name||course?.abbr||course?.id||'No associat'));
+ const fields=fieldReportEntries(d,[['observer','Observador'],['visitDate','Data de visita'],['fieldSlope','Pendent mesurat a camp (º)'],['lithology','Litologia / material'],['profileType','Tipus de perfil'],['vegetationCover','Cobertura vegetal'],['vegetationType','Tipus dominant de vegetació'],['anthropic','Elements antròpics']]);
+ if(fieldReportHas(d.incisionGrade))fields.push('Grau d’incisió: '+reachIncisionLabel(d.incisionGrade)+'.');
+ const angle=Number.isFinite(reach.mdeStats?.mdeSlopePct)?Math.atan(reach.mdeStats.mdeSlopePct/100)*180/Math.PI:null;
+ if(Number.isFinite(angle))fields.push('Pendent mitjà del MDE: '+angle.toFixed(2)+'º.');
+ const ids=fieldReportSections(reach).map(x=>x.sectionName||x.id);
+ if(ids.length)fields.push('Seccions vinculades: '+ids.join(', ')+'.');
+ for(const [key,value] of Object.entries(d))if(!['observer','visitDate','fieldSlope','lithology','profileType','incisionGrade','vegetationCover','vegetationType','anthropic','fic','schemeInk','profileInk','profileObjects','profileVerticalScale'].includes(key)&&fieldReportHas(value)&&typeof value!=='object')fields.push(key+': '+value+'.');
+ html+=fieldReportParagraph(fields.join(' '));
+ return html;
+}
+function fieldReportFic(section){
+ const data=section.sheetIII?.fic||{},chosen=REACH_FIC_ROWS.filter(r=>!r.group&&fieldReportHas(data[r.key]?.score));
+ if(!chosen.length)return '';
+ let html=fieldReportHeading('FIC · FIELD INDEX OF CONNECTIVITY · '+(section.sectionName||section.id),5);
+ const texts=chosen.map(r=>{
+  const record=data[r.key],opt=r.options.find(o=>o.score===optionalScore(record.score));
+  return r.label+': '+(opt?.text||'Categoria no disponible')+'; puntuació '+record.score+'.'+(fieldReportHas(record.note)?' Nota: '+record.note+'.':'');
+ });
+ html+=fieldReportParagraph(texts.join(' '));
+ const required=['ad','bd','cd','dd1','dd2'];
+ if(required.every(k=>optionalScore(data[k]?.score)!==null))html+=fieldReportParagraph('Sumatori dels cinc components registrats: '+required.reduce((v,k)=>v+Number(data[k].score),0).toFixed(2)+'. El FIC final no es calcula sense disposar també de Su i Sd definits.');
+ return html;
+}
+function fieldReportSection(section){
+ const d=ensureSectionSheetData(section),course=fieldReportCourse(section),reach=state.features.find(f=>f.id===section.reachId),name=section.sectionName||d.sectionName||section.id;
+ let html=fieldReportHeading('FITXA III · SECCIÓ TRANSVERSAL '+name,4);
+ html+=fieldReportParagraph('Cauce: '+(course?.name||course?.abbr||course?.id||'No associat')+(reach?' · Tram: '+(reach.reachCode||reach.id):''));
+ const crossing=fieldSectionIntersection(section);
+ html+=crossing?fieldReportCoords(crossing):fieldReportParagraph('Punt d’intersecció amb el canal no disponible.');
+ const header=fieldReportEntries(d,[['observer','Observador'],['visitDate','Data de visita'],['sectionType','Tipus de secció'],['observations','Observacions']]);
+ const dimensions=section.sectionMeasurements||{};
+ header.push(...fieldReportEntries(dimensions,[['width','Amplada de secció'],['depth','Profunditat màxima'],['note','Observacions de mesura']]));
+ if(header.length)html+=fieldReportParagraph(header.join(' '));
+ for(const [col,label] of SECTION_TABLE_COLS){
+  if(sectionColumnAbsent(d,col)){html+=fieldReportParagraph(label+': no hi ha.');continue;}
+  const entries=[];
+  for(const row of SECTION_TABLE_ROWS){
+   const val=d.table?.[row.key]?.[col],note=d.tableNotes?.[row.key]?.[col];
+   if(fieldReportHas(val))entries.push(row.label+': '+val+'.');
+   if(fieldReportHas(note))entries.push('Observació ('+row.label+'): '+note+'.');
+  }
+  if(entries.length)html+=fieldReportParagraph(label+'. '+entries.join(' '));
+ }
+ return html+fieldReportFic(section);
+}
+function fieldReportPhotoMetadata(rec){
+ const fields=[];
+ if(fieldReportHas(rec.name))fields.push('Fotografia: '+rec.name);
+ if(rec.date)fields.push('Data: '+new Date(rec.date).toLocaleDateString('ca-ES'));
+ if(Number.isFinite(rec.heading))fields.push('Orientació: '+rec.heading.toFixed(0)+'º');
+ if(Number.isFinite(rec.gnss?.accuracy))fields.push('Precisió GNSS: ±'+rec.gnss.accuracy.toFixed(1)+' m');
+ if(fieldReportHas(rec.caption||rec.observation||rec.note))fields.push('Observació: '+(rec.caption||rec.observation||rec.note));
+ return fields.join(' · ');
+}
+function fieldReportPhoto(rec){
+ let html='<figure style="break-inside:avoid;margin:10px 0 18px">';
+ if(rec.blob){const url=URL.createObjectURL(rec.blob);fieldReportPhotoUrls.push(url);html+='<img src="'+fieldReportEsc(url)+'" style="display:block;max-width:100%;max-height:350px;object-fit:contain">';}
+ html+='<figcaption contenteditable="true">'+fieldReportEsc(fieldReportPhotoMetadata(rec))+'</figcaption>';
+ if(rec.gnss)html+=fieldReportCoords(rec.gnss);
+ return html+'</figure>';
+}
+function fieldReportHistorical(point,photos){
+ let html=fieldReportHeading('PUNT FOTOGRÀFIC HISTÒRIC '+(point.name||point.code||point.id),4);
+ html+=fieldReportCoords({x:point.x,y:point.y,crs:point.crs||workingMapEpsg(),lat:point.lat,lon:point.lon,utmX:point.utmX,utmY:point.utmY,utmCrs:point.utmCrs});
+ if(fieldReportHas(point.observation||point.note))html+=fieldReportParagraph(point.observation||point.note);
+ const list=photos.slice().sort((a,b)=>{const t=x=>x.historicalDate?Date.parse(x.historicalDate):Number(x.date||0);return t(a)-t(b)});
+ for(const p of list){html+=fieldReportParagraph(p.historicalDate?'Fotografia de '+p.historicalDate:'Fotografia actual');html+=fieldReportPhoto(p);}
+ return html;
+}
+function fieldReportMap(stops,historical){
+ const lines=state.features.filter(x=>x.type==='watercourse'&&x.points?.length>1),secs=state.features.filter(x=>x.type==='section');
+ const all=[...stops,...historical,...lines.flatMap(c=>c.points||[]),...secs.flatMap(s=>s.points||[])].filter(p=>Number.isFinite(p?.x)&&Number.isFinite(p?.y));
+ if(!all.length)return '';
+ const xs=all.map(p=>p.x),ys=all.map(p=>p.y),minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
+ const span=Math.max(maxx-minx,maxy-miny,1),pad=span*.07,w=1100,h=740,scale=Math.min((w-60)/(maxx-minx+pad*2),(h-60)/(maxy-miny+pad*2));
+ const xy=p=>({x:30+(p.x-minx+pad)*scale,y:h-30-(p.y-miny+pad)*scale});
+ const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');
+ g.fillStyle='#f7f8f5';g.fillRect(0,0,w,h);g.lineWidth=2;
+ for(const watercourse of lines){g.beginPath();let first=true;for(const p of watercourse.points){const v=xy(p);if(first){g.moveTo(v.x,v.y);first=false;}else g.lineTo(v.x,v.y);}g.strokeStyle='#2277a4';g.stroke();}
+ for(const section of secs){if(section.points?.length<2)continue;g.beginPath();let first=true;for(const p of section.points){const v=xy(p);if(first){g.moveTo(v.x,v.y);first=false;}else g.lineTo(v.x,v.y);}g.strokeStyle='#b97924';g.stroke();const it=fieldSectionIntersection(section);if(it){const p=xy(it);g.fillStyle='#b97924';g.fillRect(p.x-4,p.y-4,8,8);}}
+ for(let i=0;i<stops.length;i++){const stop=stops[i],p=xy(stop);g.beginPath();g.arc(p.x,p.y,11,0,Math.PI*2);g.fillStyle='#58339f';g.fill();g.fillStyle='#fff';g.font='bold 13px sans-serif';g.textAlign='center';g.fillText(String(i+1),p.x,p.y+4);}
+ for(const hp of historical){const p=xy(hp);g.fillStyle='#216c50';g.beginPath();g.moveTo(p.x,p.y-10);g.lineTo(p.x+10,p.y+8);g.lineTo(p.x-10,p.y+8);g.closePath();g.fill();}
+ g.fillStyle='#333';g.textAlign='left';g.font='14px sans-serif';g.fillText('● Parades   ━ Cauces   ━ Seccions   ▲ Punts històrics',24,25);
+ return c.toDataURL('image/png');
+}
+function fieldReportSummary(items){
+ const courses=new Set(items.filter(x=>x.course).map(x=>x.course.id));
+ const sections=items.filter(x=>x.kind==='section').length,photos=items.filter(x=>x.kind==='photo').length,historical=items.filter(x=>x.kind==='historical').length,reaches=items.filter(x=>x.kind==='reach').length;
+ const words=[];
+ if(courses.size)words.push(courses.size+' cauce'+(courses.size!==1?'s':''));
+ if(reaches)words.push(reaches+' tram'+(reaches!==1?'s':''));
+ if(sections)words.push(sections+' secció'+(sections!==1?'ns transversals':' transversal'));
+ if(photos)words.push(photos+' fotografia'+(photos!==1?'s':'')+' de camp');
+ if(historical)words.push(historical+' punt'+(historical!==1?'s':'')+' fotogràfic'+(historical!==1?'s':'')+' històric'+(historical!==1?'s':''));
+ return words.length?'Durant aquesta parada s’han registrat '+words.join(', ')+'.':'No hi ha elements documentats vinculats a aquesta parada.';
+}
+function fieldReportItems(stops,photos){
+ const items=[],assignedPhoto=new Set();
+ for(const f of state.features.filter(x=>x.type==='reach'||x.type==='section'||x.type==='deposit')){
+  items.push({kind:f.type,obj:f,stop:fieldReportStopFor(f,stops),course:fieldReportCourse(f)});
+ }
+ for(const p of state.mapPins.filter(x=>x.kind==='note'))items.push({kind:'note',obj:p,stop:fieldReportStopFor(p,stops),course:fieldReportCourse(p)});
+ for(const point of state.historicalPhotoPoints){
+  const records=photos.filter(p=>p.historicalPointId===point.id||point.photos?.includes(p.id));
+  for(const rec of records)assignedPhoto.add(rec.id);
+  const owner=point.stopId||point.linkedStopId?{...point,stopId:point.stopId||point.linkedStopId}:point;
+  const stamp=records.reduce((v,r)=>Math.max(v,r.date||0),point.createdAt||0);
+  items.push({kind:'historical',obj:point,photos:records,stop:fieldReportStopFor({...owner,createdAt:stamp},stops,{historical:true}),course:fieldReportCourse(point)});
+ }
+ for(const p of photos){
+  if(assignedPhoto.has(p.id))continue;
+  const attached=state.features.find(f=>f.id===p.featureId)||null;
+  items.push({kind:'photo',obj:p,stop:fieldReportStopFor(p,stops),course:fieldReportCourse(p)||fieldReportCourse(attached),featureId:p.featureId});
+ }
+ return items;
+}
+async function fieldReportBuild(){
+ fieldReportClearPhotoUrls();
+ const stops=state.mapPins.filter(x=>x.kind==='stop'&&x.campaignId===state.campaign).slice().sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+ const allPhotos=await dbAll('photos'),photos=allPhotos.filter(p=>p.campaignId===state.campaign);
+ const items=fieldReportItems(stops,photos),usedPhotos=new Set();
+ let html='<article class="field-report-page">'+fieldReportHeading('INFORME DE CARACTERITZACIÓ GEOMORFOLÒGICA DE CAMP',2);
+ const campaign=currentCampaign();
+ for(const [label,value] of [['Projecte',state.project?.name],['Campanya',campaign?.name],['Data',campaign?.date],['Observador',campaign?.author||state.project?.author],['Zona',state.project?.zone],['Torrent principal',state.project?.torrent]])if(fieldReportHas(value))html+=fieldReportParagraph(label+': '+value);
+ html+='</article>';
+ const map=fieldReportMap(stops,state.historicalPhotoPoints);
+ if(map)html+='<article class="field-report-page">'+fieldReportHeading('MAPA GENERAL DE LA SORTIDA',2)+'<img src="'+map+'" style="width:100%;height:auto;max-height:630px;object-fit:contain"></article>';
+ for(let i=0;i<stops.length+1;i++){
+  const stop=stops[i]||null,stopItems=items.filter(x=>x.stop?.id===(stop?.id||null));
+  if(!stop&&(!stopItems.length||stops.length===0&&items.length===0))continue;
+  html+='<article class="field-report-page">'+fieldReportHeading(stop?'PARADA '+(i+1):'ELEMENTS SENSE PARADA ASSIGNADA',2);
+  if(stop){html+=fieldReportCoords(stop.position||{x:stop.x,y:stop.y,crs:stop.crs||workingMapEpsg()});html+=fieldReportParagraph(fieldReportSummary(stopItems));}
+  const courses=[...new Map(stopItems.filter(x=>x.course).map(x=>[x.course.id,x.course])).values()];
+  const groups=[...courses.map(course=>({course,items:stopItems.filter(x=>x.course?.id===course.id)})),{course:null,items:stopItems.filter(x=>!x.course)}];
+  for(const group of groups){
+   if(!group.items.length)continue;
+   html+=fieldReportHeading(group.course?(group.course.name||group.course.abbr||group.course.id):'Altres observacions de la parada',3);
+   const ordered=group.items.slice().sort((a,b)=>({reach:0,section:1,note:2,photo:3,historical:4,deposit:5}[a.kind]??9)-({reach:0,section:1,note:2,photo:3,historical:4,deposit:5}[b.kind]??9));
+   for(const item of ordered){
+    if(item.kind==='reach')html+=fieldReportReach(item.obj);
+    if(item.kind==='section')html+=fieldReportSection(item.obj);
+    if(item.kind==='note')html+=fieldReportHeading('OBSERVACIONS',4)+fieldReportParagraph(item.obj.text);
+    if(item.kind==='deposit')html+=fieldReportHeading('DIPÒSIT '+(item.obj.name||item.obj.id),4)+fieldReportParagraph(fieldReportEntries(item.obj,[['material','Material'],['observations','Observacions']]).join(' '));
+    if(item.kind==='photo'){
+     if(usedPhotos.has(item.obj.id))continue;usedPhotos.add(item.obj.id);
+     html+=fieldReportHeading('FOTOGRAFIES DE CAMP',4)+fieldReportPhoto(item.obj);
+    }
+    if(item.kind==='historical'){
+     html+=fieldReportHeading('FOTOGRAFIES HISTÒRIQUES',4)+fieldReportHistorical(item.obj,item.photos);
+     for(const p of item.photos)usedPhotos.add(p.id);
+    }
+   }
+  }
+  html+='</article>';
+ }
+ return html;
+}
+function fieldReportInit(){
+ const projectBtn=$('#downloadContentsBtn');if(!projectBtn||$('#fieldReportOpen'))return;
+ const button=document.createElement('button');button.id='fieldReportOpen';button.type='button';button.className='secondary full icon-text';button.textContent='Generar informe de camp';projectBtn.parentElement.insertBefore(button,projectBtn.nextSibling);
+ const modal=document.createElement('div');modal.id='fieldReportModal';modal.className='modal hidden';
+ modal.innerHTML='<div class="modal-card" style="width:min(96vw,1100px);height:94vh;display:flex;flex-direction:column;padding:16px"><header style="display:flex;justify-content:space-between;align-items:center"><h2>Informe de camp · previsualització</h2><button type="button" id="fieldReportClose">Tancar</button></header><p style="font-size:12px">Pots editar els textos d’aquesta còpia sense modificar les fitxes originals.</p><div id="fieldReportContent" style="flex:1;overflow:auto;background:#ecefec;padding:12px"></div><footer style="display:flex;justify-content:flex-end;gap:12px;padding-top:10px"><button type="button" id="fieldReportRegenerate">Regenerar</button><button type="button" id="fieldReportPdf">Exportar PDF</button></footer></div>';
+ document.body.appendChild(modal);
+ const preview=$('#fieldReportContent');
+ const close=()=>{modal.classList.add('hidden');fieldReportClearPhotoUrls();};
+ $('#fieldReportClose').onclick=close;
+ const generate=async()=>{preview.textContent='Generant informe local…';try{preview.innerHTML=await fieldReportBuild();}catch(e){preview.textContent='No s’ha pogut generar l’informe: '+(e.message||e);console.error(e);}};
+ button.onclick=async()=>{if(!state.projectId)return;modal.classList.remove('hidden');await generate();};
+ $('#fieldReportRegenerate').onclick=()=>{if(confirm('Regenerar el text? Es perdran les modificacions manuals de la previsualització.'))generate();};
+ $('#fieldReportPdf').onclick=async()=>{
+  if(!window.GeoCauceFieldPdf){toast('Generador PDF local no disponible');return;}
+  const btn=$('#fieldReportPdf');btn.disabled=true;
+  const stage=localPdfStage();
+  try{
+   const pages=[...preview.querySelectorAll('.field-report-page')].map(page=>{
+    const copy=page.cloneNode(true);copy.querySelectorAll('[contenteditable]').forEach(x=>x.removeAttribute('contenteditable'));
+    Object.assign(copy.style,{background:'#fff',width:'1050px',padding:'36px',boxSizing:'border-box',fontFamily:'Arial,sans-serif',color:'#18262d',lineHeight:'1.6',minHeight:'0',height:'auto',overflow:'visible',pageBreakInside:'avoid'});
+    copy.querySelectorAll('p').forEach(x=>{x.style.margin='8px 0';x.style.whiteSpace='pre-wrap';});
+    copy.querySelectorAll('h2,h3,h4,h5').forEach(x=>{x.style.margin='18px 0 8px';x.style.breakAfter='avoid';});
+    stage.appendChild(copy);return copy;
+   });
+   await Promise.all([...stage.querySelectorAll('img')].map(img=>img.decode?.().catch(()=>{})||Promise.resolve()));
+   const pdf=await window.GeoCauceFieldPdf.fromElements(pages);
+   await downloadBlob(pdf,'Informe_camp_'+(state.project?.name||'GeoCauce').replace(/[^a-zA-Z0-9_-]+/g,'_')+'.pdf');
+  }catch(e){console.error(e);toast('Error exportant l’informe: '+(e.message||e),6000);}finally{stage.remove();btn.disabled=false;}
+ };
+}
+
+loadSectionPalette();loadProjectCatalog();initUi();fieldReportInit();initNativeAndroidUi();refreshAccountUi();applyAppSettings();renderMaterials();renderSectionColorChips();updateMaterialButton();$('#eraserSize').value=state.eraseSize;$$('[data-erase-mode]').forEach(b=>b.classList.toggle('active',b.dataset.eraseMode===state.eraseMode));setTool(state.tool,{quiet:true});updateCompass();renderProjectHome();window.addEventListener('beforeunload',()=>{if(state.projectId)persistState();});
 
 // Bindings added in v0.16.18
 installReachProfileEditor();renderReachProfileColors();renderFicQuickColors();
