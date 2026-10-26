@@ -2519,6 +2519,15 @@ function addMapStopAt(point){
   toast(gnss?label+' · posició GNSS registrada':label+' · GNSS no disponible; es manté el punt del mapa',4500);
  }).catch(e=>{console.warn('GNSS de la parada',e);const current=mapStopById(pin.id);if(current){current.gnssPending=false;persistState();}toast('La parada s’ha guardat sense posició GNSS',4500);}).finally(()=>{state.stopCreationPending=false;});
 }
+function createStopFromMapCenter(){
+ if(!state.projectId||!requireEditable('crear una parada'))return false;
+ if(state.stopCreationPending){toast('Encara s’està registrant la parada anterior');return false;}
+ const canvas=$('#inkCanvas')||$('#mapCanvas');const rect=canvas?.getBoundingClientRect();
+ if(!rect||!rect.width||!rect.height){toast('Obre el mapa per crear una parada');return false;}
+ const point=screenToWorld({x:rect.width/2,y:rect.height/2});
+ addMapStopAt(point);
+ return true;
+}
 function beginPointRelocation(kind){
   const id=kind==='stop'?state.currentStopId:state.currentHistoricalPointId;
   const point=kind==='stop'?mapStopById(id):historicalPointById(id);
@@ -6233,6 +6242,11 @@ async function fieldReportBuild(){
  if(fieldReportHas(general))html+='<article class="field-report-page">'+fieldReportHeading('OBSERVACIONS GENERALS DE LA SORTIDA',2)+fieldReportParagraph(general)+'</article>';
  return html;
 }
+function openFieldReportFromMobile(){
+ if(!state.projectId){toast('Obre un projecte per generar l’informe');return;}
+ fieldReportInit();
+ $('#fieldReportOpen')?.click();
+}
 function fieldReportInit(){
  const projectBtn=$('#downloadContentsBtn');if(!projectBtn||$('#fieldReportOpen'))return;
  const button=document.createElement('button');button.id='fieldReportOpen';button.type='button';button.className='secondary full icon-text';button.textContent='Generar informe de camp';projectBtn.parentElement.insertBefore(button,projectBtn.nextSibling);
@@ -6358,6 +6372,15 @@ window.GeoCauceMobileApi={
   openNotebook,
   locateMe,
   setTool,
+  createStopFromMapCenter,
+  openFieldReportFromMobile,
+  switchCampaign,
+  toggleRasterVisible:(id)=>{
+   const r=state.rasters.find(x=>String(x.id)===String(id));
+   if(!r)return false;
+   r.visible=r.visible===false;
+   persistState();drawAll();return r.visible!==false;
+  },
   closeFloatingPanels,
   openHistoricalPhotoPoint,
   openAccountManage,
