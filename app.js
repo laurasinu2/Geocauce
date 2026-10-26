@@ -206,6 +206,16 @@ function loadCloudSession(){try{return JSON.parse(localStorage.getItem(AUTH_SESS
 function saveCloudSession(session){if(session)localStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(session));else localStorage.removeItem(AUTH_SESSION_KEY);refreshAccountUi();if(session?.access_token)scheduleCloudSync(2500);}
 function authEntryChoice(){return localStorage.getItem(AUTH_PREF_KEY)||'';}
 function setAuthEntryChoice(v){if(v)localStorage.setItem(AUTH_PREF_KEY,v);else localStorage.removeItem(AUTH_PREF_KEY);}
+function projectCanWrite(){return !state.project||!['viewer','unknown'].includes(state.project._accessRole);}
+async function resolveProjectRole(project){
+ const uid=loadCloudSession()?.user?.id;
+ if(!project?.cloudProjectId||!uid)return 'local';
+ if(!navigator.onLine||!cloudConfigured())return project.ownerUserId===uid?'owner':'unknown';
+ try{
+  const role=await cloudFetch('/rest/v1/rpc/geocauce_project_role',{method:'POST',body:{p_project_id:String(project.cloudProjectId)}});
+  return ['owner','editor','viewer'].includes(role)?role:'unknown';
+ }catch(e){console.warn('Rol del proyecto no disponible',e);return 'unknown';}
+}
 function sessionUser(session=loadCloudSession()){return session?.user||null;}
 function sessionEmail(session=loadCloudSession()){return sessionUser(session)?.email||'';}
 function sessionExpired(session=loadCloudSession()){
@@ -863,6 +873,7 @@ function cloudResolveFieldConflicts(conflicts){
 }
 
 async function cloudBidirectionalSync({manual=false}={}){
+ if(!projectCanWrite()){if(manual)toast('Solo lectura: utiliza Descargar cambios');return false;}
  if(cloudDeltaRunning||cloudSyncRunning||cloudRestoreRunning||!state.projectId||!state.project)return false;
  if(!window.GeoCauceDeltaSync){if(manual)toast('Actualiza GeoCauce para activar la sincronización incremental');return false;}
  if(!loadCloudSession()?.access_token||!cloudConfigured()){if(manual)toast('Inicia sesión para sincronizar');return false;}
@@ -1012,6 +1023,7 @@ function cloudConflictChoice(){
   });
 }
 async function uploadCloudChanges(){
+ if(!projectCanWrite()){toast('Los visualizadores no pueden subir cambios');return false;}
   if(!state.projectId||!state.project){toast('Abre un proyecto para subir cambios');return false;}
   if(!navigator.onLine){toast('Sin conexión. Los datos siguen guardados en el dispositivo.');return false;}
   if(cloudSyncRunning||cloudRestoreRunning||cloudDeltaRunning){toast('Ya hay una transferencia en curso');return false;}
@@ -1085,6 +1097,7 @@ async function cloudStructuredSnapshot(assetMetadata=null){
   return {...base,cloudSchema:4,appVersion:'0.16.39-android-alpha',sectionPalette:cloneAny(sectionPalette||[]),appSettings:cloneAny(appSettings),assetMetadata};
 }
 async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={}){
+ if(!projectCanWrite())return false;
   if(cloudSyncRunning||cloudRestoreRunning||!state.projectId||!state.project)return false;
   const session=loadCloudSession();if(!session?.access_token){if(manual)toast('Inicia sesión para sincronizar');return false;}
   if(!cloudConfigured()){if(manual)toast('Supabase todavía no está configurado');return false;}
@@ -1146,9 +1159,9 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
   }catch(e){cloudLastError=`Pendiente: ${e.message||e}`;console.warn('Cloud sync',e);if(manual){cloudProgressFinish(false,'Error al subir');toast(`No se pudo sincronizar: ${e.message||e}`,6500);}refreshAccountUi();return false;}
   finally{cloudSyncRunning=false;refreshAccountUi();}
 }
-function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);if(!state.projectId||!cloudConfigured()||!loadCloudSession()?.access_token||!navigator.onLine||document.hidden)return;cloudSyncTimer=setTimeout(()=>{cloudBidirectionalSync({manual:false}).catch(e=>console.warn('Background sync',e));},Math.max(600,delay));}
+function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);if(!state.projectId||!projectCanWrite()||!cloudConfigured()||!loadCloudSession()?.access_token||!navigator.onLine||document.hidden)return;cloudSyncTimer=setTimeout(()=>{cloudBidirectionalSync({manual:false}).catch(e=>console.warn('Background sync',e));},Math.max(600,delay));}
 function persistStateLocalOnly(){
-  if(!state.projectId)return;const previousCloudPayload=localStorage.getItem(projectStateKey(state.projectId));syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));cloudQueueStateDiff(state.projectId,previousCloudPayload,payload);touchProject();nativeSyncProject(payload);return payload;
+  if(!state.projectId||!projectCanWrite())return;const previousCloudPayload=localStorage.getItem(projectStateKey(state.projectId));syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));cloudQueueStateDiff(state.projectId,previousCloudPayload,payload);touchProject();nativeSyncProject(payload);return payload;
 }
 window.addEventListener('online',()=>{refreshAccountUi();cloudRefreshProjectCatalog().catch(()=>{});scheduleCloudSync(800);});window.addEventListener('offline',()=>{clearTimeout(cloudSyncTimer);refreshAccountUi();});document.addEventListener('visibilitychange',()=>{if(!document.hidden)scheduleCloudSync(700);});setInterval(()=>{if(!document.hidden&&navigator.onLine&&state.projectId)scheduleCloudSync(1000);},90000);
 
@@ -1545,6 +1558,7 @@ async function openProject(id,opt={}){
   if((cloudRestoreRunning||cloudSyncRunning||cloudDeltaRunning)&&state.projectId&&id!==state.projectId){toast('Espera a que termine la sincronización antes de cambiar de proyecto');return;}
   if(state.view3d?.active)exit3DMode({quiet:true});
   const p=projectById(id);if(!p)return;
+   p._accessRole=await resolveProjectRole(p);
   const needsCloudRestore=!localStorage.getItem(projectStateKey(id))||p._cloudOnly===true;
   if(needsCloudRestore&&(!loadCloudSession()?.access_token||!navigator.onLine)){
     toast('Proyecto en la nube: inicia sesión y conecta Internet para descargarlo.',6000);return;
@@ -1562,7 +1576,7 @@ async function openProject(id,opt={}){
   }
   restoreState(id);state.rasters=[];
   hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';
-  updateProjectUi();scheduleCloudSync(1200);renderMaterials();updateMaterialButton();updateCampaignUi();$('#eraserSize').value=state.eraseSize;$$('[data-erase-mode]').forEach(b=>b.classList.toggle('active',b.dataset.eraseMode===state.eraseMode));setTool(state.tool,{quiet:true});renderSectionList();updateCompass();updateGnssUi();setTimeout(resize,20);await loadRasters();await hydrateReferenceLayersAfterOpen();touchProject();
+  updateProjectUi();updateReadOnlyUi();scheduleCloudSync(1200);renderMaterials();updateMaterialButton();updateCampaignUi();$('#eraserSize').value=state.eraseSize;$$('[data-erase-mode]').forEach(b=>b.classList.toggle('active',b.dataset.eraseMode===state.eraseMode));setTool(state.tool,{quiet:true});renderSectionList();updateCompass();updateGnssUi();setTimeout(resize,20);await loadRasters();await hydrateReferenceLayersAfterOpen();touchProject();
   }finally{projectOpenInProgress=false;}
 }
 function updateProjectUi(){
@@ -1587,9 +1601,10 @@ function undoLast(){if(!requireEditable('deshacer cambios'))return;if(!state.his
 function currentCampaign(){return (state.campaigns||[]).find(c=>c.id===state.campaign)||null;}
 function campaignById(id){return (state.campaigns||[]).find(c=>c.id===id)||null;}
 function campaignLabel(id){const c=campaignById(id);return c?c.name:id;}
-function isEditableCampaign(id=state.campaign){return !!id&&id===state.editableCampaign;}
+function isEditableCampaign(id=state.campaign){return projectCanWrite()&&!!id&&id===state.editableCampaign;}
 function requireEditable(action='editar'){
   if(isEditableCampaign())return true;
+  if(!projectCanWrite()){toast('Proyecto en solo lectura: acción no permitida',3600);return false;}
   const c=currentCampaign();toast(`${c?.name||'Este día'} está bloqueado. Crea un Nuevo día para ${action}.`,3600);
   return false;
 }
@@ -1619,7 +1634,7 @@ function syncCurrentCampaign(){const c=currentCampaign();if(c&&isEditableCampaig
 function getPreviousCampaign(){const c=currentCampaign();if(c?.parentId)return campaignById(c.parentId);const i=(state.campaigns||[]).findIndex(x=>x.id===state.campaign);return i>0?state.campaigns[i-1]:null;}
 function updateReadOnlyUi(){
   const ro=!isEditableCampaign();
-  const badge=$('#readOnlyBadge');if(badge){badge.classList.toggle('hidden',!ro);badge.textContent=ro?`🔒 ${currentCampaign()?.name||'Día anterior'} · solo lectura`:'';}
+  const badge=$('#readOnlyBadge');if(badge){badge.classList.toggle('hidden',!ro);badge.textContent=ro?(!projectCanWrite()?'🔒 Visualizador · solo lectura':`🔒 ${currentCampaign()?.name||'Día anterior'} · solo lectura`):'';}
   document.body.classList.toggle('viewing-readonly',ro);
   const editTools=new Set(['boundary','editContour','fill','paint','basin','watercourse','reach','channel','section','photo','historicalPhoto','erase']);
   $$('#toolMenu button[data-tool]').forEach(b=>{b.disabled=ro&&editTools.has(b.dataset.tool);b.title=b.disabled?'Día anterior: crea un Nuevo día para editar':'';});
@@ -4327,7 +4342,7 @@ function makeRootCampaign(features=[],opts={}){
   return {id:'D01',name:'Día 01',date:opts.date||today(),author:opts.author||state.project?.author||'',event:opts.event||'initial',notes:opts.notes||'',parentId:null,upserts:cloneAny(normalized),deleted:[],order:normalized.map(f=>f.id),createdAt:Date.now()};
 }
 function persistState(){
-  if(!state.projectId)return;
+  if(!state.projectId||!projectCanWrite())return;
   try{persistStateLocalOnly();scheduleCloudSync();}
   catch(e){console.warn('No se pudo guardar el estado',e);toast('⚠ No se pudo guardar el estado local. Haz una copia del proyecto.',4200);}
 }
