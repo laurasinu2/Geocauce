@@ -6194,20 +6194,25 @@ function fieldReportInit(){
  const button=document.createElement('button');button.id='fieldReportOpen';button.type='button';button.className='secondary full icon-text';button.textContent='Generar informe de camp';projectBtn.parentElement.insertBefore(button,projectBtn.nextSibling);
  const sheet=document.createElement('style');sheet.textContent='#fieldReportContent .field-report-page{background:#fff;color:#1b2930;font:15px/1.65 Arial,sans-serif;margin:0 auto 14px;max-width:960px;padding:34px;box-sizing:border-box}#fieldReportContent h2{font-size:23px;line-height:1.3;border-bottom:2px solid #3e6679;padding-bottom:10px}#fieldReportContent h3{font-size:19px;margin-top:26px;color:#31536a}#fieldReportContent h4{font-size:16px;margin-top:22px}#fieldReportContent h5{font-size:14px}#fieldReportContent [contenteditable]{border-radius:3px;outline-offset:3px}#fieldReportContent [contenteditable]:focus{outline:2px solid #367ba1;background:#eef6fa}#fieldReportContent figure{max-width:100%;break-inside:avoid}#fieldReportContent figure img{border:1px solid #dadfe2}#fieldReportContent p{white-space:pre-wrap;overflow-wrap:anywhere;margin:9px 0}';document.head.appendChild(sheet);
  const modal=document.createElement('div');modal.id='fieldReportModal';modal.className='modal hidden';
- modal.innerHTML='<div class="modal-card" style="width:min(96vw,1100px);height:94vh;display:flex;flex-direction:column;padding:16px"><header style="display:flex;justify-content:space-between;align-items:center"><h2>Informe de camp · previsualització</h2><button type="button" id="fieldReportClose">Tancar</button></header><p style="font-size:12px">Pots editar els textos d’aquesta còpia sense modificar les fitxes originals.</p><div id="fieldReportContent" style="flex:1;overflow:auto;background:#ecefec;padding:12px"></div><footer style="display:flex;justify-content:flex-end;gap:12px;padding-top:10px"><button type="button" id="fieldReportRegenerate">Regenerar</button><button type="button" id="fieldReportPdf">Exportar PDF</button></footer></div>';
+ modal.innerHTML='<div class="modal-card" style="width:min(96vw,1100px);height:94vh;display:flex;flex-direction:column;padding:16px"><header style="display:flex;justify-content:space-between;align-items:center"><h2>Informe de camp · previsualització</h2><button type="button" id="fieldReportClose">Tancar</button></header><p style="font-size:12px">Pots editar els textos d’aquesta còpia sense modificar les fitxes originals.</p><div id="fieldReportContent" style="flex:1;overflow:auto;background:#ecefec;padding:12px"></div><footer style="display:flex;justify-content:flex-end;gap:12px;padding-top:10px"><button type="button" id="fieldReportAddGeneral">Afegir observacions generals</button><button type="button" id="fieldReportRegenerate">Regenerar</button><button type="button" id="fieldReportPdf">Exportar PDF</button></footer></div>';
  document.body.appendChild(modal);
  const preview=$('#fieldReportContent');
  const close=()=>{modal.classList.add('hidden');fieldReportClearPhotoUrls();};
  $('#fieldReportClose').onclick=close;
  const generate=async()=>{preview.textContent='Generant informe local…';try{preview.innerHTML=await fieldReportBuild();}catch(e){preview.textContent='No s’ha pogut generar l’informe: '+(e.message||e);console.error(e);}};
  button.onclick=async()=>{if(!state.projectId)return;modal.classList.remove('hidden');await generate();};
+ $('#fieldReportAddGeneral').onclick=()=>{
+  let page=preview.querySelector('[data-field-report-general-manual]');
+  if(!page){page=document.createElement('article');page.className='field-report-page';page.dataset.fieldReportGeneralManual='true';page.innerHTML=fieldReportHeading('OBSERVACIONS GENERALS DE LA SORTIDA',2)+'<p contenteditable="true" data-field-report-general-note="true"></p>';preview.appendChild(page);}
+  page.querySelector('[data-field-report-general-note]').focus();
+ };
  $('#fieldReportRegenerate').onclick=()=>{if(confirm('Regenerar el text? Es perdran les modificacions manuals de la previsualització.'))generate();};
  $('#fieldReportPdf').onclick=async()=>{
   if(!window.GeoCauceFieldPdf){toast('Generador PDF local no disponible');return;}
   const btn=$('#fieldReportPdf');btn.disabled=true;
   const stage=localPdfStage();
   try{
-   const pages=[...preview.querySelectorAll('.field-report-page')].map(page=>{
+   const pages=[...preview.querySelectorAll('.field-report-page')].filter(page=>!page.dataset.fieldReportGeneralManual||!!page.querySelector('[data-field-report-general-note]')?.textContent.trim()).map(page=>{
     const copy=page.cloneNode(true);copy.querySelectorAll('[contenteditable]').forEach(x=>x.removeAttribute('contenteditable'));
     Object.assign(copy.style,{background:'#fff',width:'1050px',padding:'36px',boxSizing:'border-box',fontFamily:'Arial,sans-serif',color:'#18262d',lineHeight:'1.6',minHeight:'0',height:'auto',overflow:'visible',pageBreakInside:'avoid'});
     copy.querySelectorAll('p').forEach(x=>{x.style.margin='8px 0';x.style.whiteSpace='pre-wrap';});
