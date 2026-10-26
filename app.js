@@ -4543,6 +4543,7 @@ async function photoChosen(file){
   state.pendingPhotoLocation=null;
   if(f){f.photos=f.photos||[];f.photos.push(id);persistState();toast(`Foto asociada a ${f.id}`);if(state.selectedId===f.id)showFeatureCard(f);if(!$('#photoGalleryModal').classList.contains('hidden'))openPhotoGallery(f.id);}
   else{persistState();drawAll();toast(photoPinLocation?'Foto guardada y marcada en el mapa':'Foto guardada sin posición GPS (puedes asociarla después)',4500);}
+  window.dispatchEvent(new CustomEvent('geocauce-photo-saved',{detail:{id,hasPosition:!!photoPinLocation}}));
 }
 function gnssQuality(acc){return !Number.isFinite(acc)?'unknown':acc<=5?'good':acc<=12?'mid':'poor';}
 function updateGnssUi(){
@@ -6128,7 +6129,7 @@ function initUi(){
   $('#notesBtn').onclick=openNotesForSelected;$('#featureMoreBtn').onclick=()=>{const menu=$('#featureMoreMenu'),open=menu.classList.contains('hidden');menu.classList.toggle('hidden',!open);$('#featureMoreBtn').setAttribute('aria-expanded',String(open));};$('#editContourBtn').onclick=()=>{const f=state.features.find(x=>x.id===state.selectedId);if(f?.type==='reach'){openReachEditModal(f);$('#featureMoreMenu').classList.add('hidden');return;}if(!f?.closed){toast('La edición de contorno necesita un polígono cerrado');return;}$('#featureMoreMenu').classList.add('hidden');setTool('editContour');};
   $('#changesBtn').onclick=()=>{$('#campaignPanel').classList.remove('hidden');updateCampaignUi();};
   $('#deleteFeatureBtn').onclick=()=>state.selectedId&&deleteFeature(state.selectedId,true);
-  $('#photoInput').onchange=e=>{photoChosen(e.target.files[0]);e.target.value='';};
+  $('#photoInput').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)photoChosen(file).catch(err=>{console.error('Error guardando fotografía',err);toast('No se pudo guardar la foto: '+(err.message||err),6500);});};
   $('#projectImportInput').onchange=e=>{const f=e.target.files?.[0];e.target.value='';if(f)importProjectPackage(f);};$('#gnssBadge').onclick=()=>{updateGnssUi();$('#gnssPopover').classList.toggle('hidden');};$('#gnssPopoverClose').onclick=()=>$('#gnssPopover').classList.add('hidden');$('#gnssRefreshBtn').onclick=locateMe;
   $('#sheetClose').onclick=closeSheet;$('#sheetUndo').onclick=()=>{const c=$('#sheetCanvas');if(c._readOnly){toast('Ficha en solo lectura');return;}c._inkStore?.pop();redrawInkStore(c);};
   $$('[data-sheet-tool]').forEach(b=>b.onclick=()=>{if($('#sheetCanvas')._readOnly)return;state.sheetTool=b.dataset.sheetTool;$$('[data-sheet-tool]').forEach(x=>x.classList.toggle('active',x===b));});
