@@ -12,7 +12,7 @@
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="stylesheet" href="styles.css?v=20261016-generalmap-r27" />
-  <link rel="stylesheet" href="mobile-pwa.css?v=20261016-generalmap-r27" />
+  <link rel="stylesheet" href="mobile-pwa.css?v=20261027-stops-mobile-r1" />
 </head>
 <body>
   <div id="app">
@@ -240,6 +240,7 @@ CON | Confluencia"></textarea></div>
       <div class="top-right">
         <button id="searchBtn" class="square-btn text-icon-btn" title="Buscar">⌕</button>
         <button id="legendBtn" class="square-btn icon-only" title="Leyenda"><img src="icons/material.png" alt=""></button>
+        <button id="newFieldStopBtn" class="pill compact icon-text" type="button" title="Crear parada GNSS en aquesta ubicació"><img src="icons/gps.png" alt=""><span>Nova parada</span></button>
         <button id="campaignBtn" class="pill compact icon-text" title="Campañas"><img src="icons/visita.png" alt=""><span id="campaignBtnLabel">Día 01</span></button>
         <button id="layersBtn" class="square-btn icon-only" title="Capas"><img src="icons/capas.png" alt=""><span id="layersQueueBadge" class="layers-queue-badge hidden">0</span></button>
       </div>
@@ -1220,7 +1221,7 @@ CON | Confluencia"></textarea></div>
 
     <div id="mobileMapBar" class="mobile-map-bar hidden">
       <button id="mMapHome"><img src="icons/proyecto.png" alt=""><span>Inicio</span></button>
-      <button class="active"><img src="icons/mapa.png" alt=""><span>Mapa</span></button>
+      <button id="mMapView" class="active" type="button"><img src="icons/mapa.png" alt=""><span>Mapa</span></button>
       <button id="mMapAdd" class="m-map-add">＋</button>
       <button id="mMapProjects"><img src="icons/proyecto.png" alt=""><span>Proyectos</span></button>
       <button id="mMapProfile"><img src="icons/cuenta.svg" alt=""><span>Perfil</span></button>
@@ -1285,7 +1286,7 @@ CON | Confluencia"></textarea></div>
   <script src="local-export-zip.js?v=20261016-generalmap-r27"></script>
   <script src="field-sheet-pdf.js?v=20261016-generalmap-r27"></script>
 <script src="cloud-delta-sync.js?v=20261016-generalmap-r27"></script>
-<script src="app.js?v=20261026-field-report-r2"></script>
-  <script src="mobile-pwa.js?v=20261016-generalmap-r27"></script>
+<script src="app.js?v=20261027-stops-mobile-r1"></script>
+  <script src="mobile-pwa.js?v=20261027-stops-mobile-r1"></script>
 </body>
 </html>
