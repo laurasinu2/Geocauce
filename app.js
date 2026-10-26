@@ -3274,55 +3274,45 @@ function setSectionTableZoom(value){
   requestAnimationFrame(()=>document.querySelectorAll('.section-table-ink-canvas').forEach(c=>{const f=state.features.find(x=>x.id===state.currentSection);if(f)redrawSectionTableInkCanvas(c,sectionTableInkCell(ensureSectionSheetData(f),c.dataset.row,c.dataset.col));}));
 }
 function renderSectionFieldTable(f){
-  const root=$('#sectionFieldTable');if(!root||!f)return;
-  const d=ensureSectionSheetData(f);
-  let html='<table><thead><tr><th></th>'+SECTION_TABLE_COLS.map(([col,lab])=>'<th>'+escapeHtml(lab)+'<select data-section-presence="'+col+'" aria-label="Presència: '+escapeHtml(lab)+'"><option value="unassessed">Sense avaluar</option><option value="present">Hi ha</option><option value="absent">No hi ha</option></select></th>').join('')+'</tr></thead><tbody>';
-  for(const row of SECTION_TABLE_ROWS){
-    html+='<tr><th>'+escapeHtml(row.label)+'</th>';
-    for(const [col] of SECTION_TABLE_COLS){
-      const absent=sectionColumnAbsent(d,col),val=String(sectionTableCell(d,row.key,col)),options=fieldSectionChoices(row.key,col);
-      const area=['erosionEvidence','accumulationEvidence','grainClasses'].includes(row.key);
-      const choice=options?.includes(val),custom=!!val&&!choice;
-      let choices='';
-      if(options)choices='<select class="field-table-quick-select" data-section-table-choice-row="'+row.key+'" data-section-table-choice-col="'+col+'" aria-label="'+escapeHtml(row.label)+' · '+escapeHtml(col)+'">'+fieldChoiceHTML(options,choice?val:'')+'<option value="__manual__"'+(custom?' selected':'')+'>Altres / text lliure…</option></select>';
-      const editable=options?custom:!area,showFree=!options||custom;
-      const text=options?'<input class="section-table-manual'+(showFree?'':' hidden')+'" data-section-table-row="'+row.key+'" data-section-table-col="'+col+'" type="text" value="'+escapeHtml(custom?val:'')+'" placeholder="Text lliure">':
-        (area?'<textarea data-section-table-row="'+row.key+'" data-section-table-col="'+col+'" placeholder="Text opcional">'+escapeHtml(val)+'</textarea>':'<input type="text" data-section-table-row="'+row.key+'" data-section-table-col="'+col+'" value="'+escapeHtml(val)+'" placeholder="Text opcional">');
-      html+='<td'+(absent?' style="background:#e6e8e9"':'')+'><div class="section-table-cell-editor">'+(absent?'<span style="font-weight:600;color:#60676b">No hi ha</span>':choices+text+'<canvas class="section-table-ink-canvas '+(area?'tall':'')+'" data-section-table-ink-row="'+row.key+'" data-section-table-ink-col="'+col+'"></canvas>')+'</div></td>';
-    }
-    html+='</tr>';
+ const root=$('#sectionFieldTable');if(!root||!f)return;
+ const d=ensureSectionSheetData(f),ro=!isEditableCampaign();
+ let html='<table><thead><tr><th></th>'+SECTION_TABLE_COLS.map(([col,lab])=>'<th>'+escapeHtml(lab)+'<select data-section-presence="'+col+'" aria-label="Presència: '+escapeHtml(lab)+'"><option value="unassessed">Sense avaluar</option><option value="present">Hi ha</option><option value="absent">No hi ha</option></select></th>').join('')+'</tr></thead><tbody>';
+ for(const row of SECTION_TABLE_ROWS){
+  html+='<tr><th>'+escapeHtml(row.label)+'</th>';
+  for(const [col] of SECTION_TABLE_COLS){
+   const absent=sectionColumnAbsent(d,col),val=String(sectionTableCell(d,row.key,col)),options=fieldSectionChoices(row.key,col);
+   const input=options?'<select class="field-table-quick-select" data-section-table-choice-row="'+row.key+'" data-section-table-choice-col="'+col+'" aria-label="'+escapeHtml(row.label)+'">'+fieldChoiceHTML(options,val)+'</select>':'<input type="text" data-section-table-row="'+row.key+'" data-section-table-col="'+col+'" value="'+escapeHtml(val)+'" placeholder="Valor">';
+   const note=String(d.tableNotes?.[row.key]?.[col]||''),ink=d.tableInk?.[row.key]?.[col];
+   const oldInk=Array.isArray(ink)&&ink.length?'<canvas class="section-table-ink-canvas" data-section-table-ink-row="'+row.key+'" data-section-table-ink-col="'+col+'" title="Anotació manuscrita anterior (conservada)"></canvas>':'';
+   html+='<td'+(absent?' style="background:#e6e8e9"':'')+'><div class="section-table-cell-editor">'+(absent?'<span style="font-weight:600;color:#60676b">No hi ha</span>':input+'<textarea data-section-table-note-row="'+row.key+'" data-section-table-note-col="'+col+'" rows="2" placeholder="Observacions (teclat)">'+escapeHtml(note)+'</textarea>'+oldInk)+'</div></td>';
   }
-  html+='</tbody></table>';root.innerHTML=html;
-  root.querySelectorAll('[data-section-presence]').forEach(sel=>{const col=sel.dataset.sectionPresence;sel.value=sectionColumnStatus(d,col);sel.disabled=!isEditableCampaign();sel.addEventListener('pointerdown',e=>e.stopPropagation());sel.onchange=()=>{if(!isEditableCampaign())return;d.columnPresence=d.columnPresence||{};d.columnPresence[col]=sel.value;persistState();renderSectionFieldTable(f);};});
-  root.querySelectorAll('[data-section-table-choice-row]').forEach(sel=>{
-    sel.disabled=!isEditableCampaign();
-    sel.addEventListener('pointerdown',e=>e.stopPropagation());
-    sel.onchange=e=>{
-      if(!isEditableCampaign())return;
-      const row=e.target.dataset.sectionTableChoiceRow,col=e.target.dataset.sectionTableChoiceCol,
-        input=root.querySelector('[data-section-table-row="'+row+'"][data-section-table-col="'+col+'"]'),
-        dd=ensureSectionSheetData(f);
-      dd.table[row]=dd.table[row]||{};
-      if(e.target.value==='__manual__'){
-        input.classList.remove('hidden');input.focus();
-        dd.table[row][col]=input.value;
-      }else{
-        input.classList.add('hidden');dd.table[row][col]=e.target.value;
-      }
-      persistState();
-    };
-  });
-  root.querySelectorAll('[data-section-table-row]').forEach(el=>{
-    el.disabled=!isEditableCampaign();
-    el.addEventListener('pointerdown',e=>e.stopPropagation());
-    el.oninput=e=>{
-      if(!isEditableCampaign())return;
-      const dd=ensureSectionSheetData(f),r=e.target.dataset.sectionTableRow,c=e.target.dataset.sectionTableCol;
-      dd.table[r]=dd.table[r]||{};dd.table[r][c]=e.target.value;persistState();
-    };
-  });
-  root.querySelectorAll('[data-section-table-ink-row]').forEach(c=>installSectionTableInkCanvas(c,f,c.dataset.sectionTableInkRow,c.dataset.sectionTableInkCol));
-  renderSectionTableQuickColors();setSectionTableZoom(state.sectionTableZoom||1);
+  html+='</tr>';
+ }
+ root.innerHTML=html+'</tbody></table>';
+ root.querySelectorAll('[data-section-presence]').forEach(sel=>{
+  const col=sel.dataset.sectionPresence;sel.value=sectionColumnStatus(d,col);sel.disabled=ro;sel.addEventListener('pointerdown',e=>e.stopPropagation());
+  sel.onchange=()=>{if(!isEditableCampaign())return;d.columnPresence=d.columnPresence||{};d.columnPresence[col]=sel.value;persistState();renderSectionFieldTable(f);};
+ });
+ root.querySelectorAll('[data-section-table-choice-row]').forEach(sel=>{
+  sel.disabled=ro;sel.addEventListener('pointerdown',e=>e.stopPropagation());sel.onchange=()=>{
+   if(!isEditableCampaign())return;const row=sel.dataset.sectionTableChoiceRow,col=sel.dataset.sectionTableChoiceCol;
+   const dd=ensureSectionSheetData(f);dd.table[row]=dd.table[row]||{};dd.table[row][col]=sel.value;persistState();
+  };
+ });
+ root.querySelectorAll('[data-section-table-row]').forEach(el=>{
+  el.disabled=ro;el.addEventListener('pointerdown',e=>e.stopPropagation());el.oninput=()=>{
+   if(!isEditableCampaign())return;const dd=ensureSectionSheetData(f),row=el.dataset.sectionTableRow,col=el.dataset.sectionTableCol;
+   dd.table[row]=dd.table[row]||{};dd.table[row][col]=el.value;persistState();
+  };
+ });
+ root.querySelectorAll('[data-section-table-note-row]').forEach(el=>{
+  el.disabled=ro;el.addEventListener('pointerdown',e=>e.stopPropagation());el.oninput=()=>{
+   if(!isEditableCampaign())return;const dd=ensureSectionSheetData(f),row=el.dataset.sectionTableNoteRow,col=el.dataset.sectionTableNoteCol;
+   dd.tableNotes[row]=dd.tableNotes[row]||{};dd.tableNotes[row][col]=el.value;persistState();
+  };
+ });
+ root.querySelectorAll('[data-section-table-ink-row]').forEach(c=>requestAnimationFrame(()=>redrawSectionTableInkCanvas(c,d.tableInk?.[c.dataset.sectionTableInkRow]?.[c.dataset.sectionTableInkCol]||[])));
+ renderSectionTableQuickColors();setSectionTableZoom(state.sectionTableZoom||1);
 }
 function ficCanvasNormGeneric(e,c){const r=c.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height};}
 function installSectionFicNoteCanvas(c,f,key){if(c._sectionFicInstalled)return;c._sectionFicInstalled=true;c.style.touchAction='none';const rec=ensureSectionSheetData(f).fic[key];c.addEventListener('pointerdown',e=>{if(e.pointerType==='touch'||!isEditableCampaign())return;e.preventDefault();c._active={tool:state.ficNoteTool||'pen',kind:'stroke',color:state.ficNoteColor||'#1f2b31',pts:[ficCanvasNormGeneric(e,c)],pointerId:e.pointerId};c.setPointerCapture?.(e.pointerId);redrawFicNoteCanvas(c,rec);});c.addEventListener('pointermove',e=>{if(!c._active||c._active.pointerId!==e.pointerId)return;e.preventDefault();c._active.pts.push(ficCanvasNormGeneric(e,c));redrawFicNoteCanvas(c,rec);});const finish=e=>{if(!c._active||c._active.pointerId!==e.pointerId)return;const a={...c._active};delete a.pointerId;c._active=null;rec.noteInk.push(a);ficChanged(f);persistState();redrawFicNoteCanvas(c,rec);};c.addEventListener('pointerup',finish);c.addEventListener('pointercancel',()=>{c._active=null;redrawFicNoteCanvas(c,rec);});requestAnimationFrame(()=>redrawFicNoteCanvas(c,rec));}
