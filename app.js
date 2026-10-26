@@ -6028,7 +6028,7 @@ function fieldReportReach(reach){
  return html+fieldReportFic(reach);
 }
 function fieldReportFic(section){
- const data=(section.type==='reach'?section.sheetII?.fic:section.sheetIII?.fic)||{},chosen=REACH_FIC_ROWS.filter(r=>!r.group&&(fieldReportHas(data[r.key]?.score)||fieldReportHas(data[r.key]?.note)));
+ const data=(section.type==='reach'?section.sheetII?.fic:section.sheetIII?.fic)||{},chosen=REACH_FIC_ROWS.filter(r=>!r.group&&(fieldReportHas(data[r.key]?.score)||fieldReportHas(data[r.key]?.note)||(data[r.key]?.noteInk||[]).length>0));
  if(!chosen.length)return '';
  let html=fieldReportHeading('FIC · FIELD INDEX OF CONNECTIVITY · '+(section.sectionName||section.reachCode||section.id),5);
  const texts=chosen.map(r=>{
@@ -6047,19 +6047,20 @@ function fieldReportSection(section){
  const crossing=fieldSectionIntersection(section);
  html+=crossing?fieldReportCoords(crossing):fieldReportParagraph('Punt d’intersecció amb el canal no disponible.');
  const header=fieldReportEntries(d,[['observer','Observador'],['visitDate','Data de visita'],['sectionType','Tipus de secció'],['observations','Observacions']]);
+ for(const [key,value] of Object.entries(d))if(!['observer','visitDate','sectionType','observations','sectionName','table','tableNotes','tableInk','fic','ficModelId','columnPresence'].includes(key)&&fieldReportHas(value)&&typeof value!=='object')header.push(key+': '+value+'.');
  const dimensions=section.sectionMeasurements||{};
  header.push(...fieldReportEntries(dimensions,[['width','Amplada de secció'],['depth','Profunditat màxima'],['note','Observacions de mesura']]));
  if(header.length)html+=fieldReportParagraph(header.join(' '));
  for(const [col,label] of SECTION_TABLE_COLS){
   if(sectionColumnAbsent(d,col)){html+=fieldReportParagraph(label+': no hi ha.');continue;}
   const entries=[];
-  for(const row of SECTION_TABLE_ROWS){
+  for(const row of [...SECTION_TABLE_ROWS,...Object.keys(d.table||{}).filter(k=>!SECTION_TABLE_ROWS.some(r=>r.key===k)).map(k=>({key:k,label:k}))]){
    const val=d.table?.[row.key]?.[col],note=d.tableNotes?.[row.key]?.[col];
    if(fieldReportHas(val))entries.push(fieldReportNaturalValue(row.key,val));
    if(fieldReportHas(note))entries.push('Observació ('+row.label+'): '+note+'.');
   }
   if(entries.length)html+=fieldReportParagraph(label+'. '+entries.join(' '));
-  for(const row of SECTION_TABLE_ROWS){const ink=d.tableInk?.[row.key]?.[col];if(Array.isArray(ink)&&ink.length)html+=fieldReportParagraph('Anotació manuscrita de '+row.label+' ('+label+'):')+fieldReportInkImage(ink);}
+  for(const row of [...SECTION_TABLE_ROWS,...Object.keys(d.tableInk||{}).filter(k=>!SECTION_TABLE_ROWS.some(r=>r.key===k)).map(k=>({key:k,label:k}))]){const ink=d.tableInk?.[row.key]?.[col];if(Array.isArray(ink)&&ink.length)html+=fieldReportParagraph('Anotació manuscrita de '+row.label+' ('+label+'):')+fieldReportInkImage(ink);}
  }
  return html+fieldReportFic(section);
 }
