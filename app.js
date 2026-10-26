@@ -5968,18 +5968,30 @@ function fieldReportEntries(d,defs){
  return defs.filter(([key])=>fieldReportHas(d?.[key])).map(([key,label])=>label+': '+fieldReportText(d[key])+'.');
 }
 function fieldReportNaturalValue(row,value){
- const str=String(value??'').trim();
- if(row==='vegetationCover'){
-  const match=str.match(/^[0-4]\s*[·.]\s*(.+)/);
-  return match?'La cobertura vegetal correspon a '+match[1]+'.':'Cobertura vegetal: '+str+'.';
+ const raw=String(value??'').trim();
+ const coded=(dictionary)=>{
+  const match=raw.match(/^([A-Za-z0-9]+)\s*[·.:]\s*(.+)$/);
+  const pair=dictionary.find(([key])=>key===match?.[1]);
+  return pair?pair[1]:(match?match[2]:raw);
+ };
+ const certainty=()=>{const code=raw.match(/^([ABCDX])(?:\s|$|[·.:])/);const pair=FIELD_CERTAINTY.find(([key])=>key===code?.[1]);return pair?pair[0]+' ('+pair[1]+')':raw;};
+ switch(row){
+  case 'vegetationCover':return 'La cobertura vegetal registrada és '+coded(FIELD_VEGETATION_COVER)+'.';
+  case 'vegetationType':return 'El tipus de vegetació registrat és '+raw+'.';
+  case 'substrateExposure':return 'El substrat aflora en el rang '+raw+'.';
+  case 'erosionEvidence':return 'Evidències d’erosió en superfície: '+raw+'.';
+  case 'erosionCertainty':return 'La certesa de l’erosió és '+certainty()+'.';
+  case 'accumulationEvidence':return 'Evidències d’acumulació i origen registrat: '+raw+'.';
+  case 'accumulationCertainty':return 'La certesa de l’acumulació és '+certainty()+'.';
+  case 'sedimentThickness':return 'El gruix de sediment registrat és '+raw+'.';
+  case 'thicknessCertainty':return 'La certesa del gruix és '+certainty()+'.';
+  case 'sedimentShape':return 'La forma predominant del sediment registrada és '+raw+'.';
+  case 'shapeCertainty':return 'La certesa de la forma és '+certainty()+'.';
+  case 'matrixSupport':return 'El suport de matriu o clasts s’ha classificat com '+raw+'.';
+  case 'maxBlockWeight':return 'El pes màxim del bloc es troba en el rang '+raw+'.';
+  case 'grainClasses':return 'Les classes granulomètriques registrades són '+raw+'.';
+  default:{const entry=SECTION_TABLE_ROWS.find(x=>x.key===row);return (entry?.label||row)+': '+raw+'.';}
  }
- if(row==='erosionCertainty'||row==='accumulationCertainty'||row==='thicknessCertainty'||row==='shapeCertainty'){
-  const code=str.match(/^([ABCDX])(?:\b|\s*[·.])/);
-  const known=FIELD_CERTAINTY.find(([c])=>c===code?.[1]);
-  return 'Certesa: '+(known?known[0]+' · '+known[1]:str)+'.';
- }
- const entry=SECTION_TABLE_ROWS.find(x=>x.key===row);
- return (entry?.label||row)+': '+str+'.';
 }
 function fieldReportInkImage(records){
  if(!Array.isArray(records)||!records.length)return '';
@@ -5992,14 +6004,27 @@ function fieldReportReach(reach){
  const d=reach.sheetII||{},course=fieldReportCourse(reach),name=reach.reachCode||reach.id;
  let html=fieldReportHeading('FITXA II · PERFIL LONGITUDINAL '+name,4);
  html+=fieldReportParagraph('Cauce: '+(course?.name||course?.abbr||course?.id||'No associat'));
- const fields=fieldReportEntries(d,[['observer','Observador'],['visitDate','Data de visita'],['fieldSlope','Pendent mesurat a camp (º)'],['lithology','Litologia / material'],['profileType','Tipus de perfil'],['vegetationCover','Cobertura vegetal'],['vegetationType','Tipus dominant de vegetació'],['anthropic','Elements antròpics']]);
- if(fieldReportHas(d.incisionGrade))fields.push('Grau d’incisió: '+reachIncisionLabel(d.incisionGrade)+'.');
+ const introductory=[];
+ if(fieldReportHas(d.observer))introductory.push('Observador: '+d.observer+'.');
+ if(fieldReportHas(d.visitDate))introductory.push('Data de visita: '+d.visitDate+'.');
+ if(introductory.length)html+=fieldReportParagraph(introductory.join(' '));
+ const phrases=[];
  const angle=Number.isFinite(reach.mdeStats?.mdeSlopePct)?Math.atan(reach.mdeStats.mdeSlopePct/100)*180/Math.PI:null;
- if(Number.isFinite(angle))fields.push('Pendent mitjà del MDE: '+angle.toFixed(2)+'º.');
- const ids=fieldReportSections(reach).map(x=>x.sectionName||x.id);
- if(ids.length)fields.push('Seccions vinculades: '+ids.join(', ')+'.');
- for(const [key,value] of Object.entries(d))if(!['observer','visitDate','fieldSlope','lithology','profileType','incisionGrade','vegetationCover','vegetationType','anthropic','fic','schemeInk','profileInk','profileObjects','profileVerticalScale'].includes(key)&&fieldReportHas(value)&&typeof value!=='object')fields.push(key+': '+value+'.');
- html+=fieldReportParagraph(fields.join(' '));
+ if(Number.isFinite(angle))phrases.push('La pendent mitjana calculada a partir del MDE és '+angle.toFixed(2)+'°.');
+ if(fieldReportHas(d.fieldSlope))phrases.push('La pendent mesurada a camp és '+d.fieldSlope+(String(d.fieldSlope).includes('º')||String(d.fieldSlope).includes('°')?'':'°')+'.');
+ if(fieldReportHas(d.lithology))phrases.push('El material o litologia registrada és '+d.lithology+'.');
+ if(fieldReportHas(d.profileType))phrases.push('El perfil longitudinal es classifica com '+d.profileType+'.');
+ if(fieldReportHas(d.incisionGrade))phrases.push('El grau d’incisió registrat és '+reachIncisionLabel(d.incisionGrade)+'.');
+ if(fieldReportHas(d.vegetationCover))phrases.push(fieldReportNaturalValue('vegetationCover',d.vegetationCover));
+ if(fieldReportHas(d.vegetationType))phrases.push('El tipus de vegetació dominant registrat és '+d.vegetationType+'.');
+ const sections=fieldReportSections(reach).map(x=>x.sectionName||x.id);
+ if(sections.length)phrases.push('Seccions vinculades al tram: '+sections.join(', ')+'.');
+ if(fieldReportHas(d.anthropic))phrases.push('Elements antròpics registrats: '+d.anthropic+'.');
+ for(const [key,value] of Object.entries(d)){
+  if(['observer','visitDate','fieldSlope','lithology','profileType','incisionGrade','vegetationCover','vegetationType','anthropic','fic','schemeInk','profileInk','profileObjects','profileVerticalScale'].includes(key))continue;
+  if(fieldReportHas(value)&&typeof value!=='object')phrases.push(key+': '+value+'.');
+ }
+ if(phrases.length)html+=fieldReportParagraph(phrases.join(' '));
  return html+fieldReportFic(reach);
 }
 function fieldReportFic(section){
