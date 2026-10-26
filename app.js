@@ -1273,7 +1273,7 @@ function fieldSectionChoices(row,col){
  /Bank$/.test(col)?['Banc · retrocés de marge','Banc · esllavissament']:['Pendent · rierols petits','Pendent · erosió difusa'];
  if(row==='accumulationEvidence')return col==='channel'?['Canal · dipòsit','Canal · presa natural']:
  /Bank$/.test(col)?['Banc · reomplert']:['Pendent · dipòsit','Pendent · lòbul','Pendent · blocs dispersos'];
- return FIELD_SECTION_CHOICES[row]||null;
+ return SECTION_NUMERIC_RANGES[row]||FIELD_SECTION_CHOICES[row]||null;
 }
 function codedFieldLabel(dict,code){return dict.find(([c])=>c===code)?.[1]||'';}
 function fieldChoiceHTML(options,selected){
@@ -1327,6 +1327,7 @@ const SECTION_TABLE_ROWS=[
   {key:'grainClasses',label:'Fins a sorra: 3–4 classes i més petites = llim-argila (grans no visibles)'}
 ];
 const SECTION_TABLE_COLS=[['leftSlope','Pendent esquerra'],['leftBank','Banc esquerra'],['channel','Canal'],['rightBank','Banc dret'],['rightSlope','Pendent dreta']];
+const SECTION_NUMERIC_RANGES={substrateExposure:['0–<20 %','20–<40 %','40–<60 %','60–<80 %','80–100 %'],maxBlockWeight:['<0,1 kg','0,1–<0,5 kg','0,5–<1 kg','1–<2 kg','2–<3 kg','3–<5 kg','5–<8 kg','8–<10 kg','10–<15 kg','15–20 kg','>20 kg']};
 const SECTION_ZONE_TYPES=[...SECTION_TABLE_COLS,['custom','Personalitzada…']];
 function sectionZoneLabel(key=state.sectionZoneClass,custom=state.sectionZoneCustom){
   if(key==='custom')return String(custom||'').trim()||'Zona';
@@ -1334,8 +1335,8 @@ function sectionZoneLabel(key=state.sectionZoneClass,custom=state.sectionZoneCus
 }
 function blankFicData(){return{ad:{score:null,note:'',noteInk:[]},bd:{score:null,note:'',noteInk:[]},cd:{score:null,note:'',noteInk:[]},dd1:{score:null,note:'',noteInk:[]},dd2:{score:null,note:'',noteInk:[]}};}
 function optionalScore(value){if(value===null||value===undefined||value==='')return null;const n=Number(value);return Number.isFinite(n)?n:null;}
-function defaultSectionSheetIII(){return{observer:'',visitDate:'',sectionName:'',sectionType:'',observations:'',table:{},tableInk:{},fic:blankFicData()};}
-function normalizeSectionSheetIII(src){const d={...defaultSectionSheetIII(),...(src||{})};d.table=d.table&&typeof d.table==='object'?d.table:{};d.tableInk=d.tableInk&&typeof d.tableInk==='object'?d.tableInk:{};d.fic=d.fic&&typeof d.fic==='object'?d.fic:blankFicData();for(const k of ['ad','bd','cd','dd1','dd2']){const o=d.fic[k]||{};d.fic[k]={score:optionalScore(o.score),note:o.note||'',noteInk:Array.isArray(o.noteInk)?o.noteInk:[]};}return d;}
+function defaultSectionSheetIII(){return{observer:'',visitDate:'',sectionName:'',sectionType:'',observations:'',table:{},tableNotes:{},tableInk:{},fic:blankFicData()};}
+function normalizeSectionSheetIII(src){const d={...defaultSectionSheetIII(),...(src||{})};d.table=d.table&&typeof d.table==='object'?d.table:{};d.tableNotes=d.tableNotes&&typeof d.tableNotes==='object'?d.tableNotes:{};for(const [key,options] of Object.entries(SECTION_NUMERIC_RANGES)){const cells=d.table[key];if(!cells||typeof cells!=='object')continue;d.tableNotes[key]=d.tableNotes[key]||{};for(const [col,value] of Object.entries(cells)){const old=String(value??'').trim();if(!old||options.includes(old))continue;const note=String(d.tableNotes[key][col]||'');if(!note.includes(old))d.tableNotes[key][col]=note?note+'\\n'+old:old;cells[col]='';}}d.tableInk=d.tableInk&&typeof d.tableInk==='object'?d.tableInk:{};d.fic=d.fic&&typeof d.fic==='object'?d.fic:blankFicData();for(const k of ['ad','bd','cd','dd1','dd2']){const o=d.fic[k]||{};d.fic[k]={score:optionalScore(o.score),note:o.note||'',noteInk:Array.isArray(o.noteInk)?o.noteInk:[]};}return d;}
 function sectionColumnStatus(d,col){return ['present','absent'].includes(d?.columnPresence?.[col])?d.columnPresence[col]:'unassessed';}
 function sectionColumnAbsent(d,col){return sectionColumnStatus(d,col)==='absent';}
 function ensureSectionSheetData(f){if(!f)return defaultSectionSheetIII();f.sheetIII=normalizeSectionSheetIII(f.sheetIII);if(!f.sheetIII.sectionName)f.sheetIII.sectionName=f.sectionName||f.id;return f.sheetIII;}
