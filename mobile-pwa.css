@@ -154,3 +154,12 @@ body.mobile-map-lite{overflow:hidden!important}body.mobile-map-lite #mapScreen{l
   }
   body.mobile-map-lite #mapScreen .map-quick-actions>button:not(#fitAllBtn):not(#locateQuickBtn) { display:none!important; }
 }
+
+/* Stop/report actions and real mobile layer controls. */
+.m-field-actions{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0 18px}
+.m-field-actions button{flex:1 1 160px;min-height:48px;border-radius:14px;font-size:14px;font-weight:700;padding:9px 12px;cursor:pointer}
+.m-layer-row{grid-template-columns:82px minmax(0,1fr) auto}
+.m-layer-action{border:1px solid #bad2c2;background:#e8f3eb;color:#194a34;border-radius:10px;padding:10px 11px;min-width:70px;font-weight:700;cursor:pointer}
+.m-layer-action:disabled{opacity:.55;cursor:default}
+@media(max-width:560px){.m-layer-row{grid-template-columns:68px minmax(0,1fr) auto}.m-layer-action{min-width:64px;padding:8px 7px;font-size:12px}}
+@media(max-width:820px){body.mobile-map-lite #newFieldStopBtn{display:none!important}}
