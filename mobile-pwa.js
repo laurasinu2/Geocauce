@@ -145,6 +145,7 @@ $('#mSettings').onclick=()=>go('settings');
 $('#mGpsChip').setAttribute('aria-label','Centrar en mi ubicación');
 $('#mGpsChip').onclick=async()=>{if(activeProject()){await showMap();setTimeout(()=>api.locateMe(),100)}else showShell('projects')};
 $('#mMapHome').onclick=()=>showShell('home');$('#mMapProjects').onclick=()=>showShell('projects');$('#mMapProfile').onclick=()=>showShell('profile');$('#mMapAdd').onclick=openObservationSheet;
+window.addEventListener('geocauce-photo-saved',()=>{if(simpleEnabled()&&activeProject())showMap();});
 window.addEventListener('geocauce-settings-changed',()=>{if(simpleEnabled()){if($('#settingsScreen')&&!$('#settingsScreen').classList.contains('hidden'))return;showShell(route||'home')}else{shell.classList.add('hidden');mapBar.classList.add('hidden');document.body.classList.remove('mobile-map-lite')}});
 window.addEventListener('resize',()=>{if(mode()==='auto'){if(isNarrow()){const projectVisible=$('#projectScreen')&&!$('#projectScreen').classList.contains('hidden');if(projectVisible)showShell('home')}else{shell.classList.add('hidden');mapBar.classList.add('hidden');document.body.classList.remove('mobile-map-lite')}}});
 const observer=new MutationObserver(()=>{if(!simpleEnabled())return;const ps=$('#projectScreen');if(ps&&!ps.classList.contains('hidden')&&shell.classList.contains('hidden')&&mapBar.classList.contains('hidden'))showShell('home')});
