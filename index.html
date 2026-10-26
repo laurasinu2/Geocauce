@@ -11,8 +11,8 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=20261016-generalmap-r27" />
-  <link rel="stylesheet" href="mobile-pwa.css?v=20261016-generalmap-r27" />
+  <link rel="stylesheet" href="styles.css?v=20261016-sharing-r28" />
+  <link rel="stylesheet" href="mobile-pwa.css?v=20261016-sharing-r28" />
 </head>
 <body>
   <div id="app">
@@ -342,18 +342,18 @@ CON | Confluencia"></textarea></div>
         </section>
         <div id="layersList" class="layers-list"></div>
         <label class="import-btn icon-text"><img src="icons/importar.png" alt=""> Importar mapa
-          <input id="mapFileInput" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.svg,.tif,.tiff,.cog,.pgw,.jgw,.tfw,.wld" hidden>
+          <input id="mapFileInput" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.svg,.tif,.tiff,.cog,.gpkg,.pgw,.jgw,.tfw,.wld" hidden>
         </label>
         <div class="vector-import-options">
-          <label><span>Nom de la capa</span><input id="vectorImportName" type="text" placeholder="Opcional · usa el nom del SHP"></label>
+          <label><span>Nom de la capa</span><input id="vectorImportName" type="text" placeholder="Opcional · usa el nom de la capa"></label>
           <label><span>Ús de les dades</span><select id="vectorImportRole"><option value="reference">Referència</option><option value="watercourse">Riu / cauce</option><option value="basin">Conca</option><option value="limit">Límit</option><option value="path">Camí / traçat</option><option value="other">Altres…</option></select></label>
           <label id="vectorCustomRoleLabel"><span>Tipus personalitzat</span><input id="vectorImportCustomRole" class="hidden" type="text" placeholder="Ex. canals històrics"></label>
-          <label for="vectorImportColor"><span>Color de la nova capa SHP / ZIP</span><input id="vectorImportColor" type="color" value="#6b5d82" aria-label="Color de la nova capa vectorial"></label>
+          <label for="vectorImportColor"><span>Color de la nova capa vectorial</span><input id="vectorImportColor" type="color" value="#6b5d82" aria-label="Color de la nova capa vectorial"></label>
         </div>
-        <label class="import-btn icon-text"><img src="icons/importar.png" alt=""> Importar capa vectorial SHP / ZIP
-          <input id="vectorFileInput" type="file" multiple accept=".zip,.shp,.shx,.dbf,.prj,.cpg,.qmd" hidden>
+        <label class="import-btn icon-text"><img src="icons/importar.png" alt=""> Importar SHP / ZIP / GeoPackage
+          <input id="vectorFileInput" type="file" multiple accept=".gpkg,.zip,.shp,.shx,.dbf,.prj,.cpg,.qmd" hidden>
         </label>
-        <p class="panel-help"><b>GeoTIFF:</b> define la extensión cartográfica del proyecto. <b>SHP:</b> selecciona un ZIP que contenga .shp + .dbf + .prj + .shx (también puede estar dentro de una carpeta del ZIP), o selecciona los archivos sueltos. Las capas vectoriales son solo de referencia y no cambian el zoom general.</p>
+        <p class="panel-help"><b>GeoTIFF:</b> define la extensión cartográfica del proyecto. <b>GeoPackage (.gpkg):</b> se puede elegir desde Importar mapa o SHP; se detectan las capas vectoriales y los mapas de teselas compatibles. Los raster con EPSG diferente necesitan reproyección a QGIS; las coberturas de elevación deben exportarse a GeoTIFF. <b>SHP:</b> selecciona un ZIP con .shp + .dbf + .prj + .shx o los ficheros sueltos.</p>
         <div class="subsection-title"><img src="icons/seccion.svg" alt=""> Secciones</div>
         <div id="sectionList" class="section-list"></div>
         <button id="exportGeojsonBtn" class="secondary full icon-text"><img src="icons/guardar.png" alt=""> Exportar GeoJSON</button>
@@ -395,7 +395,7 @@ CON | Confluencia"></textarea></div>
         <div class="feature-card-body">
           <div class="feature-card-heading-row">
             <div>
-              <strong id="featureCardTitle">DEP-001</strong>
+              <strong id="featureCardTitle">Elemento</strong>
               <span id="featureCardType" class="feature-card-type">Depósito</span>
             </div>
           </div>
@@ -546,11 +546,21 @@ CON | Confluencia"></textarea></div>
             <section class="raster-style-controls">
               <div class="raster-style-section raster-style-general">
                 <h3>Representació</h3>
-                <label class="raster-style-field"><span>Renderitzador</span><select id="rasterStyleRenderer"><option value="original">Original</option><option value="rgb">Color multibanda</option><option value="unique">Valors únics</option><option value="gray">Gris monobanda</option><option value="pseudocolor">Pseudocolor monobanda</option></select></label>
+                <label class="raster-style-field"><span>Renderitzador</span><select id="rasterStyleRenderer"><option value="original">Original</option><option value="rgb">Color multibanda</option><option value="unique">Valors únics</option><option value="gray">Gris monobanda</option><option value="pseudocolor">Pseudocolor monobanda</option><option value="hillshade">Ombrejat de relleu (Hillshade)</option></select></label>
                 <div id="rasterStyleBandInfo" class="raster-style-band-info">Banda 1</div>
                 <label class="raster-style-dem"><input id="rasterStyleIsDem" type="checkbox"> Tractar aquesta banda com a MDE/elevació</label>
               </div>
 
+              <div id="rasterStyleHillshadePanel" class="raster-style-section hidden">
+                <b>Ombrejat de relleu (estil QGIS)</b>
+                <p class="muted">Il·luminació del MDT calculada a partir de la banda d'altitud. El GeoTIFF original no es modifica.</p>
+                <div class="raster-style-range">
+                  <label>Azimut solar (°) <input id="rasterStyleHillshadeAzimuth" type="number" min="0" max="360" step="1" value="315"></label>
+                  <label>Altitud solar (°) <input id="rasterStyleHillshadeAltitude" type="number" min="0" max="90" step="1" value="45"></label>
+                  <label>Factor Z <input id="rasterStyleHillshadeZFactor" type="number" min="0" max="100" step="0.1" value="1"></label>
+                </div>
+                <label class="raster-style-check"><input id="rasterStyleHillshadeInvert" type="checkbox"> Invertir relleu (canviar el sentit de les ombres)</label>
+              </div>
               <div id="rasterStyleGrayPanel" class="raster-style-section hidden">
                 <h3>Escala de grisos</h3>
                 <div class="raster-style-range"><label>Mínim <input id="rasterStyleGrayMin" type="number" step="any"></label><label>Màxim <input id="rasterStyleGrayMax" type="number" step="any"></label></div>
@@ -708,6 +718,18 @@ CON | Confluencia"></textarea></div>
             <table class="section-fitxa-meta">
               <tr><th>Nom torrent:</th><td id="sectionTorrentName">—</td><th>Nom tram:</th><td id="sectionReachName">—</td></tr>
               <tr><th>Nom secció:</th><td><input id="sectionNameInput" type="text" maxlength="40"></td><th>Data visita:</th><td><input id="sectionVisitDate" type="date"></td></tr>
+              <tr class="section-work-status-row"><th>Estado de la ficha:</th><td colspan="3">
+                <label class="section-work-status-select">
+                  <span id="sectionWorkStatusIndicator" class="section-status-dot" aria-hidden="true"></span>
+                  <select id="sectionWorkStatus" aria-label="Estado de la ficha de sección">
+                    <option value="">Por revisar (ficha anterior)</option>
+                    <option value="pending">🔴 Sin hacer</option>
+                    <option value="started">🟡 Comenzada</option>
+                    <option value="done">🟢 Acabada</option>
+                  </select>
+                </label>
+                <small class="section-work-status-help">Estado manual: no modifica el contenido de la ficha.</small>
+              </td></tr>
               <tr><th>Fotografia:</th><td><span class="muted">↑ (riu amunt) ↓ (riu avall)</span></td><th>Orientació:</th><td><strong id="sectionOrientationLabel">—</strong><small id="sectionOrientationEndPoints" class="section-orientation-ends">Inici: — → Final: —</small></td></tr>
             </table>
             <div class="section-fitxa-subtitle"><b>Esquema</b> <span>(geometria amb acotacions de pendent, bancs, riu)</span></div>
@@ -1277,14 +1299,18 @@ CON | Confluencia"></textarea></div>
     <div class="cloud-progress-track" role="progressbar" aria-label="Progreso de sincronización" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="cloudProgressBar"></span></div>
     <small id="cloudProgressDetail">Preparando transferencia…</small>
   </aside>
-  <script src="supabase-config.js?v=20261016-generalmap-r27"></script>
-  <script src="native-adapter.js?v=20261016-generalmap-r27"></script>
-  <script src="geotiff-lite.js?v=20261016-generalmap-r27"></script>
-  <script src="modal-layer.js?v=20261016-generalmap-r27"></script>
-  <script src="local-export-zip.js?v=20261016-generalmap-r27"></script>
-  <script src="field-sheet-pdf.js?v=20261016-generalmap-r27"></script>
-<script src="cloud-delta-sync.js?v=20261016-generalmap-r27"></script>
-<script src="app.js?v=20261016-generalmap-r27"></script>
-  <script src="mobile-pwa.js?v=20261016-generalmap-r27"></script>
+  <script src="supabase-config.js?v=20261016-sharing-r28"></script>
+  <script src="native-adapter.js?v=20261016-sharing-r28"></script>
+  <script src="geotiff-lite.js?v=20261016-sharing-r28"></script>
+  <script src="modal-layer.js?v=20261016-sharing-r28"></script>
+  <script src="local-export-zip.js?v=20261016-sharing-r28"></script>
+  <script src="field-sheet-pdf.js?v=20261016-sharing-r28"></script>
+<script src="cloud-delta-sync.js?v=20261016-sharing-r28"></script>
+<script src="project-access.js?v=20261016-sharing-r28"></script>
+  <script src="project-sharing-ui.js?v=20261016-sharing-r28"></script>
+  <script src="gpkg-lite.js?v=20261016-gpkg-r28"></script>
+  <script src="gpkg-import.js?v=20261016-gpkg-r28"></script>
+  <script src="app.js?v=20261016-sharing-r28"></script>
+  <script src="mobile-pwa.js?v=20261016-sharing-r28"></script>
 </body>
 </html>
