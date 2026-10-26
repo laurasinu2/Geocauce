@@ -206,7 +206,7 @@ function loadCloudSession(){try{return JSON.parse(localStorage.getItem(AUTH_SESS
 function saveCloudSession(session){if(session)localStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(session));else localStorage.removeItem(AUTH_SESSION_KEY);refreshAccountUi();if(session?.access_token)scheduleCloudSync(2500);}
 function authEntryChoice(){return localStorage.getItem(AUTH_PREF_KEY)||'';}
 function setAuthEntryChoice(v){if(v)localStorage.setItem(AUTH_PREF_KEY,v);else localStorage.removeItem(AUTH_PREF_KEY);}
-function projectCanWrite(){return !state.project||!['viewer','unknown'].includes(state.project._accessRole);}
+function projectCanWrite(){const p=state.project;if(!p)return true;if(p.cloudProjectId&&p._roleUserId&&p._roleUserId!==loadCloudSession()?.user?.id)return false;return !['viewer','unknown'].includes(p._accessRole);}
 async function resolveProjectRole(project){
  const uid=loadCloudSession()?.user?.id;
  if(!project?.cloudProjectId||!uid)return 'local';
@@ -1558,7 +1558,7 @@ async function openProject(id,opt={}){
   if((cloudRestoreRunning||cloudSyncRunning||cloudDeltaRunning)&&state.projectId&&id!==state.projectId){toast('Espera a que termine la sincronización antes de cambiar de proyecto');return;}
   if(state.view3d?.active)exit3DMode({quiet:true});
   const p=projectById(id);if(!p)return;
-   p._accessRole=await resolveProjectRole(p);
+   p._accessRole=await resolveProjectRole(p);p._roleUserId=loadCloudSession()?.user?.id||null;
   const needsCloudRestore=!localStorage.getItem(projectStateKey(id))||p._cloudOnly===true;
   if(needsCloudRestore&&(!loadCloudSession()?.access_token||!navigator.onLine)){
     toast('Proyecto en la nube: inicia sesión y conecta Internet para descargarlo.',6000);return;
