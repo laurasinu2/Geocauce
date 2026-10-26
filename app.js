@@ -2470,8 +2470,9 @@ function fieldLinkFeatureAtCreation(f){
 }
 function fieldStopPosition(pinPoint,gnss){
  const epsg=projectCrsEpsg(),crs=workingMapEpsg();
- const hasGnss=gnss&&Number.isFinite(gnss.lat)&&Number.isFinite(gnss.lon)&&Number.isFinite(gnss.x)&&Number.isFinite(gnss.y);
- const mapPoint=hasGnss?{x:gnss.x,y:gnss.y}:pinPoint,position={crs:hasGnss?(gnss.crs||crs):crs,source:hasGnss?'gnss':'map'};
+ const hasGnss=gnss&&Number.isFinite(gnss.lat)&&Number.isFinite(gnss.lon);
+ const projected=hasGnss?lonLatToMapCoords(gnss.lon,gnss.lat,crs):null;
+ const mapPoint=hasGnss?{x:projected.x,y:projected.y}:pinPoint,position={crs,source:hasGnss?'gnss':'map'};
  if(hasGnss){position.lat=gnss.lat;position.lon=gnss.lon;if(Number.isFinite(gnss.altitude))position.altitude=gnss.altitude;if(Number.isFinite(gnss.accuracy))position.accuracy=gnss.accuracy;}
  if(hasGnss&&utmZoneForEpsg(epsg)){const utm=lonLatToMapCoords(gnss.lon,gnss.lat,epsg);position.utmX=utm.x;position.utmY=utm.y;position.utmCrs=epsg;}
  else if(!hasGnss&&crs===epsg&&utmZoneForEpsg(epsg)){position.utmX=pinPoint.x;position.utmY=pinPoint.y;position.utmCrs=epsg;}
@@ -6074,7 +6075,7 @@ function fieldReportFic(section){
  let html=fieldReportHeading('FIC · FIELD INDEX OF CONNECTIVITY · '+(section.sectionName||section.reachCode||section.id),5);
  const texts=chosen.map(r=>{
   const record=data[r.key],opt=r.options.find(o=>o.score===optionalScore(record.score));
-  return r.label+': '+(fieldReportHas(record.score)?(opt?.text||'Categoria no disponible')+'; puntuació '+record.score+'.':'')+(fieldReportHas(record.note)?' Nota: '+record.note+'.':'');
+  return r.label+': '+(fieldReportHas(record.score)?(opt?opt.text+'; ':'')+'puntuació '+record.score+'.':'')+(fieldReportHas(record.note)?' Nota: '+record.note+'.':'');
  });
  html+=fieldReportParagraph(texts.join(' '));
  for(const row of chosen){const notes=data[row.key]?.noteInk;if(Array.isArray(notes)&&notes.length)html+=fieldReportParagraph('Anotació manuscrita FIC · '+row.label+':')+fieldReportInkImage(notes);}
