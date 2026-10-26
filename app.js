@@ -2493,6 +2493,7 @@ function finishPointRelocation(sp){
     delete point.linkedStopId;
   }
   point.x=pos.x;point.y=pos.y;
+  if(moving.kind==='stop'){const newPosition=fieldStopPosition(pos,null);point.position=newPosition.position;point.crs=newPosition.position.crs;}
   if(moving.kind==='historical')point.crs=workingMapEpsg();
   else for(const historical of state.historicalPhotoPoints||[]){if(historical.linkedStopId===point.id){historical.x=pos.x;historical.y=pos.y;historical.crs=workingMapEpsg();}}
   persistState();drawAll();toast('Punt reubicat correctament');
@@ -6041,7 +6042,7 @@ function fieldReportMap(stops,historical){
  g.fillStyle='#f7f8f5';g.fillRect(0,0,w,h);g.lineWidth=2;
  for(const watercourse of lines)for(const fragment of courseFragments(watercourse)){g.beginPath();let first=true;for(const p of fragment){const v=xy(p);if(first){g.moveTo(v.x,v.y);first=false;}else g.lineTo(v.x,v.y);}g.strokeStyle='#2277a4';g.stroke();}
  for(const section of secs){if(section.points?.length<2)continue;g.beginPath();let first=true;for(const p of section.points){const v=xy(p);if(first){g.moveTo(v.x,v.y);first=false;}else g.lineTo(v.x,v.y);}g.strokeStyle='#b97924';g.stroke();const it=fieldSectionIntersection(section);if(it){const p=xy(it);g.fillStyle='#b97924';g.fillRect(p.x-4,p.y-4,8,8);}}
- for(let i=0;i<stops.length;i++){const stop=stops[i],p=xy(stop);g.beginPath();g.arc(p.x,p.y,11,0,Math.PI*2);g.fillStyle='#58339f';g.fill();g.fillStyle='#fff';g.font='bold 13px sans-serif';g.textAlign='center';g.fillText(String(i+1),p.x,p.y+4);}
+ for(let i=0;i<stops.length;i++){const stop=stops[i],p=xy(stop);g.beginPath();g.arc(p.x,p.y,11,0,Math.PI*2);g.fillStyle='#58339f';g.fill();g.fillStyle='#fff';g.font='bold 13px sans-serif';g.textAlign='center';g.fillText(String(i+1),p.x,p.y+4);const coord=stop.position;g.font='11px sans-serif';g.fillStyle='#333';g.textAlign='left';if(Number.isFinite(coord?.utmX)&&Number.isFinite(coord?.utmY))g.fillText(Math.round(coord.utmX)+' / '+Math.round(coord.utmY),p.x+13,p.y+16);}
  for(const hp of historical){const p=xy(hp);g.fillStyle='#216c50';g.beginPath();g.moveTo(p.x,p.y-10);g.lineTo(p.x+10,p.y+8);g.lineTo(p.x-10,p.y+8);g.closePath();g.fill();}
  g.fillStyle='#333';g.textAlign='left';g.font='14px sans-serif';g.fillText('● Parades   ━ Cauces   ━ Seccions   ▲ Punts històrics',24,25);
  return c.toDataURL('image/png');
@@ -6065,6 +6066,7 @@ function fieldReportItems(stops,photos){
  for(const p of state.mapPins.filter(x=>x.kind==='note'))items.push({kind:'note',obj:p,stop:fieldReportStopFor(p,stops),course:fieldReportCourse(p)});
  for(const point of state.historicalPhotoPoints){
   const records=photos.filter(p=>p.historicalPointId===point.id||point.photos?.includes(p.id));
+  if(point.campaignId!==state.campaign&&!records.length)continue;
   for(const rec of records)assignedPhoto.add(rec.id);
   const recent=records.slice().sort((a,b)=>(b.date||0)-(a.date||0))[0];const explicit=recent?.stopId||point.stopId||point.linkedStopId;const owner=explicit?{...point,stopId:explicit}:point;
   const stamp=records.reduce((v,r)=>Math.max(v,r.date||0),point.createdAt||0);
