@@ -104,7 +104,13 @@ function ensureObservationSheet(){
    // A file picker must be opened synchronously inside the user's tap;
    // awaiting the map would lose transient browser user activation on tablets.
    if(tool==='photo'){
-     if(await ensureProjectLoaded())api.mobileCapturePhoto();
+     // Keep the file input click in this trusted tap, before any await.
+     if(api.getState()?.projectId===selectedProjectId()){
+       api.mobileCapturePhoto();
+     }else{
+       await showMap();
+       alert('Proyecto cargado. Pulsa Foto otra vez para abrir la cámara o galería.');
+     }
      return;
    }
    await showMap();
