@@ -5970,19 +5970,18 @@ function fieldReportReach(reach){
  if(ids.length)fields.push('Seccions vinculades: '+ids.join(', ')+'.');
  for(const [key,value] of Object.entries(d))if(!['observer','visitDate','fieldSlope','lithology','profileType','incisionGrade','vegetationCover','vegetationType','anthropic','fic','schemeInk','profileInk','profileObjects','profileVerticalScale'].includes(key)&&fieldReportHas(value)&&typeof value!=='object')fields.push(key+': '+value+'.');
  html+=fieldReportParagraph(fields.join(' '));
- return html;
+ return html+fieldReportFic(reach);
 }
 function fieldReportFic(section){
- const data=section.sheetIII?.fic||{},chosen=REACH_FIC_ROWS.filter(r=>!r.group&&(fieldReportHas(data[r.key]?.score)||fieldReportHas(data[r.key]?.note)));
+ const data=(section.type==='reach'?section.sheetII?.fic:section.sheetIII?.fic)||{},chosen=REACH_FIC_ROWS.filter(r=>!r.group&&(fieldReportHas(data[r.key]?.score)||fieldReportHas(data[r.key]?.note)));
  if(!chosen.length)return '';
- let html=fieldReportHeading('FIC · FIELD INDEX OF CONNECTIVITY · '+(section.sectionName||section.id),5);
+ let html=fieldReportHeading('FIC · FIELD INDEX OF CONNECTIVITY · '+(section.sectionName||section.reachCode||section.id),5);
  const texts=chosen.map(r=>{
   const record=data[r.key],opt=r.options.find(o=>o.score===optionalScore(record.score));
   return r.label+': '+(fieldReportHas(record.score)?(opt?.text||'Categoria no disponible')+'; puntuació '+record.score+'.':'')+(fieldReportHas(record.note)?' Nota: '+record.note+'.':'');
  });
  html+=fieldReportParagraph(texts.join(' '));
- const required=['ad','bd','cd','dd1','dd2'];
- if(required.every(k=>optionalScore(data[k]?.score)!==null))html+=fieldReportParagraph('Sumatori dels cinc components registrats: '+required.reduce((v,k)=>v+Number(data[k].score),0).toFixed(2)+'. El FIC final no es calcula sense disposar també de Su i Sd definits.');
+ if(optionalScore(data.su)!==null&&optionalScore(data.sd)!==null)html+=fieldReportParagraph('FIC = (Su + Sd) / 2 = '+((Number(data.su)+Number(data.sd))/2).toFixed(2)+'.');
  return html;
 }
 function fieldReportSection(section){
@@ -6032,15 +6031,15 @@ function fieldReportHistorical(point,photos){
  return html;
 }
 function fieldReportMap(stops,historical){
- const lines=state.features.filter(x=>x.type==='watercourse'&&x.points?.length>1),secs=state.features.filter(x=>x.type==='section');
- const all=[...stops,...historical,...lines.flatMap(c=>c.points||[]),...secs.flatMap(s=>s.points||[])].filter(p=>Number.isFinite(p?.x)&&Number.isFinite(p?.y));
+ const lines=state.features.filter(x=>x.type==='watercourse'&&courseFragments(x).some(p=>p.length>1)),secs=state.features.filter(x=>x.type==='section');
+ const all=[...stops,...historical,...lines.flatMap(c=>courseFragments(c).flat()),...secs.flatMap(s=>s.points||[])].filter(p=>Number.isFinite(p?.x)&&Number.isFinite(p?.y));
  if(!all.length)return '';
  const xs=all.map(p=>p.x),ys=all.map(p=>p.y),minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
  const span=Math.max(maxx-minx,maxy-miny,1),pad=span*.07,w=1100,h=740,scale=Math.min((w-60)/(maxx-minx+pad*2),(h-60)/(maxy-miny+pad*2));
  const xy=p=>({x:30+(p.x-minx+pad)*scale,y:h-30-(p.y-miny+pad)*scale});
  const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');
  g.fillStyle='#f7f8f5';g.fillRect(0,0,w,h);g.lineWidth=2;
- for(const watercourse of lines){g.beginPath();let first=true;for(const p of watercourse.points){const v=xy(p);if(first){g.moveTo(v.x,v.y);first=false;}else g.lineTo(v.x,v.y);}g.strokeStyle='#2277a4';g.stroke();}
+ for(const watercourse of lines)for(const fragment of courseFragments(watercourse)){g.beginPath();let first=true;for(const p of fragment){const v=xy(p);if(first){g.moveTo(v.x,v.y);first=false;}else g.lineTo(v.x,v.y);}g.strokeStyle='#2277a4';g.stroke();}
  for(const section of secs){if(section.points?.length<2)continue;g.beginPath();let first=true;for(const p of section.points){const v=xy(p);if(first){g.moveTo(v.x,v.y);first=false;}else g.lineTo(v.x,v.y);}g.strokeStyle='#b97924';g.stroke();const it=fieldSectionIntersection(section);if(it){const p=xy(it);g.fillStyle='#b97924';g.fillRect(p.x-4,p.y-4,8,8);}}
  for(let i=0;i<stops.length;i++){const stop=stops[i],p=xy(stop);g.beginPath();g.arc(p.x,p.y,11,0,Math.PI*2);g.fillStyle='#58339f';g.fill();g.fillStyle='#fff';g.font='bold 13px sans-serif';g.textAlign='center';g.fillText(String(i+1),p.x,p.y+4);}
  for(const hp of historical){const p=xy(hp);g.fillStyle='#216c50';g.beginPath();g.moveTo(p.x,p.y-10);g.lineTo(p.x+10,p.y+8);g.lineTo(p.x-10,p.y+8);g.closePath();g.fill();}
@@ -6067,7 +6066,7 @@ function fieldReportItems(stops,photos){
  for(const point of state.historicalPhotoPoints){
   const records=photos.filter(p=>p.historicalPointId===point.id||point.photos?.includes(p.id));
   for(const rec of records)assignedPhoto.add(rec.id);
-  const owner=point.stopId||point.linkedStopId?{...point,stopId:point.stopId||point.linkedStopId}:point;
+  const recent=records.slice().sort((a,b)=>(b.date||0)-(a.date||0))[0];const explicit=recent?.stopId||point.stopId||point.linkedStopId;const owner=explicit?{...point,stopId:explicit}:point;
   const stamp=records.reduce((v,r)=>Math.max(v,r.date||0),point.createdAt||0);
   items.push({kind:'historical',obj:point,photos:records,stop:fieldReportStopFor({...owner,createdAt:stamp},stops,{historical:true}),course:fieldReportCourse(point)});
  }
@@ -6101,7 +6100,7 @@ async function fieldReportBuild(){
    html+=fieldReportHeading(group.course?(group.course.name||group.course.abbr||group.course.id):'Altres observacions de la parada',3);
    const ordered=group.items.slice().sort((a,b)=>({reach:0,section:1,note:2,photo:3,historical:4,deposit:5}[a.kind]??9)-({reach:0,section:1,note:2,photo:3,historical:4,deposit:5}[b.kind]??9));
    for(const item of ordered){
-    if(item.kind==='reach')html+=fieldReportReach(item.obj);
+    if(item.kind==='reach'){html+=fieldReportReach(item.obj);for(const p of ordered.filter(x=>x.kind==='photo'&&x.featureId===item.obj.id)){if(usedPhotos.has(p.obj.id))continue;usedPhotos.add(p.obj.id);html+=fieldReportHeading('FOTOGRAFIES DEL TRAM',5)+fieldReportPhoto(p.obj);}}
     if(item.kind==='section'){html+=fieldReportSection(item.obj);for(const p of ordered.filter(x=>x.kind==='photo'&&x.featureId===item.obj.id)){if(usedPhotos.has(p.obj.id))continue;usedPhotos.add(p.obj.id);html+=fieldReportHeading('FOTOGRAFIES DE LA SECCIÓ',5)+fieldReportPhoto(p.obj);}}
     if(item.kind==='note')html+=fieldReportHeading('OBSERVACIONS',4)+fieldReportParagraph(item.obj.text);
     if(item.kind==='deposit')html+=fieldReportHeading('DIPÒSIT '+(item.obj.name||item.obj.id),4)+fieldReportParagraph(fieldReportEntries(item.obj,[['material','Material'],['observations','Observacions']]).join(' '));
