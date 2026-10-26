@@ -5915,12 +5915,27 @@ function fieldReportHas(v){return v!==null&&v!==undefined&&String(v).trim()!==''
 function fieldReportText(v){return String(v??'').trim();}
 function fieldReportHeading(value,level=3){return '<h'+level+' contenteditable="true">'+fieldReportEsc(value)+'</h'+level+'>';}
 function fieldReportParagraph(value){return fieldReportHas(value)?'<p contenteditable="true">'+fieldReportEsc(value)+'</p>':'';}
+function fieldUtmToLonLat(x,y,epsg){
+ const zone=utmZoneForEpsg(epsg);
+ if(!zone||!Number.isFinite(x)||!Number.isFinite(y))return null;
+ const a=6378137,f=1/298.257223563,e2=f*(2-f),ep2=e2/(1-e2),k0=.9996;
+ const yy=(epsg>=32701&&epsg<=32760)?y-1e7:y;
+ const M=yy/k0,mu=M/(a*(1-e2/4-3*e2*e2/64-5*e2**3/256));
+ const e1=(1-Math.sqrt(1-e2))/(1+Math.sqrt(1-e2));
+ const fp=mu+(3*e1/2-27*e1**3/32)*Math.sin(2*mu)+(21*e1*e1/16-55*e1**4/32)*Math.sin(4*mu)+(151*e1**3/96)*Math.sin(6*mu)+(1097*e1**4/512)*Math.sin(8*mu);
+ const C=ep2*Math.cos(fp)**2,T=Math.tan(fp)**2,N=a/Math.sqrt(1-e2*Math.sin(fp)**2),R=a*(1-e2)/(1-e2*Math.sin(fp)**2)**1.5,D=(x-500000)/(N*k0);
+ const lat=fp-(N*Math.tan(fp)/R)*(D*D/2-(5+3*T+10*C-4*C*C-9*ep2)*D**4/24+(61+90*T+298*C+45*T*T-252*ep2-3*C*C)*D**6/720);
+ const lon=((zone-1)*6-180+3)*Math.PI/180+(D-(1+2*T+C)*D**3/6+(5-2*C+28*T-3*C*C+8*ep2+24*T*T)*D**5/120)/Math.cos(fp);
+ return {lat:lat*180/Math.PI,lon:lon*180/Math.PI};
+}
 function fieldReportCoords(p){
  if(!p)return '';
  let parts=[];
  if(Number.isFinite(p.utmX)&&Number.isFinite(p.utmY))parts.push('Coordenades: X '+p.utmX.toFixed(1)+' m · Y '+p.utmY.toFixed(1)+' m (EPSG:'+p.utmCrs+')');
  else if(Number.isFinite(p.x)&&Number.isFinite(p.y)&&p.crs&&p.crs!==4326&&p.crs!==4258)parts.push('Coordenades del punt: X '+p.x.toFixed(1)+' · Y '+p.y.toFixed(1)+' (EPSG:'+p.crs+')');
+ const derived=!Number.isFinite(p.lat)&&Number.isFinite(p.utmX)&&Number.isFinite(p.utmY)?fieldUtmToLonLat(p.utmX,p.utmY,p.utmCrs):null;
  if(Number.isFinite(p.lat)&&Number.isFinite(p.lon))parts.push('Lat/Lon: '+p.lat.toFixed(6)+', '+p.lon.toFixed(6));
+ else if(derived)parts.push('Lat/Lon (transformades del CRS): '+derived.lat.toFixed(6)+', '+derived.lon.toFixed(6));
  if(Number.isFinite(p.altitude))parts.push('Altitud: '+p.altitude.toFixed(1)+' m');
  if(Number.isFinite(p.accuracy))parts.push('Precisió GNSS: ±'+p.accuracy.toFixed(1)+' m');
  return parts.map(x=>fieldReportParagraph(x)).join('');
@@ -5958,12 +5973,12 @@ function fieldReportReach(reach){
  return html;
 }
 function fieldReportFic(section){
- const data=section.sheetIII?.fic||{},chosen=REACH_FIC_ROWS.filter(r=>!r.group&&fieldReportHas(data[r.key]?.score));
+ const data=section.sheetIII?.fic||{},chosen=REACH_FIC_ROWS.filter(r=>!r.group&&(fieldReportHas(data[r.key]?.score)||fieldReportHas(data[r.key]?.note)));
  if(!chosen.length)return '';
  let html=fieldReportHeading('FIC · FIELD INDEX OF CONNECTIVITY · '+(section.sectionName||section.id),5);
  const texts=chosen.map(r=>{
   const record=data[r.key],opt=r.options.find(o=>o.score===optionalScore(record.score));
-  return r.label+': '+(opt?.text||'Categoria no disponible')+'; puntuació '+record.score+'.'+(fieldReportHas(record.note)?' Nota: '+record.note+'.':'');
+  return r.label+': '+(fieldReportHas(record.score)?(opt?.text||'Categoria no disponible')+'; puntuació '+record.score+'.':'')+(fieldReportHas(record.note)?' Nota: '+record.note+'.':'');
  });
  html+=fieldReportParagraph(texts.join(' '));
  const required=['ad','bd','cd','dd1','dd2'];
@@ -6087,7 +6102,7 @@ async function fieldReportBuild(){
    const ordered=group.items.slice().sort((a,b)=>({reach:0,section:1,note:2,photo:3,historical:4,deposit:5}[a.kind]??9)-({reach:0,section:1,note:2,photo:3,historical:4,deposit:5}[b.kind]??9));
    for(const item of ordered){
     if(item.kind==='reach')html+=fieldReportReach(item.obj);
-    if(item.kind==='section')html+=fieldReportSection(item.obj);
+    if(item.kind==='section'){html+=fieldReportSection(item.obj);for(const p of ordered.filter(x=>x.kind==='photo'&&x.featureId===item.obj.id)){if(usedPhotos.has(p.obj.id))continue;usedPhotos.add(p.obj.id);html+=fieldReportHeading('FOTOGRAFIES DE LA SECCIÓ',5)+fieldReportPhoto(p.obj);}}
     if(item.kind==='note')html+=fieldReportHeading('OBSERVACIONS',4)+fieldReportParagraph(item.obj.text);
     if(item.kind==='deposit')html+=fieldReportHeading('DIPÒSIT '+(item.obj.name||item.obj.id),4)+fieldReportParagraph(fieldReportEntries(item.obj,[['material','Material'],['observations','Observacions']]).join(' '));
     if(item.kind==='photo'){
@@ -6102,6 +6117,8 @@ async function fieldReportBuild(){
   }
   html+='</article>';
  }
+ const general=campaign?.observations||campaign?.notes;
+ if(fieldReportHas(general))html+='<article class="field-report-page">'+fieldReportHeading('OBSERVACIONS GENERALS DE LA SORTIDA',2)+fieldReportParagraph(general)+'</article>';
  return html;
 }
 function fieldReportInit(){
