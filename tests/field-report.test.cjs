@@ -34,7 +34,7 @@ test('La intersecció es calcula sobre els segments reals i no sobre el punt cen
  const state={features:[{id:'water',type:'watercourse',points:[{x:0,y:5},{x:10,y:5}]}]};
  const seg=(a,b,c,d)=>{const rx=b.x-a.x,ry=b.y-a.y,sx=d.x-c.x,sy=d.y-c.y,den=rx*sy-ry*sx;if(Math.abs(den)<1e-12)return null;const dx=c.x-a.x,dy=c.y-a.y,t=(dx*sy-dy*sx)/den,u=(dx*ry-dy*rx)/den;return t>=0&&t<=1&&u>=0&&u<=1?t:null;};
  const intersection=evaluate(fragment('function fieldSectionIntersection(','function createSectionFeature('),
- {state,segmentIntersectionT:seg,linePoint:(a,b,t)=>({x:a.x+t*(b.x-a.x),y:a.y+t*(b.y-a.y)}),courseFragments:c=>[c.points],workingMapEpsg:()=>25831,projectCrsEpsg:()=>25831,utmZoneForEpsg:()=>31,lonLatToMapCoords:()=>({x:0,y:0})},'fieldSectionIntersection');
+ {state,segmentIntersectionT:seg,linePoint:(a,b,t)=>({x:a.x+t*(b.x-a.x),y:a.y+t*(b.y-a.y)}),courseFragments:c=>[c.points],workingMapEpsg:()=>25831,projectCrsEpsg:()=>25831,utmZoneForEpsg:()=>31,fieldUtmToLonLat:()=>({lat:41.6,lon:1.8}),lonLatToMapCoords:()=>({x:0,y:0})},'fieldSectionIntersection');
  const actual=intersection({points:[{x:3,y:0},{x:3,y:10}],courseId:'water'});
  assert.equal(actual.utmX,3);assert.equal(actual.utmY,5);
  assert.equal(intersection({points:[{x:3,y:11},{x:3,y:12}],courseId:'water'}),null);
