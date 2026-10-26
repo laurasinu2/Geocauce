@@ -67,13 +67,26 @@ function selectProjectMobile(id){
   localStorage.setItem(ACTIVE_KEY,id);
   if(route==='projects')render();else showShell('projects');
 }
+async function createNewStop(){
+ if(!activeProject()){showShell('projects');return;}
+ if(!await ensureProjectLoaded())return;
+ await showMap();
+ if(typeof api.createStopFromMapCenter!=='function'){alert('Actualitza GeoCauce per crear parades');return;}
+ api.createStopFromMapCenter();
+}
+async function openReportMobile(){
+ if(!activeProject()){showShell('projects');return;}
+ if(!await ensureProjectLoaded())return;
+ await showMap();
+ api.openFieldReportFromMobile?.();
+}
 function card(icon,title,text,klass='',routeName=''){return `<button class="m-card m-feature-card ${klass}" ${routeName?`data-go="${routeName}"`:''}><span class="m-ico"><img src="${icon}" alt=""></span><h3>${title}</h3><p>${text}</p><span class="m-card-chevron">›</span><span class="m-hills"></span></button>`}
 function home(){
  const p=activeProject(), name=p?.name||'Sin proyecto activo';
  return `<div class="m-eyebrow">HOLA</div><h1 class="m-title">Explora, documenta<br>y conserva nuestros cauces</h1><p class="m-subtitle">Geología, paisaje e historia en un mismo lugar.</p>
  <div class="m-grid2">${card('icons/mapa.png','Mapa','Consulta capas, explora el territorio y localiza puntos de interés.','','map')}${card('icons/proyecto.png','Proyectos','Gestiona tus proyectos, sitios y observaciones en el territorio.','sand','projects')}</div>
  <button class="m-hero" data-go="history"><span class="m-badge">▣ &nbsp; DESTACADO</span><h2>Fotografías históricas ›</h2><p>Observa cómo han cambiado los cauces a lo largo del tiempo. Compara fotografías antiguas y actuales.</p><span class="m-polaroid"></span></button>
- <div class="m-grid2 m-grid-secondary">${card('icons/libreta.png','Libreta de campo','Registra observaciones, mediciones y notas de tus salidas.','','notebook')}${card('icons/capas.png','Campañas / capas','Activa y gestiona capas temáticas del proyecto.','blue','campaigns')}</div>
+ <div class="m-grid2 m-grid-secondary">${card('icons/libreta.png','Libreta de campo','Registra observaciones, mediciones y notas de tus salidas.','','notebook')}${card('icons/capas.png','Campañas / capas','Activa y gestiona capas temáticas del proyecto.','blue','campaigns')}</div><div class="m-field-actions"><button class="primary" data-go="stop">＋ Nova parada</button><button class="secondary" data-go="report">Generar informe de camp</button></div>
  <div class="m-section-row"><section class="m-card m-panel"><div class="m-panel-head"><h3>◷ &nbsp; Actividad reciente</h3></div><div class="m-activity"><span class="m-thumb">⌖</span><div><b>Proyecto activo</b><small>${esc(name)}</small></div></div><div class="m-activity"><span class="m-thumb">▤</span><div><b>Última actualización</b><small>${fmtDate(p?.updatedAt)}</small></div></div></section>
  <section class="m-card m-panel"><div class="m-panel-head"><h3>⌾ &nbsp; Proyecto activo</h3><a data-go="map">Mapa ›</a></div><div class="m-near-photo"></div><h3 class="m-project-name">${esc(name)}</h3><p class="m-small-copy">${p?esc(p.objective||'Proyecto de territorio y observaciones de campo.'):'Selecciona un proyecto para empezar.'}</p><button class="m-open-btn" data-go="${p?'map':'projects'}">${p?'Abrir mapa':'Ver proyectos'} ›</button></section></div>`;
 }
@@ -89,15 +102,16 @@ function campaigns(){
  if(!p)return `<section class="m-card m-profile-card"><h2>Sin proyecto activo</h2><p>Selecciona un proyecto para consultar campañas y capas.</p><button class="primary" data-go="projects">Ver proyectos</button></section>`;
  if(st?.projectId!==p.id)return `<section class="m-card m-profile-card"><div class="m-profile-avatar"><img src="icons/capas.png"></div><h2>${esc(p.name)}</h2><p>Carga este proyecto para consultar únicamente sus campañas, observaciones y capas.</p><button class="primary" data-open-selected> Cargar proyecto </button></section>`;
  const cs=st.campaigns||[],rs=st.rasters||[];
- return `<div class="m-eyebrow">PROYECTO ACTIVO</div><h1 class="m-title">${esc(p.name)}</h1><p class="m-subtitle">● ${cs.length} campañas · ${(st.features||[]).length} observaciones</p><section class="m-card m-panel"><div class="m-campaign-title"><span class="m-campaign-icon"><img src="icons/capas.png"></span><div><h2>Campañas</h2><p>Contenido exclusivo de este proyecto.</p></div></div><div class="m-stack">${cs.map(c=>`<div class="m-layer-row"><div class="m-layer-preview"></div><div class="m-layer-copy"><h3>${esc(c.name||c.id)} ${c.id===st.editableCampaign?'<small>Actual</small>':''}</h3><p>${esc(c.date||'')} · ${(c.order||[]).length} obs.</p></div><div class="m-switch"></div></div>`).join('')||'<p>No hay campañas.</p>'}</div><div class="m-section-sep"></div><div class="m-campaign-title"><span class="m-campaign-icon"><img src="icons/mapa.png"></span><div><h2>Capas del mapa</h2><p>${rs.length} capas cargadas.</p></div></div><div class="m-stack">${rs.slice(0,5).map(r=>`<div class="m-layer-row"><div class="m-layer-preview"></div><div class="m-layer-copy"><h3>${esc(r.name||'Capa')}</h3><p>${esc(r.meta?.kind||'Mapa raster')}</p></div><div class="m-switch"></div></div>`).join('')||'<p class="m-muted-copy">No hay capas importadas todavía.</p>'}</div></section>`;
+ return `<div class="m-eyebrow">PROYECTO ACTIVO</div><h1 class="m-title">${esc(p.name)}</h1><p class="m-subtitle">● ${cs.length} campañas · ${(st.features||[]).length} observaciones</p><section class="m-card m-panel"><div class="m-campaign-title"><span class="m-campaign-icon"><img src="icons/capas.png"></span><div><h2>Campañas</h2><p>Contenido exclusivo de este proyecto.</p></div></div><div class="m-stack">${cs.map(c=>`<div class="m-layer-row"><div class="m-layer-preview"></div><div class="m-layer-copy"><h3>${esc(c.name||c.id)} ${c.id===st.editableCampaign?'<small>Actual</small>':''}</h3><p>${esc(c.date||'')} · ${(c.order||[]).length} obs.</p></div><button class="m-layer-action" type="button" data-campaign-id="${esc(c.id)}" ${c.id===st.campaign?'disabled':''}>${c.id===st.campaign?'Activa':'Obrir'}</button></div>`).join('')||'<p>No hay campañas.</p>'}</div><div class="m-section-sep"></div><div class="m-campaign-title"><span class="m-campaign-icon"><img src="icons/mapa.png"></span><div><h2>Capas del mapa</h2><p>${rs.length} capas cargadas.</p></div></div><div class="m-stack">${rs.slice(0,5).map(r=>`<div class="m-layer-row"><div class="m-layer-preview"></div><div class="m-layer-copy"><h3>${esc(r.name||'Capa')}</h3><p>${esc(r.meta?.kind||'Mapa raster')}</p></div><button class="m-layer-action" type="button" data-raster-id="${esc(r.id)}" aria-pressed="${r.visible!==false}">${r.visible===false?'Mostrar':'Ocultar'}</button></div>`).join('')||'<p class="m-muted-copy">No hay capas importadas todavía.</p>'}</div></section>`;
 }
 function profile(){const p=activeProject();return `<div class="m-eyebrow">PERFIL</div><h1 class="m-title">GeoCauce</h1><p class="m-subtitle">Cuenta, sincronización y preferencias.</p><section class="m-card m-profile-card"><div class="m-profile-avatar"><img src="icons/cuenta.svg"></div><h2>${esc(p?.author||'Usuario de campo')}</h2><p>${esc(p?.institution||'Datos locales y Supabase cuando hay una cuenta vinculada.')}</p><div class="m-profile-actions"><button class="primary" data-go="account">Cuenta</button><button data-go="settings">Configuración</button><button data-go="projects">Tus proyectos</button><button data-go="map">Abrir mapa</button></div></section>`}
 function render(){if(route==='projects')content.innerHTML=projects();else if(route==='history')content.innerHTML=history();else if(route==='campaigns')content.innerHTML=campaigns();else if(route==='profile')content.innerHTML=profile();else content.innerHTML=home();wire();}
 function ensureObservationSheet(){
  let sheet=$('#mObservationSheet');if(sheet)return sheet;
- sheet=document.createElement('div');sheet.id='mObservationSheet';sheet.className='m-observation-sheet hidden';sheet.innerHTML=`<button class="m-sheet-backdrop" data-close-observation aria-label="Cerrar"></button><section class="m-sheet-card"><div class="m-sheet-handle"></div><div class="m-sheet-head"><div><small>NUEVA OBSERVACIÓN</small><h2>¿Qué quieres registrar?</h2></div><button class="m-sheet-close" data-close-observation aria-label="Cerrar">×</button></div><div class="m-observation-grid"><button data-observation-tool="gps"><img src="icons/gps.png" alt=""><span>Punto GPS</span></button><button data-observation-tool="photo"><img src="icons/camara.png" alt=""><span>Foto</span></button><button data-observation-tool="historicalPhoto"><img src="icons/fotos.png" alt=""><span>Foto histórica</span></button><button data-observation-tool="section"><img src="icons/seccion.svg" alt=""><span>Sección</span></button><button data-observation-tool="watercourse"><img src="icons/rio.png" alt=""><span>Cauce / canal</span></button><button data-observation-tool="boundary"><img src="icons/editar.png" alt=""><span>Límite</span></button></div></section>`;
+ sheet=document.createElement('div');sheet.id='mObservationSheet';sheet.className='m-observation-sheet hidden';sheet.innerHTML=`<button class="m-sheet-backdrop" data-close-observation aria-label="Cerrar"></button><section class="m-sheet-card"><div class="m-sheet-handle"></div><div class="m-sheet-head"><div><small>NUEVA OBSERVACIÓN</small><h2>¿Qué quieres registrar?</h2></div><button class="m-sheet-close" data-close-observation aria-label="Cerrar">×</button></div><div class="m-observation-grid"><button data-create-stop><img src="icons/gps.png" alt=""><span>Nova parada</span></button><button data-observation-tool="gps"><img src="icons/gps.png" alt=""><span>Punto GPS</span></button><button data-observation-tool="photo"><img src="icons/camara.png" alt=""><span>Foto</span></button><button data-observation-tool="historicalPhoto"><img src="icons/fotos.png" alt=""><span>Foto histórica</span></button><button data-observation-tool="section"><img src="icons/seccion.svg" alt=""><span>Sección</span></button><button data-observation-tool="watercourse"><img src="icons/rio.png" alt=""><span>Cauce / canal</span></button><button data-observation-tool="boundary"><img src="icons/editar.png" alt=""><span>Límite</span></button></div></section>`;
  document.body.appendChild(sheet);
- $$('[data-close-observation]').forEach(b=>b.onclick=()=>sheet.classList.add('hidden'));
+ $('[data-close-observation]').forEach(b=>b.onclick=()=>sheet.classList.add('hidden'));
+  sheet.querySelector('[data-create-stop]').onclick=async()=>{sheet.classList.add('hidden');await createNewStop();};
  $$('[data-observation-tool]').forEach(b=>b.onclick=async()=>{const tool=b.dataset.observationTool;sheet.classList.add('hidden');await showMap();setTimeout(()=>{try{api.setTool(tool)}catch{}},100);});
  return sheet;
 }
@@ -105,7 +119,9 @@ function openObservationSheet(){if(!activeProject()){showShell('projects');retur
 function wire(){
   $$('[data-go]').forEach(el=>el.onclick=e=>{e.preventDefault();go(el.dataset.go)});
   $$('[data-project-id]').forEach(el=>el.onclick=()=>selectProjectMobile(el.dataset.projectId));
-  $$('[data-history-id]').forEach(el=>el.onclick=()=>{try{api.openHistoricalPhotoPoint(el.dataset.historyId)}catch{}});
+  $('[data-history-id]').forEach(el=>el.onclick=async()=>{if(!await ensureProjectLoaded())return;await showMap();try{api.openHistoricalPhotoPoint(el.dataset.historyId)}catch(e){console.error(e)}});
+   $('[data-campaign-id]').forEach(el=>el.onclick=()=>{api.switchCampaign(el.dataset.campaignId);render();});
+   $('[data-raster-id]').forEach(el=>el.onclick=()=>{api.toggleRasterVisible(el.dataset.rasterId);render();});
   $$('[data-open-selected]').forEach(el=>el.onclick=async()=>{await ensureProjectLoaded();showShell('campaigns')});
   const np=$('#mNewProject');if(np)np.onclick=()=>{shell.classList.add('hidden');api.showProjectCreate(null,'projects')};
   const ip=$('#mImportProject');if(ip)ip.onclick=()=>$('#projectImportInput')?.click();
@@ -114,6 +130,8 @@ function wire(){
 async function go(name){
   if(name==='map'){await showMap();return}
   if(name==='new'){openObservationSheet();return}
+   if(name==='stop'){await createNewStop();return}
+   if(name==='report'){await openReportMobile();return}
   if(name==='campaigns'){if(activeProject()&&api.getState()?.projectId!==selectedProjectId())await ensureProjectLoaded();showShell('campaigns');return}
   if(name==='history'){if(activeProject()&&api.getState()?.projectId!==selectedProjectId())await ensureProjectLoaded();showShell('history');return}
   if(name==='notebook'){if(activeProject()){await ensureProjectLoaded();try{api.openNotebook()}catch{}}else showShell('projects');return}
@@ -125,7 +143,7 @@ $$('[data-m-route]').forEach(b=>b.onclick=()=>go(b.dataset.mRoute));
 $('#mSettings').onclick=()=>go('settings');
 $('#mGpsChip').setAttribute('aria-label','Centrar en mi ubicación');
 $('#mGpsChip').onclick=async()=>{if(activeProject()){await showMap();setTimeout(()=>api.locateMe(),100)}else showShell('projects')};
-$('#mMapHome').onclick=()=>showShell('home');$('#mMapProjects').onclick=()=>showShell('projects');$('#mMapProfile').onclick=()=>showShell('profile');$('#mMapAdd').onclick=openObservationSheet;
+$('#mMapHome').onclick=()=>showShell('home');$('#mMapView').onclick=()=>showMap();$('#mMapProjects').onclick=()=>showShell('projects');$('#mMapProfile').onclick=()=>showShell('profile');$('#mMapAdd').onclick=openObservationSheet;
 window.addEventListener('geocauce-settings-changed',()=>{if(simpleEnabled()){if($('#settingsScreen')&&!$('#settingsScreen').classList.contains('hidden'))return;showShell(route||'home')}else{shell.classList.add('hidden');mapBar.classList.add('hidden');document.body.classList.remove('mobile-map-lite')}});
 window.addEventListener('resize',()=>{if(mode()==='auto'){if(isNarrow()){const projectVisible=$('#projectScreen')&&!$('#projectScreen').classList.contains('hidden');if(projectVisible)showShell('home')}else{shell.classList.add('hidden');mapBar.classList.add('hidden');document.body.classList.remove('mobile-map-lite')}}});
 const observer=new MutationObserver(()=>{if(!simpleEnabled())return;const ps=$('#projectScreen');if(ps&&!ps.classList.contains('hidden')&&shell.classList.contains('hidden')&&mapBar.classList.contains('hidden'))showShell('home')});
