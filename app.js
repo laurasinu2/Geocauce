@@ -2873,9 +2873,9 @@ function onMapPointerUp(e){
     if(!f||!st.snapStart||!endSnap||endSnap.d>28){toast('Termina cerca del borde para cerrar con el imán');drawAll();return;}
     pushHistory();const pts=[st.snapStart.world,...worldPts.slice(1,-1),endSnap.world];replaceContourSegment(f,st.snapStart,endSnap,pts);state.selectedId=f.id;showFeatureCard(f);toast(`${f.id}: contorno actualizado`);returnToPan=shouldReturnToPan();
   } else if(st.tool==='boundary'){
-    pushHistory();const f={id:uid('deposit'),type:'deposit',points:worldPts,closed:true,filled:false,material:state.material,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[]};state.features.push(f);state.selectedId=f.id;showFeatureCard(f);toast('Límite creado. Usa Rellenar para aplicar el material.');returnToPan=shouldReturnToPan();
+    pushHistory();const f={id:uid('deposit'),type:'deposit',...fieldCreationLinks(state.activeCourseId),points:worldPts,closed:true,filled:false,material:state.material,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[]};state.features.push(f);state.selectedId=f.id;showFeatureCard(f);toast('Límite creado. Usa Rellenar para aplicar el material.');returnToPan=shouldReturnToPan();
   } else if(st.tool==='paint'){
-    pushHistory();const f={id:uid('deposit'),type:'deposit',points:worldPts,closed:false,paint:true,material:state.material,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[]};state.features.push(f);toast(`Pintado: ${materialById(state.material).name}`);returnToPan=shouldReturnToPan();
+    pushHistory();const f={id:uid('deposit'),type:'deposit',...fieldCreationLinks(state.activeCourseId),points:worldPts,closed:false,paint:true,material:state.material,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[]};state.features.push(f);toast(`Pintado: ${materialById(state.material).name}`);returnToPan=shouldReturnToPan();
   } else if(st.tool==='basin'){
     if(worldPts.length<3){toast('La conca necessita un contorn tancat');drawAll();return;}const name=(prompt('Nom de la conca','Conca '+(state.project?.torrent||state.project?.name||''))||'').trim();if(!name){drawAll();return;}pushHistory();const f={id:nextHydroId('BAS'),type:'basin',name,points:worldPts,closed:true,filled:false,material:null,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[]};state.features.push(f);state.selectedId=f.id;persistState();showFeatureCard(f);toast('Conca delimitada');
   } else if(st.tool==='watercourse'){
@@ -4527,13 +4527,32 @@ function nextSectionNameForReach(reach,ratio=.5){
   if(!reach)return'';const used=new Set(state.features.filter(x=>x.type==='section'&&x.reachId===reach.id).map(x=>String(x.sectionName||x.sheetIII?.sectionName||'').toUpperCase()));
   if(ratio<=.18&&!used.has('S1'))return'S1';if(ratio>=.82&&!used.has('S2'))return'S2';let n=3;while(used.has('S'+n))n++;return'S'+n;
 }
+function fieldSectionIntersection(section){
+ const a=section?.points?.[0],b=section?.points?.[section.points.length-1];
+ if(!a||!b)return null;
+ const course=state.features.find(f=>f.id===(section.watercourseId||section.courseId)&&f.type==='watercourse');
+ const reach=state.features.find(f=>f.id===section.reachId&&f.type==='reach');
+ const geometry=course?courseFragments(course):(reach?.points?.length?[reach.points]:[]);
+ let point=null,score=Infinity;
+ for(const line of geometry)for(let i=1;i<(line||[]).length;i++){
+  const t=segmentIntersectionT(a,b,line[i-1],line[i]);if(t==null)continue;
+  const q=linePoint(a,b,t),d=Math.abs(t-.5);
+  if(d<score){score=d;point=q;}
+ }
+ if(!point)return null;
+ const crs=workingMapEpsg(),epsg=projectCrsEpsg();
+ const result={x:point.x,y:point.y,crs};
+ if(crs===epsg&&utmZoneForEpsg(epsg)){result.utmX=point.x;result.utmY=point.y;result.utmCrs=epsg;}
+ if((crs===4326||crs===4258)){result.lon=point.x;result.lat=point.y;if(utmZoneForEpsg(epsg)){const p=lonLatToMapCoords(point.x,point.y,epsg);result.utmX=p.x;result.utmY=p.y;result.utmCrs=epsg;}}
+ return result;
+}
 function createSectionFeature(a,b,assoc=null){
   const f={id:uid('section'),type:'section',points:[a,b],closed:false,material:null,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[],sectionInk:[],sectionObjects:[],sectionProfile:null,sectionView:{gridStep:1,verticalScale:'1',zoomX:1,centerD:null},sectionMeasurements:{width:'',depth:'',note:'',widthInk:[],depthInk:[],noteInk:[]},sheetIII:defaultSectionSheetIII(),...fieldCreationLinks(assoc?.reach?.courseId||null,assoc?.reach?.id||null)};
   if(assoc?.reach){f.reachId=assoc.reach.id;f.courseId=assoc.reach.courseId;f.watercourseId=assoc.reach.courseId;f.watercourseName=assoc.course?.name||assoc.course?.abbr||null;f.reachAlong=assoc.projection?.along??null;f.anchorPoint=assoc.point?{...assoc.point}:null;f.sectionName=nextSectionNameForReach(assoc.reach,assoc.ratio);f.sheetIII.sectionName=f.sectionName;const old=assoc.reach.sheetII?.fic;if(old&&!state.features.some(x=>x.type==='section'&&x.reachId===assoc.reach.id&&x.sheetIII?.fic)){f.sheetIII.fic=cloneAny(normalizeSectionSheetIII({fic:old}).fic);}}
   else{f.sectionName=f.id;f.sheetIII.sectionName=f.id;}
-  state.features.push(f);state.selectedId=f.id;persistState();drawAll();renderSectionList();openSection(f);return f;
+  f.channelIntersection=fieldSectionIntersection(f);state.features.push(f);state.selectedId=f.id;persistState();drawAll();renderSectionList();openSection(f);return f;
 }
-function associateSectionIfNeeded(f){if(!f||f.type!=='section'||f.reachId||!f.points?.length)return null;const a=f.points[0],b=f.points.at(-1),assoc=sectionAssociationFromLine(a,b);if(!assoc?.reach)return null;f.reachId=assoc.reach.id;f.courseId=assoc.reach.courseId;f.watercourseId=assoc.reach.courseId;f.watercourseName=assoc.course?.name||assoc.course?.abbr||null;f.reachAlong=assoc.projection?.along??null;f.anchorPoint=assoc.point?{...assoc.point}:null;f.sectionName=f.sectionName&&f.sectionName!==f.id?f.sectionName:nextSectionNameForReach(assoc.reach,assoc.ratio);const d=ensureSectionSheetData(f);d.sectionName=f.sectionName;const old=assoc.reach.sheetII?.fic,hasOld=old&&['ad','bd','cd','dd1','dd2'].some(k=>optionalScore(old?.[k]?.score)!==null||(old?.[k]?.noteInk?.length));const hasNew=['ad','bd','cd','dd1','dd2'].some(k=>optionalScore(d.fic?.[k]?.score)!==null||(d.fic?.[k]?.noteInk?.length));if(hasOld&&!hasNew)d.fic=cloneAny(normalizeSectionSheetIII({fic:old}).fic);persistState();return assoc;}
+function associateSectionIfNeeded(f){if(!f||f.type!=='section'||f.reachId||!f.points?.length)return null;const a=f.points[0],b=f.points.at(-1),assoc=sectionAssociationFromLine(a,b);if(!assoc?.reach)return null;f.reachId=assoc.reach.id;f.courseId=assoc.reach.courseId;f.watercourseId=assoc.reach.courseId;f.watercourseName=assoc.course?.name||assoc.course?.abbr||null;f.reachAlong=assoc.projection?.along??null;f.anchorPoint=assoc.point?{...assoc.point}:null;f.sectionName=f.sectionName&&f.sectionName!==f.id?f.sectionName:nextSectionNameForReach(assoc.reach,assoc.ratio);f.channelIntersection=fieldSectionIntersection(f);const d=ensureSectionSheetData(f);d.sectionName=f.sectionName;const old=assoc.reach.sheetII?.fic,hasOld=old&&['ad','bd','cd','dd1','dd2'].some(k=>optionalScore(old?.[k]?.score)!==null||(old?.[k]?.noteInk?.length));const hasNew=['ad','bd','cd','dd1','dd2'].some(k=>optionalScore(d.fic?.[k]?.score)!==null||(d.fic?.[k]?.noteInk?.length));if(hasOld&&!hasNew)d.fic=cloneAny(normalizeSectionSheetIII({fic:old}).fic);persistState();return assoc;}
 function polygonSignedArea(pts){let a=0;for(let i=0,j=pts.length-1;i<pts.length;j=i++)a+=(pts[j].x*pts[i].y-pts[i].x*pts[j].y);return a/2;}
 function sectionBasinAtPoint(p){
   const list=state.features.filter(f=>f.type==='basin'&&f.closed&&f.points?.length>=3&&pointInPoly(p,f.points));
@@ -4621,7 +4640,7 @@ function redefineCourseReach(course,fragmentIndex,d0,d1){
   }
   if(remove.size)state.features=state.features.filter(f=>!remove.has(f.id));
   state.features.push(...add);
-  const now=Date.now(),f={id:allocReachId(),type:'reach',courseId:course.id,fragmentIndex,startAlong:d0,endAlong:d1,points:[],closed:false,campaign:state.campaign,date:today(),createdAt:now,createdOrder:now+state.features.length/1000,ink:[],photos:[],erasures:[],fieldSlopeInk:[],changeCodeInk:[],observationsInk:[]};
+  const now=Date.now(),f={id:allocReachId(),type:'reach',...fieldCreationLinks(course.id),courseId:course.id,fragmentIndex,startAlong:d0,endAlong:d1,points:[],closed:false,campaign:state.campaign,date:today(),createdAt:now,createdOrder:now+state.features.length/1000,ink:[],photos:[],erasures:[],fieldSlopeInk:[],changeCodeInk:[],observationsInk:[]};
   updateReachGeometryFromInterval(f,course,fragmentIndex,d0,d1);state.features.push(f);
   course.longitudinalProfile=null;renumberCourseReaches(course.id);return f;
 }
@@ -4676,7 +4695,7 @@ function suggestAbbr(name){return String(name||'').normalize('NFD').replace(/[\u
 function saveNewCourse(){
   const name=$('#courseName').value.trim(),abbr=$('#courseAbbr').value.trim().toUpperCase();if(!name||!abbr){toast('Indica nom i abreviatura');return false;}
   if(state.editCourseId){const f=state.features.find(x=>x.id===state.editCourseId&&x.type==='watercourse');if(!f)return false;pushHistory();Object.assign(f,{name,abbr,kind:$('#courseKind').value,basinId:$('#courseBasin').value||null,direction:$('#courseDirection').value});renumberCourseReaches(f.id);state.activeCourseId=f.id;state.editCourseId=null;persistState();$('#courseModal').classList.add('hidden');updateHydroFab();drawAll();toast(`Curs ${abbr} actualitzat`);return true;}
-  const pts=state.pendingCourseStroke;if(!pts?.length){toast('Primer traça un tros del curs al mapa');return false;}const importedFrags=state.pendingImportedCourseFragments?.length?cloneAny(state.pendingImportedCourseFragments):null;pushHistory();const frags=importedFrags||[cloneAny(pts)],f={id:nextHydroId('CUR'),type:'watercourse',name,abbr,kind:$('#courseKind').value,basinId:$('#courseBasin').value||null,direction:$('#courseDirection').value,points:cloneAny(frags[0]),fragments:frags,closed:false,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[],longitudinalProfile:null,source:importedFrags?{type:'referenceLayer'}:null};state.features.push(f);if(importedFrags)normalizeCourseFragments(f,{remapReaches:false});state.activeCourseId=f.id;state.selectedId=f.id;state.pendingCourseStroke=null;state.pendingImportedCourseFragments=null;persistState();$('#courseModal').classList.add('hidden');updateHydroFab();showFeatureCard(f);drawAll();toast(`Curs ${abbr} creat`);return true;
+  const pts=state.pendingCourseStroke;if(!pts?.length){toast('Primer traça un tros del curs al mapa');return false;}const importedFrags=state.pendingImportedCourseFragments?.length?cloneAny(state.pendingImportedCourseFragments):null;pushHistory();const frags=importedFrags||[cloneAny(pts)],f={id:nextHydroId('CUR'),type:'watercourse',name,abbr,kind:$('#courseKind').value,basinId:$('#courseBasin').value||null,direction:$('#courseDirection').value,points:cloneAny(frags[0]),fragments:frags,closed:false,campaign:state.campaign,date:today(),ink:[],photos:[],erasures:[],longitudinalProfile:null,source:importedFrags?{type:'referenceLayer'}:null,...fieldCreationLinks()};state.features.push(f);if(importedFrags)normalizeCourseFragments(f,{remapReaches:false});state.activeCourseId=f.id;state.selectedId=f.id;state.pendingCourseStroke=null;state.pendingImportedCourseFragments=null;persistState();$('#courseModal').classList.add('hidden');updateHydroFab();showFeatureCard(f);drawAll();toast(`Curs ${abbr} creat`);return true;
 }
 function courseEndpointCandidates(course){const out=[];courseFragments(course).forEach((frag,fragmentIndex)=>{if(!frag.length)return;out.push({fragmentIndex,end:'start',point:frag[0]},{fragmentIndex,end:'end',point:frag.at(-1)});});return out;}
 function courseEndpointSnapTolerance(){return Math.min(5,Math.max(.35,34/state.view.scale));}
