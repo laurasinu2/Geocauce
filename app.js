@@ -2477,7 +2477,42 @@ function fieldStopPosition(pinPoint,gnss){
  else if(!hasGnss&&crs===epsg&&utmZoneForEpsg(epsg)){position.utmX=pinPoint.x;position.utmY=pinPoint.y;position.utmCrs=epsg;}
  return {mapPoint,position};
 }
-function addMapStopAt(point){if(!point||!requireEditable('afegir un punt de parada'))return;const def=nextStopLabel(),label=(prompt('Nom del punt de parada',def)||def).trim()||def;state.mapPins=state.mapPins||[];const loc=fieldStopPosition(point,state.gnss),pin={id:'mp'+Date.now().toString(36),kind:'stop',x:loc.mapPoint.x,y:loc.mapPoint.y,crs:loc.position.crs,position:loc.position,creationPosition:cloneAny(loc.position),label,campaignId:state.campaign,createdAt:Date.now()};state.mapPins.push(pin);state.activeFieldStopId=pin.id;persistState();drawAll();toast(`${label} afegida`);}
+async function fieldFreshGnssForStop(){
+ const previous=state.gnss;
+ if(previous&&Number.isFinite(previous.lat)&&Number.isFinite(previous.lon)&&Date.now()-Number(previous.timestamp||0)<15000)return previous;
+ if(ANDROID_NATIVE){
+  return await new Promise(resolve=>{
+   let done=false;
+   const finish=value=>{if(done)return;done=true;clearTimeout(timeout);window.removeEventListener('geocauce-native-gnss',listener);resolve(value);};
+   const listener=e=>{const d=e.detail||{};if(Number.isFinite(Number(d.lat))&&Number.isFinite(Number(d.lon)))finish(state.gnss||null);};
+   const timeout=setTimeout(()=>finish(null),8000);
+   window.addEventListener('geocauce-native-gnss',listener);
+   try{nativeCall('requestLocation');}catch{finish(null);}
+  });
+ }
+ if(!navigator.geolocation)return null;
+ return await new Promise(resolve=>{
+  navigator.geolocation.getCurrentPosition(pos=>{
+   const coord=pos.coords,u=lonLatToMapCoords(coord.longitude,coord.latitude);
+   const fresh={x:u.x,y:u.y,crs:u.epsg,lat:coord.latitude,lon:coord.longitude,accuracy:coord.accuracy,altitude:coord.altitude,heading:coord.heading,timestamp:pos.timestamp||Date.now()};
+   state.gnss=fresh;updateGnssUi();resolve(fresh);
+  },()=>resolve(null),{enableHighAccuracy:true,maximumAge:0,timeout:8000});
+ });
+}
+async function addMapStopAt(point){
+ if(!point||!requireEditable('afegir un punt de parada')||state.stopCreationPending)return;
+ const campaignId=state.campaign,def=nextStopLabel(),label=(prompt('Nom del punt de parada',def)||def).trim()||def;
+ state.stopCreationPending=true;toast('Registrant la posició GNSS de la parada…');
+ try{
+  const gnss=await fieldFreshGnssForStop();
+  if(state.campaign!==campaignId||!isEditableCampaign())return;
+  state.mapPins=state.mapPins||[];
+  const loc=fieldStopPosition(point,gnss),pin={id:'mp'+Date.now().toString(36),kind:'stop',x:loc.mapPoint.x,y:loc.mapPoint.y,crs:loc.position.crs,position:loc.position,creationPosition:cloneAny(loc.position),label,campaignId:state.campaign,createdAt:Date.now()};
+  state.mapPins.push(pin);state.activeFieldStopId=pin.id;persistState();drawAll();
+  toast(gnss?label+' · GNSS registrat':label+' · GNSS no disponible, posició del mapa registrada',4500);
+ }finally{state.stopCreationPending=false;}
+}
+
 function beginPointRelocation(kind){
   const id=kind==='stop'?state.currentStopId:state.currentHistoricalPointId;
   const point=kind==='stop'?mapStopById(id):historicalPointById(id);
