@@ -95,10 +95,23 @@ function profile(){const p=activeProject();return `<div class="m-eyebrow">PERFIL
 function render(){if(route==='projects')content.innerHTML=projects();else if(route==='history')content.innerHTML=history();else if(route==='campaigns')content.innerHTML=campaigns();else if(route==='profile')content.innerHTML=profile();else content.innerHTML=home();wire();}
 function ensureObservationSheet(){
  let sheet=$('#mObservationSheet');if(sheet)return sheet;
- sheet=document.createElement('div');sheet.id='mObservationSheet';sheet.className='m-observation-sheet hidden';sheet.innerHTML=`<button class="m-sheet-backdrop" data-close-observation aria-label="Cerrar"></button><section class="m-sheet-card"><div class="m-sheet-handle"></div><div class="m-sheet-head"><div><small>NUEVA OBSERVACIÓN</small><h2>¿Qué quieres registrar?</h2></div><button class="m-sheet-close" data-close-observation aria-label="Cerrar">×</button></div><div class="m-observation-grid"><button data-observation-tool="gps"><img src="icons/gps.png" alt=""><span>Punto GPS</span></button><button data-observation-tool="photo"><img src="icons/camara.png" alt=""><span>Foto</span></button><button data-observation-tool="historicalPhoto"><img src="icons/fotos.png" alt=""><span>Foto histórica</span></button><button data-observation-tool="section"><img src="icons/seccion.svg" alt=""><span>Sección</span></button><button data-observation-tool="watercourse"><img src="icons/rio.png" alt=""><span>Cauce / canal</span></button><button data-observation-tool="boundary"><img src="icons/editar.png" alt=""><span>Límite</span></button></div></section>`;
+ sheet=document.createElement('div');sheet.id='mObservationSheet';sheet.className='m-observation-sheet hidden';sheet.innerHTML=`<button class="m-sheet-backdrop" data-close-observation aria-label="Cerrar"></button><section class="m-sheet-card"><div class="m-sheet-handle"></div><div class="m-sheet-head"><div><small>NUEVA OBSERVACIÓN</small><h2>¿Qué quieres registrar?</h2></div><button class="m-sheet-close" data-close-observation aria-label="Cerrar">×</button></div><div class="m-observation-grid"><button data-observation-tool="gps"><img src="icons/gps.png" alt=""><span>Punto GPS</span></button><button data-observation-tool="photo"><img src="icons/camara.png" alt=""><span>Foto</span></button><button data-observation-tool="historicalPhoto"><img src="icons/fotos.png" alt=""><span>Foto histórica</span></button><button data-observation-tool="stop"><img src="icons/visita.png" alt=""><span>Crear parada</span></button><button data-observation-tool="pan"><img src="icons/mover.png" alt=""><span>Mover</span></button><button data-observation-tool="select"><img src="icons/seleccionar.png" alt=""><span>Seleccionar</span></button></div></section>`;
  document.body.appendChild(sheet);
  $$('[data-close-observation]').forEach(b=>b.onclick=()=>sheet.classList.add('hidden'));
- $$('[data-observation-tool]').forEach(b=>b.onclick=async()=>{const tool=b.dataset.observationTool;sheet.classList.add('hidden');await showMap();setTimeout(()=>{try{api.setTool(tool)}catch{}},100);});
+ $('[data-observation-tool]').forEach(b=>b.onclick=async()=>{
+   const tool=b.dataset.observationTool;
+   sheet.classList.add('hidden');
+   // A file picker must be opened synchronously inside the user's tap;
+   // awaiting the map would lose transient browser user activation on tablets.
+   if(tool==='photo'){
+     if(await ensureProjectLoaded())api.mobileCapturePhoto();
+     return;
+   }
+   await showMap();
+   if(api.getState()?.screen!=='map')return;
+   if(tool==='gps'){await api.mobileRegisterGpsPoint();return;}
+   try{api.setTool(tool);if(tool==='stop')alert('Toca el mapa en la ubicación donde quieras crear la parada.');}catch(error){console.error(error);}
+  });
  return sheet;
 }
 function openObservationSheet(){if(!activeProject()){showShell('projects');return;}ensureObservationSheet().classList.remove('hidden');}
