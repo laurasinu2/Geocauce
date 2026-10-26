@@ -1336,6 +1336,8 @@ function blankFicData(){return{ad:{score:null,note:'',noteInk:[]},bd:{score:null
 function optionalScore(value){if(value===null||value===undefined||value==='')return null;const n=Number(value);return Number.isFinite(n)?n:null;}
 function defaultSectionSheetIII(){return{observer:'',visitDate:'',sectionName:'',sectionType:'',observations:'',table:{},tableInk:{},fic:blankFicData()};}
 function normalizeSectionSheetIII(src){const d={...defaultSectionSheetIII(),...(src||{})};d.table=d.table&&typeof d.table==='object'?d.table:{};d.tableInk=d.tableInk&&typeof d.tableInk==='object'?d.tableInk:{};d.fic=d.fic&&typeof d.fic==='object'?d.fic:blankFicData();for(const k of ['ad','bd','cd','dd1','dd2']){const o=d.fic[k]||{};d.fic[k]={score:optionalScore(o.score),note:o.note||'',noteInk:Array.isArray(o.noteInk)?o.noteInk:[]};}return d;}
+function sectionColumnStatus(d,col){return ['present','absent'].includes(d?.columnPresence?.[col])?d.columnPresence[col]:'unassessed';}
+function sectionColumnAbsent(d,col){return sectionColumnStatus(d,col)==='absent';}
 function ensureSectionSheetData(f){if(!f)return defaultSectionSheetIII();f.sheetIII=normalizeSectionSheetIII(f.sheetIII);if(!f.sheetIII.sectionName)f.sheetIII.sectionName=f.sectionName||f.id;return f.sheetIII;}
 function sectionReach(f){return state.features.find(x=>x.id===f?.reachId&&x.type==='reach')||null;}
 function reachSections(reachId){return state.features.filter(x=>x.type==='section'&&x.reachId===reachId).slice().sort((a,b)=>(Number.isFinite(+a.reachAlong)?+a.reachAlong:Infinity)-(Number.isFinite(+b.reachAlong)?+b.reachAlong:Infinity));}
@@ -3256,7 +3258,7 @@ function sectionTableInkNorm(e,c){const r=c.getBoundingClientRect();return{x:(e.
 function installSectionTableInkCanvas(c,f,row,col){
   if(!c||c._tableInkInstalled)return;c._tableInkInstalled=true;c.dataset.row=row;c.dataset.col=col;
   const data=()=>sectionTableInkCell(ensureSectionSheetData(f),row,col);
-  c.addEventListener('pointerdown',e=>{if(e.pointerType==='touch'||!isEditableCampaign())return;e.preventDefault();e.stopPropagation();state.sectionTableActiveCell={row,col};c._active={tool:state.sectionTableInkTool||'pen',color:state.sectionTableInkColor||state.notebookPenColor||'#1f2b31',pts:[sectionTableInkNorm(e,c)],pointerId:e.pointerId};c.setPointerCapture?.(e.pointerId);redrawSectionTableInkCanvas(c,data(),c._active);});
+  c.addEventListener('pointerdown',e=>{if(e.pointerType==='touch'||!isEditableCampaign()||sectionColumnAbsent(ensureSectionSheetData(f),col))return;e.preventDefault();e.stopPropagation();state.sectionTableActiveCell={row,col};c._active={tool:state.sectionTableInkTool||'pen',color:state.sectionTableInkColor||state.notebookPenColor||'#1f2b31',pts:[sectionTableInkNorm(e,c)],pointerId:e.pointerId};c.setPointerCapture?.(e.pointerId);redrawSectionTableInkCanvas(c,data(),c._active);});
   c.addEventListener('pointermove',e=>{if(!c._active||c._active.pointerId!==e.pointerId)return;e.preventDefault();e.stopPropagation();c._active.pts.push(sectionTableInkNorm(e,c));redrawSectionTableInkCanvas(c,data(),c._active);});
   const finish=e=>{if(!c._active||c._active.pointerId!==e.pointerId)return;const rec={...c._active};delete rec.pointerId;c._active=null;data().push(rec);persistState();redrawSectionTableInkCanvas(c,data());};
   c.addEventListener('pointerup',finish);c.addEventListener('pointercancel',()=>{c._active=null;redrawSectionTableInkCanvas(c,data());});
@@ -3273,11 +3275,11 @@ function setSectionTableZoom(value){
 function renderSectionFieldTable(f){
   const root=$('#sectionFieldTable');if(!root||!f)return;
   const d=ensureSectionSheetData(f);
-  let html='<table><thead><tr><th></th>'+SECTION_TABLE_COLS.map(([,lab])=>'<th>'+escapeHtml(lab)+'</th>').join('')+'</tr></thead><tbody>';
+  let html='<table><thead><tr><th></th>'+SECTION_TABLE_COLS.map(([col,lab])=>'<th>'+escapeHtml(lab)+'<select data-section-presence="'+col+'" aria-label="Presència: '+escapeHtml(lab)+'"><option value="unassessed">Sense avaluar</option><option value="present">Hi ha</option><option value="absent">No hi ha</option></select></th>').join('')+'</tr></thead><tbody>';
   for(const row of SECTION_TABLE_ROWS){
     html+='<tr><th>'+escapeHtml(row.label)+'</th>';
     for(const [col] of SECTION_TABLE_COLS){
-      const val=String(sectionTableCell(d,row.key,col)),options=fieldSectionChoices(row.key,col);
+      const absent=sectionColumnAbsent(d,col),val=String(sectionTableCell(d,row.key,col)),options=fieldSectionChoices(row.key,col);
       const area=['erosionEvidence','accumulationEvidence','grainClasses'].includes(row.key);
       const choice=options?.includes(val),custom=!!val&&!choice;
       let choices='';
@@ -3285,11 +3287,12 @@ function renderSectionFieldTable(f){
       const editable=options?custom:!area,showFree=!options||custom;
       const text=options?'<input class="section-table-manual'+(showFree?'':' hidden')+'" data-section-table-row="'+row.key+'" data-section-table-col="'+col+'" type="text" value="'+escapeHtml(custom?val:'')+'" placeholder="Text lliure">':
         (area?'<textarea data-section-table-row="'+row.key+'" data-section-table-col="'+col+'" placeholder="Text opcional">'+escapeHtml(val)+'</textarea>':'<input type="text" data-section-table-row="'+row.key+'" data-section-table-col="'+col+'" value="'+escapeHtml(val)+'" placeholder="Text opcional">');
-      html+='<td><div class="section-table-cell-editor">'+choices+text+'<canvas class="section-table-ink-canvas '+(area?'tall':'')+'" data-section-table-ink-row="'+row.key+'" data-section-table-ink-col="'+col+'"></canvas></div></td>';
+      html+='<td'+(absent?' style="background:#e6e8e9"':'')+'><div class="section-table-cell-editor">'+(absent?'<span style="font-weight:600;color:#60676b">No hi ha</span>':choices+text+'<canvas class="section-table-ink-canvas '+(area?'tall':'')+'" data-section-table-ink-row="'+row.key+'" data-section-table-ink-col="'+col+'"></canvas>')+'</div></td>';
     }
     html+='</tr>';
   }
   html+='</tbody></table>';root.innerHTML=html;
+  root.querySelectorAll('[data-section-presence]').forEach(sel=>{const col=sel.dataset.sectionPresence;sel.value=sectionColumnStatus(d,col);sel.disabled=!isEditableCampaign();sel.addEventListener('pointerdown',e=>e.stopPropagation());sel.onchange=()=>{if(!isEditableCampaign())return;d.columnPresence=d.columnPresence||{};d.columnPresence[col]=sel.value;persistState();renderSectionFieldTable(f);};});
   root.querySelectorAll('[data-section-table-choice-row]').forEach(sel=>{
     sel.disabled=!isEditableCampaign();
     sel.addEventListener('pointerdown',e=>e.stopPropagation());
@@ -5470,13 +5473,13 @@ async function localPdfReachSheet(reach,stage){
 function localPdfSectionTable(section,root){
  const d=ensureSectionSheetData(section),target=root.querySelector('#sectionFieldTable');
  if(!target)return [];
- let html='<table><thead><tr><th></th>'+SECTION_TABLE_COLS.map(([,label])=>'<th>'+escapeHtml(label)+'</th>').join('')+'</tr></thead><tbody>';
+ let html='<table><thead><tr><th></th>'+SECTION_TABLE_COLS.map(([col,label])=>'<th>'+escapeHtml(label)+(sectionColumnAbsent(d,col)?'<div>No hi ha</div>':'')+'</th>').join('')+'</tr></thead><tbody>';
  for(const row of SECTION_TABLE_ROWS){
   html+='<tr><th>'+escapeHtml(row.label)+'</th>';
   for(const [col] of SECTION_TABLE_COLS){
-   const value=String(d.table?.[row.key]?.[col]??'');
-   html+='<td><div class="section-table-cell-editor"><div class="field-table-quick-select">'+escapeHtml(value||'—')+'</div>'+
-     '<canvas class="section-table-ink-canvas '+(['erosionEvidence','accumulationEvidence','grainClasses'].includes(row.key)?'tall':'')+'" data-pdf-table-ink="'+escapeHtml(row.key)+'" data-pdf-col="'+escapeHtml(col)+'"></canvas></div></td>';
+   const absent=sectionColumnAbsent(d,col),value=absent?'No hi ha':String(d.table?.[row.key]?.[col]??'');
+   html+='<td'+(absent?' style="background:#e6e8e9"':'')+'><div class="section-table-cell-editor"><div class="field-table-quick-select">'+escapeHtml(value||'—')+'</div>'+
+     (absent?'':'<canvas class="section-table-ink-canvas '+(['erosionEvidence','accumulationEvidence','grainClasses'].includes(row.key)?'tall':'')+'" data-pdf-table-ink="'+escapeHtml(row.key)+'" data-pdf-col="'+escapeHtml(col)+'"></canvas>')+'</div></td>';
   }
   html+='</tr>';
  }
