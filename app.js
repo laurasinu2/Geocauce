@@ -2812,7 +2812,7 @@ function addMapStopAt(point){
  if(position.crs===4326||position.crs===4258){
   position.lon=loc.mapPoint.x;position.lat=loc.mapPoint.y;
  }
- const pin={id:'mp'+Date.now().toString(36),kind:'stop',x:loc.mapPoint.x,y:loc.mapPoint.y,crs:position.crs,position,creationPosition:cloneAny(position),label,campaignId:state.campaign,createdAt:Date.now()};
+ const pin={id:'mp-'+cloudUuid(),kind:'stop',x:loc.mapPoint.x,y:loc.mapPoint.y,crs:position.crs,position,creationPosition:cloneAny(position),label,campaignId:state.campaign,createdAt:Date.now()};
  state.mapPins=state.mapPins||[];state.mapPins.push(pin);state.activeFieldStopId=pin.id;
  persistState();drawAll();toast(label+' · coordenades del mapa guardades',3500);
 }
@@ -2822,7 +2822,7 @@ function closeMapStop(){state.currentStopId=null;$('#mapStopModal').classList.ad
 function deleteMapStop(id=state.currentStopId){const pin=mapStopById(id);if(!pin||!requireEditable('eliminar un punt de parada'))return;const linked=(state.historicalPhotoPoints||[]).filter(p=>p.linkedStopId===pin.id);const extra=linked.length?`
 
 ${linked.length} punt${linked.length===1?'':'s'} històric${linked.length===1?'':'s'} quedarà${linked.length===1?'':'an'} desvinculat${linked.length===1?'':'s'}, però no s'eliminarà${linked.length===1?'':'an'}.`:'';if(!confirm(`Eliminar ${pin.label||'aquesta parada'}?${extra}`))return;for(const p of linked)delete p.linkedStopId;state.mapPins=(state.mapPins||[]).filter(p=>p.id!==pin.id);if(state.activeFieldStopId===pin.id)state.activeFieldStopId=null;closeMapStop();persistState();drawAll();toast('Punt de parada eliminat');}
-function addQuickNoteAt(point){if(!point||!requireEditable('afegir una nota ràpida'))return;const text=(prompt('Nota ràpida','')||'').trim();if(!text)return;state.mapPins=state.mapPins||[];state.mapPins.push({id:'mp'+Date.now().toString(36),kind:'note',x:point.x,y:point.y,text,campaignId:state.campaign,...fieldCreationLinks(),createdAt:Date.now()});persistState();drawAll();toast('Nota ràpida guardada');}
+function addQuickNoteAt(point){if(!point||!requireEditable('afegir una nota ràpida'))return;const text=(prompt('Nota ràpida','')||'').trim();if(!text)return;state.mapPins=state.mapPins||[];state.mapPins.push({id:'mp-'+cloudUuid(),kind:'note',x:point.x,y:point.y,text,campaignId:state.campaign,...fieldCreationLinks(),createdAt:Date.now()});persistState();drawAll();toast('Nota ràpida guardada');}
 function createNotebookPageAt(point){if(!point||!requireEditable('crear una pàgina vinculada'))return;ensureNotebook();commitNotebookPage();const p=makeNotebookPage();p.campaignId=state.editableCampaign;p.stopId=fieldActiveStop()?.id||null;p.links=[{type:'position',x:point.x,y:point.y}];state.notebook.pages.push(p);state.notebook.currentPageId=p.id;persistState();drawAll();openNotebook(p.id);toast('Pàgina nova vinculada al punt del mapa');}
 function choosePhotoAt(point){if(!point||!requireEditable('afegir fotografies'))return;state.pendingPhotoFor=null;state.pendingPhotoLocation={x:point.x,y:point.y,crs:workingMapEpsg()};$('#photoInput').click();}
 function handleMapContextAction(action){const p=state.mapContextPoint?{...state.mapContextPoint}:null;hideMapContextMenu();if(!p)return;if(action==='photo')choosePhotoAt(p);else if(action==='page')createNotebookPageAt(p);else if(action==='note')addQuickNoteAt(p);else if(action==='stop')addMapStopAt(p);}
@@ -4673,7 +4673,7 @@ async function photoChosen(file){
   await dbPut('photos',rec);nativeSyncPhotoMeta(rec);
   const f=state.features.find(x=>x.id===state.pendingPhotoFor);
   const photoPinLocation=loc||(g&&Number.isFinite(g.x)&&Number.isFinite(g.y)?{x:g.x,y:g.y,crs:g.crs||workingMapEpsg()}:null);
-  if(!f&&photoPinLocation){state.mapPins=state.mapPins||[];state.mapPins.push({id:'mp'+Date.now().toString(36),kind:'photo',x:photoPinLocation.x,y:photoPinLocation.y,photoId:id,campaignId:state.campaign,stopId:rec.stopId,createdAt:Date.now()});}
+  if(!f&&photoPinLocation){state.mapPins=state.mapPins||[];state.mapPins.push({id:'mp-'+cloudUuid(),kind:'photo',x:photoPinLocation.x,y:photoPinLocation.y,photoId:id,campaignId:state.campaign,stopId:rec.stopId,createdAt:Date.now()});}
   state.pendingPhotoLocation=null;
   if(f){f.photos=f.photos||[];f.photos.push(id);persistState();toast(`Foto asociada a ${f.id}`);if(state.selectedId===f.id)showFeatureCard(f);if(!$('#photoGalleryModal').classList.contains('hidden'))openPhotoGallery(f.id);}
   else{persistState();drawAll();toast(photoPinLocation?'Foto guardada y marcada en el mapa':'Foto guardada sin posición GPS (puedes asociarla después)',4500);}
@@ -4730,7 +4730,7 @@ async function mobileRegisterGpsPoint(){
  try{
   const g=await mobileAcquireGps();
   if(!g||!Number.isFinite(g.x)||!Number.isFinite(g.y))throw new Error('No hay coordenadas GPS válidas.');
-  const pin={id:uid('gps'),kind:'gps',x:g.x,y:g.y,crs:g.crs,lat:g.lat,lon:g.lon,accuracy:g.accuracy,altitude:g.altitude,campaignId:state.campaign,...fieldCreationLinks(),createdAt:Date.now(),gnss:{...g}};
+  const pin={id:'gps-'+cloudUuid(),kind:'gps',x:g.x,y:g.y,crs:g.crs,lat:g.lat,lon:g.lon,accuracy:g.accuracy,altitude:g.altitude,campaignId:state.campaign,...fieldCreationLinks(),createdAt:Date.now(),gnss:{...g}};
   state.mapPins=state.mapPins||[];state.mapPins.push(pin);
   state.view.cx=g.x;state.view.cy=g.y;persistState();drawAll();
   toast('Punto GPS registrado · precisión ±'+(Number.isFinite(g.accuracy)?Math.round(g.accuracy)+' m':'desconocida'),4500);
