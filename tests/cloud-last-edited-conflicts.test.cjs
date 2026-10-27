@@ -10,13 +10,13 @@ function engine(){const window={};vm.runInNewContext(deltaSource,{window,Date});
 const key='/campaigns[id=D01]/upserts[id=SEC-1]/sheetIII/workStatus';
 const now=Date.now();
 const status=value=>({campaigns:[{id:'D01',upserts:[{id:'SEC-1',sheetIII:{workStatus:value}}]}]});
-test('different statuses stay pending even when device timestamps disagree',()=>{
+test('different statuses use the newest trustworthy field edit timestamp',()=>{
  const m=engine().merge(status('started'),status('done'),status('pending'),{
   editTimes:{local:{[key]:now-12000},remote:{[key]:now-54000}}
  });
- assert.equal(m.conflicts.length,1);
- assert.equal(m.autoResolved.length,0);
- assert.equal(m.conflicts[0].path,key);
+ assert.equal(m.conflicts.length,0);
+ assert.equal(m.autoResolved[0].choice,'local');
+ assert.equal(m.value.campaigns[0].upserts[0].sheetIII.workStatus,'done');
 });
 test('remote snapshot time is not treated as a reliable time for a single field',()=>{
  const m=engine().merge(status('started'),status('done'),status('pending'),{
@@ -38,14 +38,15 @@ test('independent order inserts merge without losing either section',()=>{
  assert.equal(m.conflicts.length,0);
  assert.equal(JSON.stringify(m.value.campaigns[0].order),JSON.stringify(['A','LOCAL','REMOTE','B']));
 });
-test('incompatible reorder stays explicit even with different timestamps',()=>{
+test('incompatible reorder prefers most recent and retains both devices section IDs',()=>{
  const b={campaigns:[{id:'D01',order:['A','B','C']}]};
  const l={campaigns:[{id:'D01',order:['B','A','C','NEW_LOCAL']}]};
  const r={campaigns:[{id:'D01',order:['A','C','B','NEW_REMOTE']}]};
  const p='/campaigns[id=D01]/order';
  const m=engine().merge(b,l,r,{editTimes:{local:{[p]:now-22000},remote:{[p]:now-6000}}});
- assert.equal(m.conflicts.length,1);
- assert.equal(m.conflicts[0].path,p);
+ assert.equal(m.conflicts.length,0);
+ assert.equal(m.autoResolved[0].choice,'remote');
+ assert.equal(JSON.stringify(m.value.campaigns[0].order),JSON.stringify(['A','C','B','NEW_REMOTE','NEW_LOCAL']));
  const decided=engine().merge(b,l,r,{resolutions:{[p]:'local'}});
  assert.equal(decided.conflicts.length,0);
  assert.ok(decided.value.campaigns[0].order.includes('NEW_LOCAL'));
@@ -88,4 +89,13 @@ test('manual conflict resolution saves both versions before asking',()=>{
  assert.ok(appSource.includes('conflictRecoveryLocal'));
  assert.ok(appSource.includes('conflictRecoveryRemote'));
  assert.doesNotThrow(()=>new vm.Script(appSource));
+});
+
+test('legacy local modification after cloud snapshot is provably more recent',()=>{
+ const m=engine().merge(status('started'),status('done'),status('pending'),{
+  legacy:{localQueue:{[key]:now-5000},remoteSnapshotAt:now-40000}
+ });
+ assert.equal(m.conflicts.length,0);
+ assert.equal(m.autoResolved[0].choice,'local');
+ assert.equal(m.autoResolved[0].source,'snapshot-before-local');
 });
