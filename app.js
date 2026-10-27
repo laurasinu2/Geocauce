@@ -6815,6 +6815,9 @@ async function fieldReportBuild(options={}){
    html+=fieldReportHeading((index+1)+'. TRAM '+(reach.reachCode||reach.id),3);
    html+=fieldReportNarrativeReach(reach,sections);
    html+=fieldReportReach(reach);
+   // Technical figures are taken from the registered sheet, not reconstructed interpretations.
+   if((reach.sheetII?.schemeInk||[]).length)html+='<figure><img alt="Esquema de camp del tram" style="max-width:100%;height:auto" src="'+reachSheetSchemeDataUrl(reach)+'"><figcaption>Esquema registrat a la FITXA II</figcaption></figure>';
+   try{const profileImage=await reachLongProfileDataUrl(reach,group.course);if(profileImage)html+='<figure><img alt="Perfil longitudinal del tram" style="max-width:100%;height:auto" src="'+profileImage+'"><figcaption>Perfil longitudinal del tram</figcaption></figure>';}catch(e){console.warn('Perfil en informe',e);}
    html+=printPhotos(photoFor(reach),'FOTOGRAFIES DEL TRAM');
    for(const section of sections){
     html+=fieldReportSection(section);
@@ -6828,11 +6831,19 @@ async function fieldReportBuild(options={}){
  for(const p of photos)if(!included.has(p.id)&&(!p.featureId||!model.byId.has(p.featureId)||(selectedCourse==='all'||fieldReportCourse(p)?.id===selectedCourse)))orphans.push(p);
  const notes=(state.notebook?.pages||[]).filter(p=>!day||p.campaignId===model.campaignId);
  const relevantNotes=notes.filter(p=>fieldReportHas(p.text||p.observations)||(p.ink||[]).length);
- if(model.unlinked.length||orphans.length||relevantNotes.length||model.warnings.length){
+ const relatedDeposits=(day?fieldReportCampaignFeatures(model.campaignId):state.features).filter(f=>f.type==='deposit'&&(model.courseId==='all'||fieldReportCourse(f)?.id===model.courseId));
+ const stops=(state.mapPins||[]).filter(p=>p.kind==='stop'&&(!day||p.campaignId===model.campaignId));
+ const historical=(state.historicalPhotoPoints||[]).filter(p=>!day||p.campaignId===model.campaignId);
+ const stopNotes=(state.mapPins||[]).filter(p=>p.kind==='note'&&(!day||p.campaignId===model.campaignId));
+ if(model.unlinked.length||orphans.length||relevantNotes.length||model.warnings.length||relatedDeposits.length||stops.length||historical.length||stopNotes.length){
   html+='<article class="field-report-page">'+fieldReportHeading('ELEMENTS PENDENTS DE VINCULACIÓ I NOTES',2);
   for(const warning of model.warnings)html+=fieldReportParagraph('Comprovació: '+warning);
   for(const f of model.unlinked)html+=fieldReportParagraph('Element sense una ubicació jeràrquica validada: '+(f.sectionName||f.reachCode||f.name||f.id)+' ('+f.type+').');
   for(const p of orphans)html+=fieldReportHeading('FOTOGRAFIA SENSE VINCULACIÓ AL TRAM',4)+fieldReportPhoto(p);
+  for(const dep of relatedDeposits)html+=fieldReportHeading('DIPÒSIT '+(dep.name||dep.id),4)+fieldReportParagraph(fieldReportEntries(dep,[['material','Material'],['observations','Observacions']]).join(' '));
+  for(const stop of stops)html+=fieldReportHeading('PARADA DE CAMP '+(stop.label||stop.id),4)+fieldReportCoords(stop.position||stop)+fieldReportParagraph(stop.text||stop.observation||stop.note);
+  for(const p of historical)html+=fieldReportHistorical(p,photos.filter(photo=>photo.historicalPointId===p.id));
+  for(const p of stopNotes)html+=fieldReportHeading('OBSERVACIÓ DE CAMP',4)+fieldReportParagraph(p.text);
   for(const note of relevantNotes)html+=fieldReportHeading('QUADERN DE CAMP',4)+fieldReportParagraph(note.text||note.observations)+fieldReportInkImage(note.ink);
   html+='</article>';
  }
@@ -6859,7 +6870,7 @@ function fieldReportInit(){
  };
  const options=()=>({mode:modeSelect.value,campaignId:campSelect.value||state.campaign,courseId:courseSelect.value||'all'});
  // Manual text revisions live outside the underlying field-sheet data.
- const draftKey=()=>['geocauce-field-report-edits',state.projectId,state.campaign].join(':');
+ const draftKey=()=>['geocauce-field-report-edits-v2',state.projectId,options().mode,options().campaignId,options().courseId].join(':');
  const readDraft=()=>{try{return JSON.parse(localStorage.getItem(draftKey())||'{}')||{};}catch{return {};}};
  const saveDraft=()=>{
   try{
