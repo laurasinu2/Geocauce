@@ -26,7 +26,7 @@ test('independent newly created sections and stop pins survive three-way sync',(
  assert.equal(sections.get('SEC-001').sheetIII.observations,'cloud notes');
  assert.equal(sections.get('SEC-002').sheetIII.workStatus,'done');
  assert.equal(sections.get('SEC-003').sheetIII.workStatus,'pending');
- assert.deepEqual(final.value.mapPins.map(x=>x.id).sort(),['stop-mobile','stop-tablet']);
+ assert.deepEqual(json(final.value.mapPins.map(x=>x.id).sort()),['stop-mobile','stop-tablet']);
 });
 test('legacy unclassified section status does not conflict with a real classification',()=>{
  const b={},l={campaigns:[{id:'D01',upserts:[{id:'SEC-002',sheetIII:{workStatus:null}}]}]},
