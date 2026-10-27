@@ -18,6 +18,14 @@ test('different statuses use the newest trustworthy field edit timestamp',()=>{
  assert.equal(m.autoResolved[0].choice,'local');
  assert.equal(m.value.campaigns[0].upserts[0].sheetIII.workStatus,'done');
 });
+test('remote field is selected automatically when its edit timestamp is newer',()=>{
+ const m=engine().merge(status('started'),status('done'),status('pending'),{
+  editTimes:{local:{[key]:now-54000},remote:{[key]:now-12000}}
+ });
+ assert.equal(m.conflicts.length,0);
+ assert.equal(m.autoResolved[0].choice,'remote');
+ assert.equal(m.value.campaigns[0].upserts[0].sheetIII.workStatus,'pending');
+});
 test('remote snapshot time is not treated as a reliable time for a single field',()=>{
  const m=engine().merge(status('started'),status('done'),status('pending'),{
   legacy:{localQueue:{[key]:now-80000},remoteSnapshotAt:now-10000}
