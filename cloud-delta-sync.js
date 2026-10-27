@@ -68,33 +68,29 @@
    if(eq(l,r))return clone(l);
    if(eq(b,l))return clone(r);
    if(eq(b,r))return clone(l);
-   // For legacy sheets, an unclassified status is not a competing
-   // observation. Two different explicit classifications still conflict.
-   if(b===MISSING&&p[0]==='campaigns'&&p[p.length-1]==='workStatus'&&p.includes('sheetIII')){
-    const unclassified=v=>v===MISSING||v===null||v==='';
-    const valid=v=>['pending','started','done'].includes(v);
-    if(unclassified(l)&&valid(r))return clone(r);
-    if(unclassified(r)&&valid(l))return clone(l);
-   }
+   const path=pathName(p),explicit=resolutions[path];
    const orderPath=p[0]==='campaigns'&&p[p.length-1]==='order';
-   if(orderPath&&Array.isArray(l)&&Array.isArray(r)){
+   const orderList=orderPath&&Array.isArray(l)&&Array.isArray(r);
+   const orderDelete=orderList&&Array.isArray(b)&&b.some(id=>!l.includes(id)||!r.includes(id));
+   if(orderList&&explicit==='local'||orderList&&explicit==='remote'){
+    // Honour which device removed a previously-known ID, but keep new IDs
+    // created independently by the other device.
+    const preferred=explicit==='local'?l:r,other=explicit==='local'?r:l;
+    const out=[...preferred];for(const id of other)
+     if((!Array.isArray(b)||!b.includes(id))&&!out.includes(id))out.push(id);
+    return clone(out);
+   }
+   if(orderList&&!orderDelete){
     const combined=reconcileOrder(l,r);
     if(combined!==null)return combined;
-   }
-   // Explicit choices always win. A deletion-versus-edit remains manual,
-   // since it might otherwise permanently remove field observations.
-   const path=pathName(p),explicit=resolutions[path];
-   if(l!==MISSING&&r!==MISSING&&explicit!=='local'&&explicit!=='remote'){
+    // When both sides reordered the same set differently, prefer a reliably
+    // newer order and append IDs created on the other device.
     const decision=latest(path);
     if(decision){
      autoResolved.push(decision);
-     if(orderPath&&Array.isArray(l)&&Array.isArray(r)){
-      const newer=decision.choice==='local'?l:r,older=decision.choice==='local'?r:l;
-      const union=[...newer];
-      for(const id of older)if(!union.includes(id))union.push(id);
-      return clone(union);
-     }
-     return clone(decision.choice==='local'?l:r);
+     const preferred=decision.choice==='local'?l:r,other=decision.choice==='local'?r:l;
+     const out=[...preferred];for(const id of other)if(!out.includes(id))out.push(id);
+     return clone(out);
     }
    }
    if(l===MISSING||r===MISSING){
@@ -119,9 +115,23 @@
       return [...new Set([...baseArray,...r,...l])];
     }
    }
-   if(resolutions[pathName(p)]==='local')return clone(l);
-   if(resolutions[pathName(p)]==='remote')return clone(r);
-   conflicts.push({path:pathName(p),local:clone(l),remote:clone(r),type:'concurrent-edit'});
+   if(explicit==='local')return clone(l);
+   if(explicit==='remote')return clone(r);
+   // Merge objects and stable-ID collections before considering timestamps.
+   // Selecting a whole recently-saved object would discard independent edits
+   // made to another field on the other device.
+   if(!orderList&&!plain(l)&&!plain(r)&&!Array.isArray(l)&&!Array.isArray(r)){
+    const decision=latest(path);
+    if(decision){autoResolved.push(decision);return clone(decision.choice==='local'?l:r);}
+   }
+   // A legacy unclassified sheet has no asserted field condition.
+   if(b===MISSING&&p[0]==='campaigns'&&p[p.length-1]==='workStatus'&&p.includes('sheetIII')){
+    const unclassified=v=>v===MISSING||v===null||v==='';
+    const valid=v=>['pending','started','done'].includes(v);
+    if(unclassified(l)&&valid(r))return clone(r);
+    if(unclassified(r)&&valid(l))return clone(l);
+   }
+   conflicts.push({path,local:clone(l),remote:clone(r),type:'concurrent-edit'});
    return clone(l);
   };
   const result={...clone(remote||{})};
