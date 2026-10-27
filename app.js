@@ -1398,7 +1398,7 @@ const FIELD_SECTION_CHOICES={
  thicknessCertainty:FIELD_CERTAINTY.map(([k,v])=>k+' · '+v),
  shapeCertainty:FIELD_CERTAINTY.map(([k,v])=>k+' · '+v),
  sedimentShape:['Canto','Bretxa','Bloc'],
- matrixSupport:['Absent','Escassa','Moderada','Abundant','Clast suportat','Matriu suportat'],
+ matrixSupport:['Absent','Escassa (clast supported)','Moderada','Abundant (matrix supported)'],
  grainClasses:['Arena','Grava','Còdols','Blocs','Llim-argila']
 };
 function fieldSectionChoices(row,col){
@@ -1409,10 +1409,21 @@ function fieldSectionChoices(row,col){
  return SECTION_NUMERIC_RANGES[row]||FIELD_SECTION_CHOICES[row]||null;
 }
 function codedFieldLabel(dict,code){return dict.find(([c])=>c===code)?.[1]||'';}
-function fieldChoiceHTML(options,selected){
+function fieldChoiceHTML(options,selected,{allowAbsence=false,previousValue=''}={}){
  let html='<option value="">— Selecciona —</option>';
- for(const text of options){html+='<option value="'+escapeHtml(text)+'"'+(text===selected?' selected':'')+'>'+escapeHtml(text)+'</option>';}
- if(selected&&!options.includes(selected))html+='<option selected value="'+escapeHtml(selected)+'">'+escapeHtml(selected)+'</option>';
+ if(allowAbsence){
+  html+='<option value="'+SECTION_CELL_ABSENT_VALUE+'"'+(selected===SECTION_CELL_ABSENT_VALUE?' selected':'')+'>No hi ha</option>';
+  if(selected===SECTION_CELL_ABSENT_VALUE&&previousValue)html+='<option value="'+SECTION_CELL_RESTORE_VALUE+'">Recuperar valor anterior</option>';
+ }
+ for(const value of options){
+  const label=value==='Escassa'?'Escassa (clast supported)':value==='Abundant'?'Abundant (matrix supported)':value;
+  html+='<option value="'+escapeHtml(value)+'"'+(value===selected?' selected':'')+'>'+escapeHtml(label)+'</option>';
+ }
+ if(selected&&selected!==SECTION_CELL_ABSENT_VALUE&&!options.includes(selected)){
+  // Display old records without adding the removed classifications to new choices.
+  const label=selected==='Escassa'?'Escassa (clast supported)':selected==='Abundant'?'Abundant (matrix supported)':selected;
+  html+='<option selected value="'+escapeHtml(selected)+'">'+escapeHtml(label)+'</option>';
+ }
  return html;
 }
 function sectionOrientationEnds(f){
@@ -1468,8 +1479,8 @@ function sectionZoneLabel(key=state.sectionZoneClass,custom=state.sectionZoneCus
 }
 function blankFicData(){return{ad:{score:null,note:'',noteInk:[]},bd:{score:null,note:'',noteInk:[]},cd:{score:null,note:'',noteInk:[]},dd1:{score:null,note:'',noteInk:[]},dd2:{score:null,note:'',noteInk:[]}};}
 function optionalScore(value){if(value===null||value===undefined||value==='')return null;const n=Number(value);return Number.isFinite(n)?n:null;}
-function defaultSectionSheetIII(){return{observer:'',visitDate:'',sectionName:'',sectionType:'',observations:'',workStatus:null,table:{},tableNotes:{},tableInk:{},fic:blankFicData()};}
-function normalizeSectionSheetIII(src){const d={...defaultSectionSheetIII(),...(src||{})};d.workStatus=['pending','started','done'].includes(d.workStatus)?d.workStatus:null;d.table=d.table&&typeof d.table==='object'?d.table:{};d.tableNotes=d.tableNotes&&typeof d.tableNotes==='object'?d.tableNotes:{};for(const [key,options] of Object.entries(SECTION_NUMERIC_RANGES)){const cells=d.table[key];if(!cells||typeof cells!=='object')continue;d.tableNotes[key]=d.tableNotes[key]||{};for(const [col,value] of Object.entries(cells)){const old=String(value??'').trim();if(!old||options.includes(old))continue;const note=String(d.tableNotes[key][col]||'');if(!note.includes(old))d.tableNotes[key][col]=note?note+'\n'+old:old;cells[col]='';}}d.tableInk=d.tableInk&&typeof d.tableInk==='object'?d.tableInk:{};d.fic=d.fic&&typeof d.fic==='object'?d.fic:blankFicData();for(const k of ['ad','bd','cd','dd1','dd2']){const o=d.fic[k]||{};d.fic[k]={score:optionalScore(o.score),note:o.note||'',noteInk:Array.isArray(o.noteInk)?o.noteInk:[]};}return d;}
+function defaultSectionSheetIII(){return{observer:'',visitDate:'',sectionName:'',sectionType:'',observations:'',workStatus:null,table:{},tableNotes:{},cellAbsence:{},tableInk:{},fic:blankFicData()};}
+function normalizeSectionSheetIII(src){const d={...defaultSectionSheetIII(),...(src||{})};d.workStatus=['pending','started','done'].includes(d.workStatus)?d.workStatus:null;d.table=d.table&&typeof d.table==='object'?d.table:{};d.tableNotes=d.tableNotes&&typeof d.tableNotes==='object'?d.tableNotes:{};d.cellAbsence=d.cellAbsence&&typeof d.cellAbsence==='object'&&!Array.isArray(d.cellAbsence)?d.cellAbsence:{};for(const [key,options] of Object.entries(SECTION_NUMERIC_RANGES)){const cells=d.table[key];if(!cells||typeof cells!=='object')continue;d.tableNotes[key]=d.tableNotes[key]||{};for(const [col,value] of Object.entries(cells)){const old=String(value??'').trim();if(!old||options.includes(old)||old==='No hi ha'||old==='No hay')continue;const note=String(d.tableNotes[key][col]||'');if(!note.includes(old))d.tableNotes[key][col]=note?note+'\n'+old:old;cells[col]='';}}d.tableInk=d.tableInk&&typeof d.tableInk==='object'?d.tableInk:{};d.fic=d.fic&&typeof d.fic==='object'?d.fic:blankFicData();for(const k of ['ad','bd','cd','dd1','dd2']){const o=d.fic[k]||{};d.fic[k]={score:optionalScore(o.score),note:o.note||'',noteInk:Array.isArray(o.noteInk)?o.noteInk:[]};}return d;}
 // Status is manual, never inferred from whether the field sheet has content.
 // Legacy sheets remain unclassified until explicitly reviewed.
 const SECTION_WORK_STATUSES={
@@ -3503,7 +3514,7 @@ function sectionTableInkNorm(e,c){const r=c.getBoundingClientRect();return{x:(e.
 function installSectionTableInkCanvas(c,f,row,col){
   if(!c||c._tableInkInstalled)return;c._tableInkInstalled=true;c.dataset.row=row;c.dataset.col=col;
   const data=()=>sectionTableInkCell(ensureSectionSheetData(f),row,col);
-  c.addEventListener('pointerdown',e=>{if(e.pointerType==='touch'||!isEditableCampaign()||sectionColumnAbsent(ensureSectionSheetData(f),col))return;e.preventDefault();e.stopPropagation();state.sectionTableActiveCell={row,col};c._active={tool:state.sectionTableInkTool||'pen',color:state.sectionTableInkColor||state.notebookPenColor||'#1f2b31',pts:[sectionTableInkNorm(e,c)],pointerId:e.pointerId};c.setPointerCapture?.(e.pointerId);redrawSectionTableInkCanvas(c,data(),c._active);});
+  c.addEventListener('pointerdown',e=>{if(e.pointerType==='touch'||!isEditableCampaign()||sectionColumnAbsent(ensureSectionSheetData(f),col)||sectionCellAbsent(ensureSectionSheetData(f),row,col))return;e.preventDefault();e.stopPropagation();state.sectionTableActiveCell={row,col};c._active={tool:state.sectionTableInkTool||'pen',color:state.sectionTableInkColor||state.notebookPenColor||'#1f2b31',pts:[sectionTableInkNorm(e,c)],pointerId:e.pointerId};c.setPointerCapture?.(e.pointerId);redrawSectionTableInkCanvas(c,data(),c._active);});
   c.addEventListener('pointermove',e=>{if(!c._active||c._active.pointerId!==e.pointerId)return;e.preventDefault();e.stopPropagation();c._active.pts.push(sectionTableInkNorm(e,c));redrawSectionTableInkCanvas(c,data(),c._active);});
   const finish=e=>{if(!c._active||c._active.pointerId!==e.pointerId)return;const rec={...c._active};delete rec.pointerId;c._active=null;data().push(rec);persistState();redrawSectionTableInkCanvas(c,data());};
   c.addEventListener('pointerup',finish);c.addEventListener('pointercancel',()=>{c._active=null;redrawSectionTableInkCanvas(c,data());});
@@ -3524,11 +3535,14 @@ function renderSectionFieldTable(f){
  for(const row of SECTION_TABLE_ROWS){
   html+='<tr><th>'+escapeHtml(row.label)+'</th>';
   for(const [col] of SECTION_TABLE_COLS){
-   const absent=sectionColumnAbsent(d,col),val=String(sectionTableCell(d,row.key,col)),options=fieldSectionChoices(row.key,col);
-   const input=options?'<select class="field-table-quick-select" data-section-table-choice-row="'+row.key+'" data-section-table-choice-col="'+col+'" aria-label="'+escapeHtml(row.label)+'">'+fieldChoiceHTML(options,val)+'</select>':'<input type="text" data-section-table-row="'+row.key+'" data-section-table-col="'+col+'" value="'+escapeHtml(val)+'" placeholder="Valor">';
+   const columnAbsent=sectionColumnAbsent(d,col),cellAbsent=sectionCellAbsent(d,row.key,col);
+   const val=String(sectionTableCell(d,row.key,col)),options=fieldSectionChoices(row.key,col);
+   const choice=options?'<select class="field-table-quick-select" data-section-table-choice-row="'+row.key+'" data-section-table-choice-col="'+col+'" aria-label="'+escapeHtml(row.label)+'">'+fieldChoiceHTML(options,cellAbsent?SECTION_CELL_ABSENT_VALUE:val,{allowAbsence:true,previousValue:val})+'</select>':'';
+   const textMode=!options?'<select class="field-table-quick-select section-cell-absence-mode" data-section-table-absence-row="'+row.key+'" data-section-table-absence-col="'+col+'" aria-label="Presència de '+escapeHtml(row.label)+'"><option value="value"'+(cellAbsent?'':' selected')+'>Introduir valor</option><option value="absent"'+(cellAbsent?' selected':'')+'>No hi ha</option></select>':'';
+   const input=options?choice:textMode+(cellAbsent?'<span class="section-cell-absent-label">No hi ha</span>':'<input type="text" data-section-table-row="'+row.key+'" data-section-table-col="'+col+'" value="'+escapeHtml(val)+'" placeholder="Valor">');
    const note=String(d.tableNotes?.[row.key]?.[col]||''),ink=d.tableInk?.[row.key]?.[col];
    const oldInk=Array.isArray(ink)&&ink.length?'<canvas class="section-table-ink-canvas" data-section-table-ink-row="'+row.key+'" data-section-table-ink-col="'+col+'" title="Anotació manuscrita anterior (conservada)"></canvas>':'';
-   html+='<td'+(absent?' style="background:#e6e8e9"':'')+'><div class="section-table-cell-editor">'+(absent?'<span style="font-weight:600;color:#60676b">No hi ha</span>':input+'<textarea data-section-table-note-row="'+row.key+'" data-section-table-note-col="'+col+'" rows="2" placeholder="Observacions (teclat)">'+escapeHtml(note)+'</textarea>'+oldInk)+'</div></td>';
+   html+='<td'+(columnAbsent||cellAbsent?' style="background:#e6e8e9"':'')+'><div class="section-table-cell-editor">'+(columnAbsent?'<span class="section-cell-absent-label">No hi ha</span>':input+(cellAbsent?'':'<textarea data-section-table-note-row="'+row.key+'" data-section-table-note-col="'+col+'" rows="2" placeholder="Observacions (teclat)">'+escapeHtml(note)+'</textarea>'+oldInk))+'</div></td>';
   }
   html+='</tr>';
  }
@@ -3539,8 +3553,22 @@ function renderSectionFieldTable(f){
  });
  root.querySelectorAll('[data-section-table-choice-row]').forEach(sel=>{
   sel.disabled=ro;sel.addEventListener('pointerdown',e=>e.stopPropagation());sel.onchange=()=>{
-   if(!isEditableCampaign())return;const row=sel.dataset.sectionTableChoiceRow,col=sel.dataset.sectionTableChoiceCol;
-   const dd=ensureSectionSheetData(f);dd.table[row]=dd.table[row]||{};dd.table[row][col]=sel.value;persistState();
+   if(!isEditableCampaign())return;const row=sel.dataset.sectionTableChoiceRow,col=sel.dataset.sectionTableChoiceCol,value=sel.value;
+   const dd=ensureSectionSheetData(f);
+   dd.cellAbsence[row]=dd.cellAbsence[row]||{};
+   if(value===SECTION_CELL_ABSENT_VALUE){dd.cellAbsence[row][col]=true;}
+   else if(value===SECTION_CELL_RESTORE_VALUE){delete dd.cellAbsence[row][col];}
+   else{delete dd.cellAbsence[row][col];dd.table[row]=dd.table[row]||{};dd.table[row][col]=value;}
+   persistState();
+   if(value===SECTION_CELL_ABSENT_VALUE||value===SECTION_CELL_RESTORE_VALUE)renderSectionFieldTable(f);
+  };
+ });
+ root.querySelectorAll('[data-section-table-absence-row]').forEach(sel=>{
+  sel.disabled=ro;sel.addEventListener('pointerdown',e=>e.stopPropagation());sel.onchange=()=>{
+   if(!isEditableCampaign())return;const row=sel.dataset.sectionTableAbsenceRow,col=sel.dataset.sectionTableAbsenceCol,dd=ensureSectionSheetData(f);
+   dd.cellAbsence[row]=dd.cellAbsence[row]||{};
+   if(sel.value==='absent')dd.cellAbsence[row][col]=true;else delete dd.cellAbsence[row][col];
+   persistState();renderSectionFieldTable(f);
   };
  });
  root.querySelectorAll('[data-section-table-row]').forEach(el=>{
@@ -5831,7 +5859,7 @@ function localPdfSectionTable(section,root){
  for(const row of SECTION_TABLE_ROWS){
   html+='<tr><th>'+escapeHtml(row.label)+'</th>';
   for(const [col] of SECTION_TABLE_COLS){
-   const absent=sectionColumnAbsent(d,col),value=absent?'No hi ha':String(d.table?.[row.key]?.[col]??'');
+   const absent=sectionColumnAbsent(d,col)||sectionCellAbsent(d,row.key,col),value=absent?'No hi ha':String(d.table?.[row.key]?.[col]??'');
    const note=absent?'':String(d.tableNotes?.[row.key]?.[col]||''),ink=d.tableInk?.[row.key]?.[col]||[];
    const oldInk=!absent&&ink.length?'<canvas class="section-table-ink-canvas" data-pdf-table-ink="'+escapeHtml(row.key)+'" data-pdf-col="'+escapeHtml(col)+'"></canvas>':'';
    html+='<td'+(absent?' style="background:#e6e8e9"':'')+'><div class="section-table-cell-editor"><div class="field-table-quick-select">'+escapeHtml(value||'—')+'</div>'+(note?'<div style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px">'+escapeHtml(note)+'</div>':'')+oldInk+'</div></td>';
@@ -5982,7 +6010,7 @@ async function renderFitxaIIIPage1(f){
 }
 function renderFitxaIIIPage2(f){
   const d=ensureSectionSheetData(f),c=document.createElement('canvas');c.width=1240;c.height=1754;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.fillStyle='#666';g.font='700 30px sans-serif';g.textAlign='center';g.fillText('FITXA III- SECCIÓ TRANSVERSAL',620,54);g.textAlign='left';let y=exportFitxaIIIMeta(g,f,d,78)+28;g.fillStyle='#111';g.font='700 23px sans-serif';g.fillText('Taula de camp',55,y);y+=24;const x0=45,labelW=275,colW=181,headerH=72;exportCell(g,x0,y,labelW,headerH,{fill:'#f1efe9'});SECTION_TABLE_COLS.forEach(([,lab],i)=>{const x=x0+labelW+i*colW;exportCell(g,x,y,colW,headerH,{fill:'#f1efe9'});g.fillStyle='#111';g.font='700 16px sans-serif';g.textAlign='center';exportWrapText(g,lab,x+8,y+28,colW-16,19,2);});g.textAlign='left';y+=headerH;
-  const rowH=86;for(const row of SECTION_TABLE_ROWS){exportCell(g,x0,y,labelW,rowH,{fill:'#faf9f5'});g.fillStyle='#111';g.font='700 15px sans-serif';exportWrapText(g,row.label,x0+9,y+23,labelW-18,18,4);SECTION_TABLE_COLS.forEach(([col],i)=>{const x=x0+labelW+i*colW;exportCell(g,x,y,colW,rowH);const val=d.table?.[row.key]?.[col]??'',ink=d.tableInk?.[row.key]?.[col]||[];if(ink.length){const ic=document.createElement('canvas');ic.width=colW-12;ic.height=rowH-12;const ig=ic.getContext('2d'),rr={width:ic.width,height:ic.height};for(const st of ink)drawInkRecord(ig,rr,st,1,false);g.drawImage(ic,x+6,y+6);}if(val){g.fillStyle='#222';g.font='13px sans-serif';exportWrapText(g,val,x+8,y+rowH-18,colW-16,15,2);}});y+=rowH;}
+  const rowH=86;for(const row of SECTION_TABLE_ROWS){exportCell(g,x0,y,labelW,rowH,{fill:'#faf9f5'});g.fillStyle='#111';g.font='700 15px sans-serif';exportWrapText(g,row.label,x0+9,y+23,labelW-18,18,4);SECTION_TABLE_COLS.forEach(([col],i)=>{const x=x0+labelW+i*colW;exportCell(g,x,y,colW,rowH);const absent=sectionColumnAbsent(d,col)||sectionCellAbsent(d,row.key,col),val=absent?'No hi ha':d.table?.[row.key]?.[col]??'',ink=absent?[]:d.tableInk?.[row.key]?.[col]||[];if(ink.length){const ic=document.createElement('canvas');ic.width=colW-12;ic.height=rowH-12;const ig=ic.getContext('2d'),rr={width:ic.width,height:ic.height};for(const st of ink)drawInkRecord(ig,rr,st,1,false);g.drawImage(ic,x+6,y+6);}if(val){g.fillStyle='#222';g.font='13px sans-serif';exportWrapText(g,val,x+8,y+rowH-18,colW-16,15,2);}});y+=rowH;}
   g.fillStyle='#333';g.font='14px sans-serif';exportWrapText(g,'Codis certesa: A = observació directa / mesura; B = estimació raonable; C = interpretació / estimada / assumit; D = incert; X = no possible.',55,1690,1130,18,2);return c.toDataURL('image/png');
 }
 function renderFitxaIIIPage3(f){
@@ -6243,6 +6271,9 @@ async function buildReachSheetExportPayload(reach){const course=reachCourse(reac
 function sectionColumnStatus(d,col){return ['present','absent'].includes(d?.columnPresence?.[col])?d.columnPresence[col]:'unassessed';}
 
 function sectionColumnAbsent(d,col){return sectionColumnStatus(d,col)==='absent';}
+const SECTION_CELL_ABSENT_VALUE='__section_cell_absent__';
+const SECTION_CELL_RESTORE_VALUE='__section_cell_restore__';
+function sectionCellAbsent(d,row,col){return d?.cellAbsence?.[row]?.[col]===true;}
 
 function ficSnapshot(v){return Object.fromEntries(['ad','bd','cd','dd1','dd2'].map(k=>{const x=v?.[k]||{};return[k,{score:optionalScore(x.score),note:x.note||'',noteInk:cloneAny(x.noteInk||[])}]}));}
 
@@ -6432,7 +6463,7 @@ function fieldReportNaturalValue(row,value){
   case 'thicknessCertainty':return 'La certesa del gruix és '+certainty()+'.';
   case 'sedimentShape':return 'La forma predominant del sediment registrada és '+raw+'.';
   case 'shapeCertainty':return 'La certesa de la forma és '+certainty()+'.';
-  case 'matrixSupport':return 'El suport de matriu o clasts s’ha classificat com '+raw+'.';
+  case 'matrixSupport':return 'El suport de matriu o clasts s’ha classificat com '+(raw==='Escassa'?'Escassa (clast supported)':raw==='Abundant'?'Abundant (matrix supported)':raw)+'.';
   case 'maxBlockWeight':return 'El pes màxim del bloc es troba en el rang '+raw+'.';
   case 'grainClasses':return 'Les classes granulomètriques registrades són '+raw+'.';
   default:{const entry=SECTION_TABLE_ROWS.find(x=>x.key===row);return (entry?.label||row)+': '+raw+'.';}
@@ -6492,7 +6523,7 @@ function fieldReportSection(section){
  const crossing=fieldSectionIntersection(section);
  html+=crossing?fieldReportCoords(crossing):fieldReportParagraph('Punt d’intersecció amb el canal no disponible.');
  const header=fieldReportEntries(d,[['observer','Observador'],['visitDate','Data de visita'],['sectionType','Tipus de secció'],['observations','Observacions']]);
- for(const [key,value] of Object.entries(d))if(!['observer','visitDate','sectionType','observations','sectionName','table','tableNotes','tableInk','fic','ficModelId','columnPresence'].includes(key)&&fieldReportHas(value)&&typeof value!=='object')header.push(key+': '+value+'.');
+ for(const [key,value] of Object.entries(d))if(!['observer','visitDate','sectionType','observations','sectionName','table','tableNotes','cellAbsence','tableInk','fic','ficModelId','columnPresence'].includes(key)&&fieldReportHas(value)&&typeof value!=='object')header.push(key+': '+value+'.');
  const dimensions=section.sectionMeasurements||{};
  header.push(...fieldReportEntries(dimensions,[['width','Amplada de secció'],['depth','Profunditat màxima'],['note','Observacions de mesura']]));
  if(header.length)html+=fieldReportParagraph(header.join(' '));
@@ -6501,11 +6532,12 @@ function fieldReportSection(section){
   const entries=[];
   for(const row of [...SECTION_TABLE_ROWS,...Object.keys(d.table||{}).filter(k=>!SECTION_TABLE_ROWS.some(r=>r.key===k)).map(k=>({key:k,label:k}))]){
    const val=d.table?.[row.key]?.[col],note=d.tableNotes?.[row.key]?.[col];
+   if(sectionCellAbsent(d,row.key,col)||val==='No hi ha'||val==='No hay'){entries.push(row.label+': no hi ha.');continue;}
    if(fieldReportHas(val))entries.push(fieldReportNaturalValue(row.key,val));
    if(fieldReportHas(note))entries.push('Observació ('+row.label+'): '+note+'.');
   }
   if(entries.length)html+=fieldReportParagraph(label+'. '+entries.join(' '));
-  for(const row of [...SECTION_TABLE_ROWS,...Object.keys(d.tableInk||{}).filter(k=>!SECTION_TABLE_ROWS.some(r=>r.key===k)).map(k=>({key:k,label:k}))]){const ink=d.tableInk?.[row.key]?.[col];if(Array.isArray(ink)&&ink.length)html+=fieldReportParagraph('Anotació manuscrita de '+row.label+' ('+label+'):')+fieldReportInkImage(ink);}
+  for(const row of [...SECTION_TABLE_ROWS,...Object.keys(d.tableInk||{}).filter(k=>!SECTION_TABLE_ROWS.some(r=>r.key===k)).map(k=>({key:k,label:k}))]){const ink=d.tableInk?.[row.key]?.[col];if(!sectionCellAbsent(d,row.key,col)&&Array.isArray(ink)&&ink.length)html+=fieldReportParagraph('Anotació manuscrita de '+row.label+' ('+label+'):')+fieldReportInkImage(ink);}
  }
  return html+fieldReportFic(section);
 }
