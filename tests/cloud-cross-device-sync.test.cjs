@@ -219,3 +219,28 @@ test('remote-only changes are received without uploading unchanged data again',a
  assert.ok(out.actions.includes('queueAcknowledged'));
  assert.ok(!out.actions.includes('incrementalUpload'));
 });
+
+test('round trip preserves mobile edits, tablet edits and map pins in both devices',()=>{
+ const base=project(),mobile=project('done'),tablet=project('pending','Notas de la tablet');
+ mobile.mapPins.push({id:'gps-mobile',kind:'gps',x:1,y:2});
+ tablet.mapPins.push({id:'mp-tablet',kind:'stop',x:3,y:4});
+ // The phone uploads its offline work first, then the tablet pulls and uploads
+ // its independent observations, then the phone receives the merged revision.
+ const afterMobile=sync.merge(base,mobile,clone(base));
+ assert.equal(afterMobile.conflicts.length,0);
+ const afterTablet=sync.merge(base,tablet,afterMobile.value);
+ assert.equal(afterTablet.conflicts.length,0);
+ assert.equal(sec1(afterTablet.value).workStatus,'done');
+ assert.equal(sec2(afterTablet.value).observations,'Notas de la tablet');
+ assertIds(afterTablet.value.mapPins.map(p=>p.id),['gps-mobile','mp-tablet']);
+ const phoneReceives=sync.merge(afterMobile.value,mobile,afterTablet.value);
+ assert.equal(phoneReceives.conflicts.length,0);
+ assert.equal(sec1(phoneReceives.value).workStatus,'done');
+ assert.equal(sec2(phoneReceives.value).observations,'Notas de la tablet');
+ assertIds(phoneReceives.value.mapPins.map(p=>p.id),['gps-mobile','mp-tablet']);
+});
+test('no-op repeated sync reports no data changes',()=>{
+ const base=project();
+ assert.equal(sync.diff(base,clone(base)).length,0);
+ assert.equal(sync.merge(base,clone(base),clone(base)).conflicts.length,0);
+});
