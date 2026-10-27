@@ -43,24 +43,8 @@
  function merge(base,local,remote,options={}){
   const resolutions=options.resolutions||{};
   const conflicts=[],changed=[],autoResolved=[];
-  const editTimes=options.editTimes||{},legacy=options.legacy||{};
-  const toTimestamp=value=>{
-   const t=typeof value==='string'?Date.parse(value):Number(value);
-   return Number.isFinite(t)&&t>1577836800000&&t<=Date.now()+300000?t:0;
-  };
-  const latest=path=>{
-   let localAt=toTimestamp(editTimes.local?.[path]);
-   let remoteAt=toTimestamp(editTimes.remote?.[path]);
-   let source='field';
-   // Legacy snapshots have no individual edit clocks. For section statuses
-   // and order only, use queued edit time and the remote save time as a proxy.
-   if(!remoteAt&&(/\/sheetIII\/workStatus$|\/order$/).test(path)){
-    const queued=toTimestamp(legacy.localQueue?.[path]),snapshot=toTimestamp(legacy.remoteSnapshotAt);
-    if(queued&&snapshot){localAt=queued;remoteAt=snapshot;source='snapshot-estimate';}
-   }
-   if(!localAt||!remoteAt||Math.abs(localAt-remoteAt)<2000)return null;
-   return {path,choice:localAt>remoteAt?'local':'remote',localAt,remoteAt,source};
-  };
+  // Device clocks and a remote snapshot's save time cannot prove which
+  // individual field value should win. Keep real disagreements explicit.
   const resolve=(b,l,r,p)=>{
    if(eq(l,r))return clone(l);
    if(eq(b,l))return clone(r);
@@ -78,21 +62,9 @@
     const combined=reconcileOrder(l,r);
     if(combined!==null)return combined;
    }
-   // Respect explicit choices. Deletion-vs-edit always needs a human decision.
+   // Explicit user choices only for genuine conflicts; never let a
+   // timestamp choose an entire section or discard independent observations.
    const path=pathName(p);
-   if(l!==MISSING&&r!==MISSING&&!['local','remote'].includes(resolutions[path])){
-    const winner=latest(path);
-    if(winner){
-     autoResolved.push(winner);
-     if(orderPath&&Array.isArray(l)&&Array.isArray(r)){
-      const preferred=winner.choice==='local'?l:r,other=winner.choice==='local'?r:l;
-      const mergedOrder=[...preferred];
-      for(const id of other)if(!mergedOrder.includes(id))mergedOrder.push(id);
-      return clone(mergedOrder);
-     }
-     return clone(winner.choice==='local'?l:r);
-    }
-   }
    if(l===MISSING||r===MISSING){
     if(resolutions[pathName(p)]==='local')return clone(l);
     if(resolutions[pathName(p)]==='remote')return clone(r);
