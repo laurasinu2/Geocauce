@@ -982,6 +982,22 @@ async function cloudSaveConflictVersions(projectId,local,remote,updatedAt){
  await dbPut('cloudSyncBase',{key:'conflictRecoveryLocal',projectId,createdAt,state:cloneAny(local)});
  await dbPut('cloudSyncBase',{key:'conflictRecoveryRemote',projectId,createdAt,updatedAt:updatedAt||null,state:cloneAny(remote)});
 }
+async function cloudDownloadConflictBackup(projectId=state.projectId){
+ try{
+  if(!projectId)throw new Error('Abre primero el proyecto.');
+  const local=await dbGet('cloudSyncBase','conflictRecoveryLocal');
+  const remote=await dbGet('cloudSyncBase','conflictRecoveryRemote');
+  if(local?.projectId!==projectId||remote?.projectId!==projectId||!local.state||!remote.state)
+   throw new Error('No hay copias de conflictos guardadas para este proyecto.');
+  const payload={format:'GeoCauceConflictBackup',version:1,projectId,
+   createdAt:new Date(local.createdAt||Date.now()).toISOString(),
+   local:local.state,remote:remote.state,remoteUpdatedAt:remote.updatedAt||null};
+  const date=new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+  await downloadBlob(new Blob([JSON.stringify(payload)],{type:'application/json'}),
+   'GeoCauce_ambas_versiones_'+date+'.json');
+  toast('Copia de las dos versiones descargada (sin archivos binarios)',4200);
+ }catch(e){console.warn('Copia de versiones en conflicto',e);toast(e.message||String(e),6000);}
+}
 function cloudConflictLabel(path){
  const sheet=path.match(/^\/campaigns\[id=([^\]]+)\]\/upserts\[id=([^\]]+)\]\/sheetIII\/workStatus$/);
  if(sheet)return 'Sección '+sheet[2]+' · Estado de la ficha · Campaña '+sheet[1];
@@ -1117,7 +1133,7 @@ async function cloudBidirectionalSync({manual=false}={}){
    if(ack.length)cloudClearAcknowledgedChanges(projectId,ack);
    cloudLastSyncAt=Date.now();if(manual)cloudProgressFinish(true,'Sin cambios nuevos');refreshAccountUi();return true;
   }
-  let merged=local;
+  let merged=local,autoResolvedCount=0,autoEstimatedCount=0;
   if(remote){
    const localQueueTimes=Object.fromEntries(ack.filter(entry=>entry.kind==='data'&&entry.path).map(entry=>[entry.path,entry.createdAt]));
    const mergeOptions={
@@ -1126,6 +1142,8 @@ async function cloudBidirectionalSync({manual=false}={}){
    };
    let result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state,mergeOptions);
    const automatic=result.autoResolved||[];
+   autoResolvedCount=automatic.length;
+   autoEstimatedCount=automatic.filter(x=>x.source==='snapshot-estimate').length;
    let decisions=null;
    // Save both complete structured snapshots before accepting ANY automatic
    // or human conflict choice. The cloud version is not overwritten first.
@@ -1189,14 +1207,15 @@ async function cloudBidirectionalSync({manual=false}={}){
    saveProjectCatalog();
    await cloudDeltaSaveBase(projectId,merged,remote.updated_at);
    cloudClearAcknowledgedChanges(projectId,ack);
-   if(manual){cloudProgressFinish(true,'Cambios recibidos');toast('Sincronizado: se han recibido los cambios de otros dispositivos',4600);}
+   if(manual)cloudProgressFinish(true,'Cambios recibidos');
+   if(manual||autoResolvedCount)toast(autoResolvedCount?autoResolvedCount+' conflicto(s) resueltos por fecha. Ambas versiones recuperables en Cuenta.'+(autoEstimatedCount?' Fecha de nube estimada para '+autoEstimatedCount+'.':''):'Sincronizado: se han recibido los cambios de otros dispositivos',6500);
    cloudLastError='';refreshAccountUi();return true;
   }
   const ok=await syncCurrentProjectToCloud({manual,expectedUpdatedAt:remote?.updated_at||null});
   if(ok){
    await cloudDeltaSaveBase(projectId,{...currentStatePayloadForCloud(),assetMetadata:cloudLastAssetManifest},new Date(project._cloudUpdatedAt||Date.now()).toISOString());
    cloudClearAcknowledgedChanges(projectId,ack);
-   if(manual)toast('Sincronización bidireccional completada',4000);
+   if(manual||autoResolvedCount)toast(autoResolvedCount?autoResolvedCount+' conflicto(s) resueltos por fecha. Copias en Cuenta.'+(autoEstimatedCount?' '+autoEstimatedCount+' comparados con fecha de sincronización de nube.':''):'Sincronización bidireccional completada',6500);
    return true;
   }
   return false;
@@ -1293,6 +1312,14 @@ function renderAccountManageBody(){
   }
   if(a.kind==='account')html+=`<p class="account-note">Cambios en cola local: <b>${cloudPendingChanges().length}</b>. Los cambios se envían automáticamente cuando hay conexión, con la app abierta. Las modificaciones incompatibles se conservan sin sobrescribir.</p>`;
   root.innerHTML=html;
+  if(state.projectId){
+   const archive=document.createElement('button');archive.type='button';archive.className='secondary';
+   archive.style.cssText='margin-top:12px;min-height:42px;width:100%';
+   archive.textContent='Descargar versiones guardadas antes de resolver conflictos';
+   archive.title='Descarga los dos estados JSON. Las fotos y mapas binarios permanecen en sus almacenamientos respectivos.';
+   archive.onclick=()=>cloudDownloadConflictBackup(state.projectId);
+   root.appendChild(archive);
+  }
   const p=$('#accountManagePrimary'),q=$('#accountManageSecondary');if(!p||!q)return;
   if(a.kind==='account'){p.textContent='Sincronizar ahora';p.onclick=syncNow;q.textContent='Cerrar sesión y seguir local';q.onclick=async()=>{await signOutCloud();closeAccountManage();toast('Sesión cerrada · tus datos locales siguen disponibles');};}
   else{p.textContent='Iniciar sesión';p.onclick=()=>{closeAccountManage();openAuthModal('manage','signin');};q.textContent='Crear cuenta';q.onclick=()=>{closeAccountManage();openAuthModal('manage','signup');};}
