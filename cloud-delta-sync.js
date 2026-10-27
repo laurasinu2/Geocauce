@@ -17,6 +17,29 @@
  const plain=x=>x!==MISSING&&x!==null&&typeof x==='object'&&!Array.isArray(x);
  const pathName=xs=>xs.map(x=>x.startsWith('@')?'[id='+x.slice(1)+']':(x.startsWith('/')?x:('/'+x))).join('');
  const fields=['campaigns','notebook','mapInk','mapPins','historicalPhotoPoints','materialStyles','referenceLayers','demGroups','activeDemGroupId'];
+
+ // Order arrays contain stable IDs. We can combine independent insertions
+ // when both devices agree on the order of shared elements.
+ const reconcileOrder=(local,remote)=>{
+  if(!Array.isArray(local)||!Array.isArray(remote))return null;
+  const valid=x=>x.every(v=>typeof v==='string'&&v.length>0)&&new Set(x).size===x.length;
+  if(!valid(local)||!valid(remote))return null;
+  const rs=new Set(remote),ls=new Set(local);
+  if(!eq(local.filter(x=>rs.has(x)),remote.filter(x=>ls.has(x))))return null;
+  const nodes=[...new Set([...local,...remote])],edges=new Map(nodes.map(v=>[v,new Set()])),degrees=new Map(nodes.map(v=>[v,0]));
+  for(const arr of [local,remote])for(let i=1;i<arr.length;i++){
+   const a=arr[i-1],b=arr[i];
+   if(!edges.get(a).has(b)){edges.get(a).add(b);degrees.set(b,degrees.get(b)+1);}
+  }
+  const result=[],used=new Set();
+  while(result.length<nodes.length){
+   const free=nodes.find(v=>!used.has(v)&&degrees.get(v)===0);
+   if(!free)return null;
+   used.add(free);result.push(free);
+   for(const v of edges.get(free))degrees.set(v,degrees.get(v)-1);
+  }
+  return result;
+ };
  function merge(base,local,remote,options={}){
   const resolutions=options.resolutions||{};
   const conflicts=[],changed=[];
@@ -24,6 +47,19 @@
    if(eq(l,r))return clone(l);
    if(eq(b,l))return clone(r);
    if(eq(b,r))return clone(l);
+   // For legacy sheets, an unclassified status is not a competing
+   // observation. Two different explicit classifications still conflict.
+   if(b===MISSING&&p[0]==='campaigns'&&p[p.length-1]==='workStatus'&&p.includes('sheetIII')){
+    const unclassified=v=>v===MISSING||v===null||v==='';
+    const valid=v=>['pending','started','done'].includes(v);
+    if(unclassified(l)&&valid(r))return clone(r);
+    if(unclassified(r)&&valid(l))return clone(l);
+   }
+   const orderPath=p[0]==='campaigns'&&p[p.length-1]==='order';
+   if(orderPath&&Array.isArray(l)&&Array.isArray(r)){
+    const combined=reconcileOrder(l,r);
+    if(combined!==null)return combined;
+   }
    if(l===MISSING||r===MISSING){
     if(resolutions[pathName(p)]==='local')return clone(l);
     if(resolutions[pathName(p)]==='remote')return clone(r);
@@ -42,7 +78,7 @@
      return out;
     }
     const simple=x=>x.every(v=>['string','number','boolean'].includes(typeof v))&&new Set(x.map(v=>typeof v+':'+String(v))).size===x.length;
-    if(simple(l)&&simple(r)&&simple(baseArray)&&baseArray.every(v=>l.includes(v)&&r.includes(v))){
+    if(!orderPath&&simple(l)&&simple(r)&&simple(baseArray)&&baseArray.every(v=>l.includes(v)&&r.includes(v))){
       return [...new Set([...baseArray,...r,...l])];
     }
    }
