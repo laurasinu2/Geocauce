@@ -1119,15 +1119,24 @@ async function cloudBidirectionalSync({manual=false}={}){
   }
   let merged=local;
   if(remote){
-   let result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state);
+   const localQueueTimes=Object.fromEntries(ack.filter(entry=>entry.kind==='data'&&entry.path).map(entry=>[entry.path,entry.createdAt]));
+   const mergeOptions={
+    editTimes:{local:local.syncEditTimes||{},remote:remote.state?.syncEditTimes||{}},
+    legacy:{localQueue:localQueueTimes,remoteSnapshotAt:Date.parse(remote.updated_at||'')||0}
+   };
+   let result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state,mergeOptions);
+   const automatic=result.autoResolved||[];
+   let decisions=null;
+   // Save both complete structured snapshots before accepting ANY automatic
+   // or human conflict choice. The cloud version is not overwritten first.
+   if(automatic.length||(manual&&result.conflicts.length))await cloudSaveConflictVersions(projectId,local,remote.state,remote.updated_at);
    if(result.conflicts.length){
     if(manual){
-     await cloudSaveConflictVersions(projectId,local,remote.state,remote.updated_at);
-      clearTimeout(cloudProgressTimer);
-      const panel=$('#cloudProgressPanel');if(panel)panel.hidden=true;
-      const decisions=await cloudResolveFieldConflicts(result.conflicts,projectId);
-      if(decisions)cloudProgressStart('Aplicando las decisiones y fusionando datos',2);
-     if(decisions)result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state,{resolutions:decisions});
+     clearTimeout(cloudProgressTimer);
+     const panel=$('#cloudProgressPanel');if(panel)panel.hidden=true;
+     decisions=await cloudResolveFieldConflicts(result.conflicts,projectId);
+     if(decisions)cloudProgressStart('Aplicando las decisiones y fusionando datos',2);
+     if(decisions)result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state,{...mergeOptions,resolutions:decisions});
     }
     if(result.conflicts.length){
      const paths=result.conflicts.slice(0,4).map(c=>c.path).join(', ');
@@ -1140,6 +1149,16 @@ async function cloudBidirectionalSync({manual=false}={}){
     if(Object.prototype.hasOwnProperty.call(result.value,field))merged[field]=result.value[field];
     else delete merged[field];
    }
+   // Merge edit clocks too. A resolved field retains the timestamp from
+   // the chosen side so a discarded old value cannot become newest later.
+   const editTimes={...(remote.state?.syncEditTimes||{})};
+   for(const [path,value] of Object.entries(local.syncEditTimes||{}))editTimes[path]=Math.max(Number(value)||0,Number(editTimes[path])||0);
+   for(const {path,choice} of [...(result.autoResolved||[]),...Object.entries(decisions||{}).map(([path,choice])=>({path,choice}))]){
+    const winning=choice==='local'?(Number(local.syncEditTimes?.[path])||Number(localQueueTimes[path])||0)
+     :(Number(remote.state?.syncEditTimes?.[path])||Date.parse(remote.updated_at||'')||0);
+    if(winning>0)editTimes[path]=winning;
+   }
+   merged.syncEditTimes=editTimes;
    // A deletion on the other device cannot be treated as a new upload from this one.
    for(const kind of ['photos','rasters','vectorLayers']){
     const knownIds=new Set((baseline?.state?.assetMetadata?.[kind]||[]).map(x=>x.id));
@@ -1151,7 +1170,7 @@ async function cloudBidirectionalSync({manual=false}={}){
    }
   }
   if(state.projectId!==projectId||cloudSyncEditingInProgress())return false;
-  const needApply=!!remote&&window.GeoCauceDeltaSync.diff(local,merged).length>0;
+  const needApply=!!remote&&(window.GeoCauceDeltaSync.diff(local,merged).length>0||cloudStableJson(local.syncEditTimes||{})!==cloudStableJson(merged.syncEditTimes||{}));
   // Protect the current, complete local state before incorporating remote edits.
   if(needApply)await dbPut('cloudSyncBase',{key:'preMergeRecovery',projectId,state:local,createdAt:Date.now()});
   cloudApplyingRemote=true;
