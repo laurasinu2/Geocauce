@@ -1020,6 +1020,11 @@ function cloudResolveFieldConflicts(conflicts,projectId){
    }catch(e){console.error('Backup de conflictos',e);toast('No se pudo descargar el respaldo de datos: '+(e.message||e),6000);}
   });
   backup.title='Copia de datos estructurados, no incluye archivos binarios de fotos o mapas';
+  const fullBackup=button('Guardar copia completa del proyecto (.geocauce)',async()=>{
+   try{await exportProjectPackage();}
+   catch(e){console.error('Respaldo completo antes de fusionar',e);toast('No se pudo exportar el proyecto completo: '+(e.message||e),6000);}
+  });
+  fullBackup.title='Incluye fichas, fotografías, mapas y datos locales del dispositivo actual';
   toolbar.append(title,info,actions,status);
   list.parentElement.insertBefore(toolbar,list);
   for(const item of conflicts){
