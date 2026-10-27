@@ -1075,7 +1075,7 @@ function cloudResolveFieldConflicts(conflicts,projectId){
   ok.onclick=()=>{
    if(rows.some(([,c])=>!c.value)){toast('Selecciona una versión para cada conflicto');return;}
    const n=rows.filter(([,c])=>c.value==='local').length;
-   if(!confirm('Se conservarán '+n+' valores de este dispositivo y '+(rows.length-n)+' de la nube. Los demás cambios se combinarán. Hay copias locales recuperables de ambas versiones. ¿Aplicar y sincronizar?'))return;
+   if(!confirm('Se conservarán '+n+' valores de este dispositivo y '+(rows.length-n)+' de la nube. Los demás cambios se combinarán. Se han guardado copias estructuradas de ambas versiones en este dispositivo. Puedes descargarlas. ¿Aplicar y sincronizar?'))return;
    finish(Object.fromEntries(rows.map(([path,c])=>[path,c.value])));
   };
   modal.classList.remove('hidden');
@@ -1157,8 +1157,8 @@ async function cloudBidirectionalSync({manual=false}={}){
      if(decisions)result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state,{...mergeOptions,resolutions:decisions});
     }
     if(result.conflicts.length){
-     const paths=result.conflicts.slice(0,4).map(c=>c.path).join(', ');
-     cloudDeltaRootError(result.conflicts.length+' conflictos pendientes en '+paths+'. Los dos dispositivos conservan sus datos. Usa «Sincronizar ahora» para elegir.',manual);
+     const paths=result.conflicts.slice(0,2).map(c=>cloudConflictLabel(c.path)).join('; ');
+     cloudDeltaRootError(result.conflicts.length+' diferencias por revisar ('+paths+'). Ambas versiones siguen conservadas. Pulsa «Sincronizar ahora» para decidir.',manual);
      return false;
     }
    }
