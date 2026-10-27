@@ -966,40 +966,87 @@ async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[]){
  }
  return changed;
 }
-function cloudResolveFieldConflicts(conflicts){
+async function cloudSaveConflictVersions(projectId,local,remote,updatedAt){
+ // A resolution is never offered unless both structured snapshots are saved.
+ // Binary photos/rasters remain in their existing local/cloud asset stores.
+ const createdAt=Date.now();
+ await dbPut('cloudSyncBase',{key:'conflictRecoveryLocal',projectId,createdAt,state:cloneAny(local)});
+ await dbPut('cloudSyncBase',{key:'conflictRecoveryRemote',projectId,createdAt,updatedAt:updatedAt||null,state:cloneAny(remote)});
+}
+function cloudConflictLabel(path){
+ const sheet=path.match(/^\/campaigns\[id=([^\]]+)\]\/upserts\[id=([^\]]+)\]\/sheetIII\/workStatus$/);
+ if(sheet)return 'Sección '+sheet[2]+' · Estado de la ficha · Campaña '+sheet[1];
+ const order=path.match(/^\/campaigns\[id=([^\]]+)\]\/order$/);
+ if(order)return 'Orden de los elementos · Campaña '+order[1];
+ return path;
+}
+function cloudConflictPreview(path,value){
+ if(/\/sheetIII\/workStatus$/.test(path)){
+  const labels={pending:'Sin hacer',started:'Comenzada',done:'Acabada'};
+  return labels[value]||(value==null?'Por revisar':String(value));
+ }
+ if(/\/order$/.test(path)&&Array.isArray(value))return value.length+' elementos: '+value.slice(0,16).join(', ')+(value.length>16?'…':'');
+ const raw=JSON.stringify(value);
+ return (raw||'Sin valor').slice(0,1000)+(raw?.length>1000?'…':'');
+}
+function cloudResolveFieldConflicts(conflicts,projectId){
  return new Promise(resolve=>{
   const modal=$('#cloudDeltaConflictModal'),list=$('#cloudDeltaConflictList'),
    ok=$('#cloudDeltaConflictApply'),cancel=$('#cloudDeltaConflictCancel');
   if(!modal||!list||!ok||!cancel){resolve(null);return;}
   list.replaceChildren();
-  const rows=[];
+  $('#cloudDeltaConflictBulk')?.remove();
+  const toolbar=document.createElement('section');toolbar.id='cloudDeltaConflictBulk';
+  toolbar.style.cssText='padding:12px;margin:8px 0 14px;border:1px solid #c8d4d0;border-radius:10px;background:#f4f8f7;display:grid;gap:9px';
+  const title=document.createElement('strong');title.textContent=conflicts.length+' diferencias pendientes de decisión';
+  const info=document.createElement('p');info.style.cssText='font-size:13px;margin:0';
+  info.textContent='Los datos independientes se combinan automáticamente. Para los campos cambiados en ambos dispositivos, selecciona la versión. GeoCauce ha guardado una copia local de ambas versiones antes de continuar.';
+  const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
+  const rows=[],status=document.createElement('small');
+  status.style.fontWeight='600';
+  const update=()=>{const n=rows.filter(([,c])=>!!c.value).length;status.textContent=n+' de '+rows.length+' decisiones tomadas';ok.disabled=n!==rows.length;};
+  const button=(text,action)=>{const b=document.createElement('button');b.type='button';b.className='secondary';b.textContent=text;b.onclick=action;actions.appendChild(b);return b;};
+  button('Conservar este dispositivo en todos',()=>{for(const [,c] of rows)c.value='local';update();});
+  button('Conservar nube en todos',()=>{for(const [,c] of rows)c.value='remote';update();});
+  button('Elegir uno por uno',()=>{for(const [,c] of rows)c.value='';update();});
+  const backup=button('Descargar las dos versiones (JSON)',async()=>{
+   try{
+    const local=await dbGet('cloudSyncBase','conflictRecoveryLocal'),remote=await dbGet('cloudSyncBase','conflictRecoveryRemote');
+    if(local?.projectId!==projectId||remote?.projectId!==projectId||!local.state||!remote.state)throw Error('Las copias no están disponibles');
+    const payload={format:'GeoCauceConflictBackup',version:1,projectId,createdAt:new Date().toISOString(),
+     local:local.state,remote:remote.state,remoteUpdatedAt:remote.updatedAt||null,paths:conflicts.map(x=>x.path)};
+    const stamp=new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    await downloadBlob(new Blob([JSON.stringify(payload)],{type:'application/json'}),'GeoCauce_conflictos_'+stamp+'.json');
+   }catch(e){console.error('Backup de conflictos',e);toast('No se pudo descargar el respaldo de datos: '+(e.message||e),6000);}
+  });
+  backup.title='Copia de datos estructurados, no incluye archivos binarios de fotos o mapas';
+  toolbar.append(title,info,actions,status);
+  list.parentElement.insertBefore(toolbar,list);
   for(const item of conflicts){
-   const wrapper=document.createElement('div');
-   wrapper.style.cssText='border:1px solid #bdc9c4;border-radius:10px;padding:12px;background:#fff';
-   const title=document.createElement('strong');title.textContent=item.path;wrapper.appendChild(title);
-   const view=(label,value)=>{
-    const box=document.createElement('div');box.style.cssText='margin:8px 0;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:100px;overflow:auto';
-    const header=document.createElement('b');header.textContent=label+': ';box.appendChild(header);
-    const details=document.createElement('span');const full=JSON.stringify(value);
-    details.textContent=(full||'Sin valor').slice(0,800)+(full?.length>800?'…':'');box.appendChild(details);wrapper.appendChild(box);
-   };
-   view('Móvil/tablet actual',item.local);view('Versión de la nube',item.remote);
-   const choice=document.createElement('select');
-   choice.setAttribute('aria-label','Resolución de '+item.path);
-   for(const [value,label] of [['','Elegir versión…'],['local','Conservar este dispositivo'],['remote','Conservar la nube']]){
-    const option=document.createElement('option');option.value=value;option.textContent=label;choice.appendChild(option);
+   const box=document.createElement('div');box.style.cssText='border:1px solid #bdc9c4;border-radius:10px;padding:12px;background:#fff';
+   const label=document.createElement('strong');label.textContent=cloudConflictLabel(item.path);box.appendChild(label);
+   if(label.textContent!==item.path){const path=document.createElement('small');path.textContent=item.path;path.style.cssText='display:block;color:#65716f;overflow-wrap:anywhere';box.appendChild(path);}
+   for(const [name,value] of [['Este dispositivo',item.local],['Nube',item.remote]]){
+    const row=document.createElement('div');row.style.cssText='margin:8px 0;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto';
+    const caption=document.createElement('b');caption.textContent=name+': ';
+    const detail=document.createElement('span');detail.textContent=cloudConflictPreview(item.path,value);
+    row.append(caption,detail);box.appendChild(row);
    }
-   choice.style.cssText='width:100%;padding:9px;min-height:42px';
-   wrapper.appendChild(choice);list.appendChild(wrapper);rows.push([item.path,choice]);
+   const choice=document.createElement('select');choice.setAttribute('aria-label','Resolución de '+item.path);
+   for(const [v,name] of [['','Elegir versión…'],['local','Conservar este dispositivo'],['remote','Conservar la nube']]){
+    const opt=document.createElement('option');opt.value=v;opt.textContent=name;choice.appendChild(opt);
+   }
+   choice.style.cssText='width:100%;min-height:42px;padding:9px';choice.onchange=update;
+   box.appendChild(choice);list.appendChild(box);rows.push([item.path,choice]);
   }
-  const finish=data=>{
-   modal.classList.add('hidden');ok.onclick=null;cancel.onclick=null;
-   resolve(data);
-  };
+  update();
+  const finish=value=>{modal.classList.add('hidden');ok.onclick=null;cancel.onclick=null;toolbar.remove();ok.disabled=false;resolve(value);};
   cancel.onclick=()=>finish(null);
   ok.onclick=()=>{
-   if(rows.some(([,choice])=>!choice.value)){toast('Elige qué versión conservar en cada conflicto');return;}
-   finish(Object.fromEntries(rows.map(([path,choice])=>[path,choice.value])));
+   if(rows.some(([,c])=>!c.value)){toast('Selecciona una versión para cada conflicto');return;}
+   const n=rows.filter(([,c])=>c.value==='local').length;
+   if(!confirm('Se conservarán '+n+' valores de este dispositivo y '+(rows.length-n)+' de la nube. Los demás cambios se combinarán. Hay copias locales recuperables de ambas versiones. ¿Aplicar y sincronizar?'))return;
+   finish(Object.fromEntries(rows.map(([path,c])=>[path,c.value])));
   };
   modal.classList.remove('hidden');
  });
@@ -1061,7 +1108,11 @@ async function cloudBidirectionalSync({manual=false}={}){
    let result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state);
    if(result.conflicts.length){
     if(manual){
-     const decisions=await cloudResolveFieldConflicts(result.conflicts);
+     await cloudSaveConflictVersions(projectId,local,remote.state,remote.updated_at);
+      clearTimeout(cloudProgressTimer);
+      const panel=$('#cloudProgressPanel');if(panel)panel.hidden=true;
+      const decisions=await cloudResolveFieldConflicts(result.conflicts,projectId);
+      if(decisions)cloudProgressStart('Aplicando las decisiones y fusionando datos',2);
      if(decisions)result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state,{resolutions:decisions});
     }
     if(result.conflicts.length){
