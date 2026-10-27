@@ -43,8 +43,27 @@
  function merge(base,local,remote,options={}){
   const resolutions=options.resolutions||{};
   const conflicts=[],changed=[],autoResolved=[];
-  // Device clocks and a remote snapshot's save time cannot prove which
-  // individual field value should win. Keep real disagreements explicit.
+  const times=options.editTimes||{},legacy=options.legacy||{};
+  const validTime=value=>{
+   const n=typeof value==='string'&&isNaN(Number(value))?Date.parse(value):Number(value);
+   // Ignore implausible clocks and never interpret an absent date as 1970.
+   return Number.isFinite(n)&&n>1577836800000&&n<Date.now()+300000?n:0;
+  };
+  const latest=path=>{
+   const local=validTime(times.local?.[path]),remote=validTime(times.remote?.[path]);
+   if(local&&remote&&Math.abs(local-remote)>=2000)
+    return {path,choice:local>remote?'local':'remote',localAt:local,remoteAt:remote,source:'field'};
+   // For old field sheets the remote snapshot time is NOT the last field
+   // edit. It only proves the edit already existed by the snapshot date.
+   // Thus we may prefer a known later local edit, never infer remote wins.
+   if(!remote&&(/\/sheetIII\/workStatus$|\/order$/).test(path)){
+    const queued=validTime(legacy.localQueue?.[path])||local;
+    const lastRemoteSave=validTime(legacy.remoteSnapshotAt);
+    if(queued&&lastRemoteSave&&queued>lastRemoteSave+2000)
+     return {path,choice:'local',localAt:queued,remoteAt:lastRemoteSave,source:'snapshot-before-local'};
+   }
+   return null;
+  };
   const resolve=(b,l,r,p)=>{
    if(eq(l,r))return clone(l);
    if(eq(b,l))return clone(r);
@@ -62,9 +81,22 @@
     const combined=reconcileOrder(l,r);
     if(combined!==null)return combined;
    }
-   // Explicit user choices only for genuine conflicts; never let a
-   // timestamp choose an entire section or discard independent observations.
-   const path=pathName(p);
+   // Explicit choices always win. A deletion-versus-edit remains manual,
+   // since it might otherwise permanently remove field observations.
+   const path=pathName(p),explicit=resolutions[path];
+   if(l!==MISSING&&r!==MISSING&&explicit!=='local'&&explicit!=='remote'){
+    const decision=latest(path);
+    if(decision){
+     autoResolved.push(decision);
+     if(orderPath&&Array.isArray(l)&&Array.isArray(r)){
+      const newer=decision.choice==='local'?l:r,older=decision.choice==='local'?r:l;
+      const union=[...newer];
+      for(const id of older)if(!union.includes(id))union.push(id);
+      return clone(union);
+     }
+     return clone(decision.choice==='local'?l:r);
+    }
+   }
    if(l===MISSING||r===MISSING){
     if(resolutions[pathName(p)]==='local')return clone(l);
     if(resolutions[pathName(p)]==='remote')return clone(r);
