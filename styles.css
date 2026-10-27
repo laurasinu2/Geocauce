@@ -1386,3 +1386,38 @@ body > .modal > .modal-backdrop{position:absolute;inset:0}
 .section-status-summary-item{display:inline-flex;align-items:center;gap:5px;color:#46524a;font-size:11px}
 .section-status-summary-item i{width:9px;height:9px;border-radius:50%;display:inline-block}
 @media(max-width:620px){.section-fitxa-meta .section-work-status-select select{min-width:0;width:100%}}
+
+
+/* Conflict resolution: readable bulk choices on phones, tablets and desktop. */
+#cloudDeltaConflictModal .cloud-conflict-dialog{
+  width:min(780px,94vw);
+  max-width:min(780px,94vw);
+  max-height:90dvh;
+  overflow-y:auto;
+}
+#cloudDeltaConflictBulk button{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:auto;
+  max-width:100%;
+  flex:1 1 180px;
+  margin-top:0;
+  padding:10px 12px;
+  font-size:13px;
+  line-height:1.35;
+  text-align:center;
+  white-space:normal;
+}
+#cloudDeltaConflictList{max-height:42dvh!important}
+#cloudDeltaConflictApply:disabled{opacity:.55;cursor:not-allowed}
+@media(max-width:520px){
+  #cloudDeltaConflictModal{padding:7px}
+  #cloudDeltaConflictModal .cloud-conflict-dialog{
+    width:100%;max-width:100%;
+    padding:14px;
+    border-radius:12px;
+  }
+  #cloudDeltaConflictBulk button{flex:1 1 100%;min-height:42px}
+  #cloudDeltaConflictList{max-height:38dvh!important}
+}
