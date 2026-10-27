@@ -6,66 +6,60 @@ const vm=require('node:vm');
 const path=require('node:path');
 const deltaSource=fs.readFileSync(path.join(__dirname,'../cloud-delta-sync.js'),'utf8');
 const appSource=fs.readFileSync(path.join(__dirname,'../app.js'),'utf8');
-function engine(){
- const window={};
- vm.runInNewContext(deltaSource,{window,Date});
- return window.GeoCauceDeltaSync;
-}
+function engine(){const window={};vm.runInNewContext(deltaSource,{window,Date});return window.GeoCauceDeltaSync;}
 const key='/campaigns[id=D01]/upserts[id=SEC-1]/sheetIII/workStatus';
 const now=Date.now();
 const status=value=>({campaigns:[{id:'D01',upserts:[{id:'SEC-1',sheetIII:{workStatus:value}}]}]});
-test('newest local edit wins a workStatus disagreement',()=>{
+test('different statuses stay pending even when device timestamps disagree',()=>{
  const m=engine().merge(status('started'),status('done'),status('pending'),{
   editTimes:{local:{[key]:now-12000},remote:{[key]:now-54000}}
  });
- assert.equal(m.conflicts.length,0);
- assert.equal(m.value.campaigns[0].upserts[0].sheetIII.workStatus,'done');
- assert.equal(m.autoResolved[0].choice,'local');
- assert.equal(m.autoResolved[0].source,'field');
+ assert.equal(m.conflicts.length,1);
+ assert.equal(m.autoResolved.length,0);
+ assert.equal(m.conflicts[0].path,key);
 });
-test('newest remote edit wins a workStatus disagreement',()=>{
- const m=engine().merge(status('started'),status('done'),status('pending'),{
-  editTimes:{local:{[key]:now-54000},remote:{[key]:now-12000}}
- });
- assert.equal(m.conflicts.length,0);
- assert.equal(m.value.campaigns[0].upserts[0].sheetIII.workStatus,'pending');
- assert.equal(m.autoResolved[0].choice,'remote');
-});
-test('legacy field uses queued local edit versus remote save, clearly marked estimated',()=>{
+test('remote snapshot time is not treated as a reliable time for a single field',()=>{
  const m=engine().merge(status('started'),status('done'),status('pending'),{
   legacy:{localQueue:{[key]:now-80000},remoteSnapshotAt:now-10000}
  });
- assert.equal(m.conflicts.length,0);
- assert.equal(m.value.campaigns[0].upserts[0].sheetIII.workStatus,'pending');
- assert.equal(m.autoResolved[0].source,'snapshot-estimate');
+ assert.equal(m.conflicts.length,1);
+ assert.equal(m.autoResolved.length,0);
 });
-test('missing or effectively tied timestamps still require a choice',()=>{
+test('missing or effectively tied timestamps require choosing',()=>{
  const api=engine(),base=status('started'),local=status('done'),remote=status('pending');
  assert.equal(api.merge(base,local,remote).conflicts.length,1);
  assert.equal(api.merge(base,local,remote,{editTimes:{local:{[key]:now-5000},remote:{[key]:now-5100}}}).conflicts.length,1);
 });
-test('newer reordering keeps all section IDs from both devices',()=>{
- const base={campaigns:[{id:'D01',order:['A','B','C']}]};
- const local={campaigns:[{id:'D01',order:['B','A','C','NEW_LOCAL']}]};
- const remote={campaigns:[{id:'D01',order:['A','C','B','NEW_REMOTE']}]};
- const p='/campaigns[id=D01]/order';
- const result=engine().merge(base,local,remote,{
-  editTimes:{local:{[p]:now-22000},remote:{[p]:now-6000}}
- });
- assert.equal(result.conflicts.length,0);
- assert.equal(JSON.stringify(result.value.campaigns[0].order),JSON.stringify(['A','C','B','NEW_REMOTE','NEW_LOCAL']));
+test('independent order inserts merge without losing either section',()=>{
+ const b={campaigns:[{id:'D01',order:['A','B']}]};
+ const l={campaigns:[{id:'D01',order:['A','LOCAL','B']}]};
+ const r={campaigns:[{id:'D01',order:['A','REMOTE','B']}]};
+ const m=engine().merge(b,l,r);
+ assert.equal(m.conflicts.length,0);
+ assert.equal(JSON.stringify(m.value.campaigns[0].order),JSON.stringify(['A','LOCAL','REMOTE','B']));
 });
-test('concurrent deletions versus edits are not silently resolved',()=>{
+test('incompatible reorder stays explicit even with different timestamps',()=>{
+ const b={campaigns:[{id:'D01',order:['A','B','C']}]};
+ const l={campaigns:[{id:'D01',order:['B','A','C','NEW_LOCAL']}]};
+ const r={campaigns:[{id:'D01',order:['A','C','B','NEW_REMOTE']}]};
+ const p='/campaigns[id=D01]/order';
+ const m=engine().merge(b,l,r,{editTimes:{local:{[p]:now-22000},remote:{[p]:now-6000}}});
+ assert.equal(m.conflicts.length,1);
+ assert.equal(m.conflicts[0].path,p);
+ const decided=engine().merge(b,l,r,{resolutions:{[p]:'local'}});
+ assert.equal(decided.conflicts.length,0);
+ assert.ok(decided.value.campaigns[0].order.includes('NEW_LOCAL'));
+});
+test('deletion versus editing does not silently restore removed data',()=>{
  const base={mapPins:[{id:'stop-1',label:'before'}]};
- const local={mapPins:[]};
- const remote={mapPins:[{id:'stop-1',label:'after'}]};
- const result=engine().merge(base,local,remote,{
+ const local={mapPins:[]},remote={mapPins:[{id:'stop-1',label:'after'}]};
+ const m=engine().merge(base,local,remote,{
   editTimes:{local:{'/mapPins[id=stop-1]':now-30000},remote:{'/mapPins[id=stop-1]/label':now-10000}}
  });
- assert.equal(result.conflicts.length,1);
- assert.equal(result.conflicts[0].type,'delete-versus-edit');
+ assert.equal(m.conflicts.length,1);
+ assert.equal(m.conflicts[0].type,'delete-versus-edit');
 });
-test('saving records per-field timestamps, without restamping unchanged data',()=>{
+test('saving keeps field-edit metadata without restamping unchanged data',()=>{
  const i=appSource.indexOf('function cloudQueueStateDiff('),j=appSource.indexOf('function cloudQueueAssetChange(',i);
  assert.ok(i>0&&j>i);
  const memory=new Map();let counter=0;
@@ -84,13 +78,14 @@ test('saving records per-field timestamps, without restamping unchanged data',()
  fn('pr1',JSON.stringify(after),JSON.parse(JSON.stringify(after)));
  assert.equal(counter,1);
 });
-test('automatic resolution takes a recovery copy before it can apply merged data',()=>{
+test('manual conflict resolution saves both versions before asking',()=>{
  const i=appSource.indexOf('const mergeOptions='),j=appSource.indexOf('const hasLocal=localChange.length>0',i);
  assert.ok(i>0&&j>i);
  const flow=appSource.slice(i,j);
- assert.ok(flow.indexOf('await cloudSaveConflictVersions(')>0);
- assert.ok(flow.indexOf('await cloudSaveConflictVersions(')<flow.indexOf('merged={...local}'));
+ assert.ok(flow.includes('cloudSaveConflictVersions(projectId,local,remote.state,remote.updated_at)'));
+ assert.ok(flow.indexOf('cloudSaveConflictVersions(')<flow.indexOf('cloudResolveFieldConflicts('));
  assert.ok(appSource.includes('cloudDownloadConflictBackup'));
- assert.ok(appSource.includes('merged.syncEditTimes=editTimes'));
+ assert.ok(appSource.includes('conflictRecoveryLocal'));
+ assert.ok(appSource.includes('conflictRecoveryRemote'));
  assert.doesNotThrow(()=>new vm.Script(appSource));
 });
