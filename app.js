@@ -2681,23 +2681,18 @@ function showMapContextMenu(sp){
 }
 function nextStopLabel(){const n=(state.mapPins||[]).filter(p=>p.kind==='stop').length+1;return`Parada ${String(n).padStart(2,'0')}`;}
 function addMapStopAt(point){
- if(!point||!requireEditable('afegir un punt de parada')||state.stopCreationPending)return;
- const projectId=state.projectId,campaignId=state.campaign,def=nextStopLabel(),label=(prompt('Nom del punt de parada',def)||def).trim()||def;
+ if(!point||!Number.isFinite(point.x)||!Number.isFinite(point.y)||!requireEditable('afegir un punt de parada'))return;
+ const def=nextStopLabel(),label=(prompt('Nom del punt de parada',def)||def).trim()||def;
+ // A parada always stays at the exact position chosen on the map. Never request
+ // or reuse the tablet's GNSS when creating it.
  const loc=fieldStopPosition(point,null);
- const pin={id:'mp'+Date.now().toString(36),kind:'stop',x:loc.mapPoint.x,y:loc.mapPoint.y,crs:loc.position.crs,position:loc.position,creationPosition:cloneAny(loc.position),label,campaignId,createdAt:Date.now(),gnssPending:true};
+ const position={...loc.position,x:loc.mapPoint.x,y:loc.mapPoint.y,source:'map'};
+ if(position.crs===4326||position.crs===4258){
+  position.lon=loc.mapPoint.x;position.lat=loc.mapPoint.y;
+ }
+ const pin={id:'mp'+Date.now().toString(36),kind:'stop',x:loc.mapPoint.x,y:loc.mapPoint.y,crs:position.crs,position,creationPosition:cloneAny(position),label,campaignId:state.campaign,createdAt:Date.now()};
  state.mapPins=state.mapPins||[];state.mapPins.push(pin);state.activeFieldStopId=pin.id;
- state.stopCreationPending=true;persistState();drawAll();toast(label+' · comprovant coordenades GNSS…',4500);
- fieldFreshGnssForStop().then(gnss=>{
-  if(state.projectId!==projectId||state.campaign!==campaignId||!isEditableCampaign())return;
-  const current=mapStopById(pin.id);if(!current||!current.gnssPending)return;
-  current.gnssPending=false;
-  if(gnss){
-   const gps=fieldStopPosition(point,gnss);
-   current.x=gps.mapPoint.x;current.y=gps.mapPoint.y;current.crs=gps.position.crs;current.position=gps.position;current.creationPosition=cloneAny(gps.position);
-  }
-  persistState();drawAll();
-  toast(gnss?label+' · posició GNSS registrada':label+' · GNSS no disponible; es manté el punt del mapa',4500);
- }).catch(e=>{console.warn('GNSS de la parada',e);const current=mapStopById(pin.id);if(current){current.gnssPending=false;persistState();}toast('La parada s’ha guardat sense posició GNSS',4500);}).finally(()=>{state.stopCreationPending=false;});
+ persistState();drawAll();toast(label+' · coordenades del mapa guardades',3500);
 }
 function mapStopById(id){return (state.mapPins||[]).find(p=>p.id===id&&p.kind==='stop')||null;}
 function openMapStop(id){const pin=mapStopById(id);if(!pin)return;state.currentStopId=id;const linked=(state.historicalPhotoPoints||[]).filter(p=>p.linkedStopId===id);$('#mapStopTitle').textContent=pin.label||'Punt de parada';$('#mapStopSubtitle').textContent=linked.length?`${linked.length} punt${linked.length===1?'':'s'} històric${linked.length===1?'':'s'} vinculat${linked.length===1?'':'s'}`:'Sense punts històrics vinculats';$('#mapStopModal').classList.remove('hidden');}
