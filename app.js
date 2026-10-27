@@ -869,15 +869,24 @@ function cloudQueueChange(projectId,kind,path){
  }catch(e){cloudLastError='No se pudo guardar la cola de sincronización';console.error(cloudLastError,e);refreshAccountUi();}
 }
 function cloudQueueStateDiff(projectId,previousJson,next){
- if(cloudApplyingRemote||!window.GeoCauceDeltaSync)return;
  try{
   const before=previousJson?JSON.parse(previousJson):{};
+  // Field edit times travel inside the project snapshot. They are not
+  // collaborative data fields and therefore cannot create edit conflicts.
+  next.syncEditTimes={...(before.syncEditTimes&&typeof before.syncEditTimes==='object'&&!Array.isArray(before.syncEditTimes)?before.syncEditTimes:{})};
+  if(cloudApplyingRemote||!window.GeoCauceDeltaSync)return;
   const changes=window.GeoCauceDeltaSync.diff(before,next);
   if(!changes.length)return;
   const entries=cloudPendingChanges(projectId);
   const changedPaths=new Set(changes.map(op=>op.path));
   const pending=entries.filter(x=>!(x.kind==='data'&&changedPaths.has(x.path)));
-  for(const op of changes)pending.push({id:cloudUuid(),kind:'data',path:op.path,createdAt:Date.now()});
+  const timestamp=Date.now();
+  for(const op of changes){
+   pending.push({id:cloudUuid(),kind:'data',path:op.path,createdAt:timestamp});
+   next.syncEditTimes[op.path]=timestamp;
+  }
+  const history=Object.entries(next.syncEditTimes);
+  if(history.length>10000)next.syncEditTimes=Object.fromEntries(history.sort((a,b)=>Number(a[1])-Number(b[1])).slice(-10000));
   localStorage.setItem(cloudQueueKey(projectId),JSON.stringify(pending.slice(-5000)));
   scheduleCloudSync(1800);
  }catch(e){console.warn('Cloud pending state queue',e);cloudQueueChange(projectId,'data','/campaigns');}
@@ -1350,7 +1359,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
 }
 function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);if(state.project&&!canEditCurrentProject())return;if(!state.projectId||!cloudConfigured()||!loadCloudSession()?.access_token||!navigator.onLine||document.hidden)return;cloudSyncTimer=setTimeout(()=>{cloudBidirectionalSync({manual:false}).catch(e=>console.warn('Background sync',e));},Math.max(600,delay));}
 function persistStateLocalOnly(){
-  if(!state.projectId||!canEditCurrentProject())return;const previousCloudPayload=localStorage.getItem(projectStateKey(state.projectId));syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],activeFieldStopId:state.activeFieldStopId||null,historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));cloudQueueStateDiff(state.projectId,previousCloudPayload,payload);touchProject();nativeSyncProject(payload);return payload;
+  if(!state.projectId||!canEditCurrentProject())return;const previousCloudPayload=localStorage.getItem(projectStateKey(state.projectId));syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],activeFieldStopId:state.activeFieldStopId||null,historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};cloudQueueStateDiff(state.projectId,previousCloudPayload,payload);localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));touchProject();nativeSyncProject(payload);return payload;
 }
 window.addEventListener('online',()=>{refreshAccountUi();cloudRefreshProjectCatalog().catch(()=>{});scheduleCloudSync(800);});window.addEventListener('offline',()=>{clearTimeout(cloudSyncTimer);refreshAccountUi();});document.addEventListener('visibilitychange',()=>{if(!document.hidden)scheduleCloudSync(700);});setInterval(()=>{if(!document.hidden&&navigator.onLine&&state.projectId)scheduleCloudSync(1000);},90000);
 
