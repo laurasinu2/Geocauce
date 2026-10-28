@@ -1421,3 +1421,17 @@ body > .modal > .modal-backdrop{position:absolute;inset:0}
   #cloudDeltaConflictBulk button{flex:1 1 100%;min-height:42px}
   #cloudDeltaConflictList{max-height:38dvh!important}
 }
+
+/* R28: fixed application scale, independent map/sheet gestures remain unchanged. */
+html{ -webkit-text-size-adjust:100%;text-size-adjust:100%; }
+#historicalPhotoMain{cursor:zoom-in;touch-action:manipulation}
+.historical-photo-enlarge{align-self:center;margin:2px auto 7px;padding:8px 18px;border:1px solid #c2c9c5;border-radius:12px;background:#fff;color:#24372e;font-weight:700;cursor:pointer}
+.gc-photo-lightbox{position:fixed;inset:0;z-index:10000;display:flex;flex-direction:column;background:rgba(9,13,14,.98);color:#fff;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.gc-photo-lightbox.hidden{display:none!important}
+.gc-photo-lightbox header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 14px;min-height:52px;flex:0 0 auto}
+.gc-photo-lightbox header span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}
+.gc-photo-lightbox header div{display:flex;gap:8px;flex-shrink:0}
+.gc-photo-lightbox button{border:1px solid #5d6565;background:#263030;color:#fff;border-radius:10px;min-width:48px;min-height:42px;padding:8px 13px;cursor:pointer}
+.gc-lightbox-viewport{flex:1;min-height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none;overscroll-behavior:contain;user-select:none;-webkit-user-select:none}
+.gc-lightbox-viewport img{max-width:98%;max-height:100%;object-fit:contain;transform-origin:center center;will-change:transform;pointer-events:none}
+.gc-photo-lightbox small{text-align:center;color:#d2d9d6;padding:9px 8px;font-size:12px}
