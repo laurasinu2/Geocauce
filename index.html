@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#f2efe6" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -11,8 +11,8 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=20261027-bidirectional-safe-v7" />
-  <link rel="stylesheet" href="mobile-pwa.css?v=20261027-bidirectional-safe-v7" />
+  <link rel="stylesheet" href="styles.css?v=20261028-r28-photo-viewer" />
+  <link rel="stylesheet" href="mobile-pwa.css?v=20261028-r28-photo-viewer" />
 </head>
 <body>
   <div id="app">
@@ -1158,11 +1158,11 @@ CON | Confluencia"></textarea></div>
         <header><div><img src="icons/fotos.png" alt=""><div><b id="historicalPhotoTitle">Punt fotogràfic històric</b><small id="historicalPhotoSubtitle"></small></div></div><button id="historicalPhotoClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
         <div class="historical-photo-stage">
           <button id="historicalPhotoPrev" class="historical-photo-nav" type="button">‹</button>
-          <img id="historicalPhotoMain" class="hidden" alt="Fotografia històrica">
+          <img id="historicalPhotoMain" class="hidden" alt="Fotografia històrica" title="Toca per ampliar a pantalla completa">
           <div id="historicalPhotoEmpty" class="historical-photo-empty"><img src="icons/fotos.png" alt=""><b>Encara no hi ha fotos</b><span>Fes una foto nova o importa una fotografia històrica del dispositiu.</span></div>
           <button id="historicalPhotoNext" class="historical-photo-nav" type="button">›</button>
         </div>
-        <div id="historicalPhotoStrip" class="historical-photo-strip"></div>
+        <button type="button" id="historicalPhotoEnlarge" class="historical-photo-enlarge">⛶ Ampliar fotografia</button><div id="historicalPhotoStrip" class="historical-photo-strip"></div>
         <div id="historicalPhotoMeta" class="historical-photo-meta"></div>
         <footer class="historical-photo-actions"><button id="historicalPhotoCamera" class="primary icon-text"><img src="icons/camara.png" alt=""><span>Fer foto</span></button><button id="historicalPhotoImport" class="secondary icon-text"><img src="icons/importar.png" alt=""><span>Importar</span></button><button id="historicalPhotoLinkStop" class="secondary magnet-action" type="button"><span class="magnet-glyph">🧲</span><span>Vincular parada</span></button><button id="historicalPhotoDelete" class="ghost danger-action" type="button"><img src="icons/eliminar.svg" alt=""><span>Eliminar punt</span></button></footer>
       </div>
@@ -1300,18 +1300,18 @@ CON | Confluencia"></textarea></div>
     <div class="cloud-progress-track" role="progressbar" aria-label="Progreso de sincronización" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="cloudProgressBar"></span></div>
     <small id="cloudProgressDetail">Preparando transferencia…</small>
   </aside>
-  <script src="supabase-config.js?v=20261027-bidirectional-safe-v7"></script>
-  <script src="native-adapter.js?v=20261027-bidirectional-safe-v7"></script>
-  <script src="geotiff-lite.js?v=20261027-bidirectional-safe-v7"></script>
-  <script src="modal-layer.js?v=20261027-bidirectional-safe-v7"></script>
-  <script src="local-export-zip.js?v=20261027-bidirectional-safe-v7"></script>
-  <script src="field-sheet-pdf.js?v=20261027-bidirectional-safe-v7"></script>
-<script src="cloud-delta-sync.js?v=20261027-bidirectional-safe-v7"></script>
-<script src="project-access.js?v=20261027-bidirectional-safe-v7"></script>
-  <script src="project-sharing-ui.js?v=20261027-bidirectional-safe-v7"></script>
+  <script src="supabase-config.js?v=20261028-r28-photo-viewer"></script>
+  <script src="native-adapter.js?v=20261028-r28-photo-viewer"></script>
+  <script src="geotiff-lite.js?v=20261028-r28-photo-viewer"></script>
+  <script src="modal-layer.js?v=20261028-r28-photo-viewer"></script>
+  <script src="local-export-zip.js?v=20261028-r28-photo-viewer"></script>
+  <script src="field-sheet-pdf.js?v=20261028-r28-photo-viewer"></script>
+<script src="cloud-delta-sync.js?v=20261028-r28-photo-viewer"></script>
+<script src="project-access.js?v=20261028-r28-photo-viewer"></script>
+  <script src="project-sharing-ui.js?v=20261028-r28-photo-viewer"></script>
   <script src="gpkg-lite.js?v=20261016-gpkg-r28"></script>
   <script src="gpkg-import.js?v=20261016-gpkg-r28"></script>
-  <script src="app.js?v=20261027-bidirectional-safe-v7"></script>
-  <script src="mobile-pwa.js?v=20261027-bidirectional-safe-v7"></script>
+  <script src="app.js?v=20261028-r28-photo-viewer"></script>
+  <script src="mobile-pwa.js?v=20261028-r28-photo-viewer"></script>
 </body>
 </html>
