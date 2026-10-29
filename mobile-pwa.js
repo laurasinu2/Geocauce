@@ -40,6 +40,7 @@ async function ensureProjectLoaded(){
   catch(err){console.error(err);return false;}
   finally{mapOpening=false;setBusy(false);}
 }
+window.GeoCauceShowMapForRelocation=()=>showMap();
 async function showMap(){
   if(!simpleEnabled())return;
   const p=activeProject();if(!p){showShell('projects');return;}
