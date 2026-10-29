@@ -25,7 +25,7 @@ function buttons(){
  '<div class="gc-work-grid"><section class="gc-work-left">'+
  '<label class="gc-drop" id="gcDrop"><span>📁</span><b id="gcDropTitle">Selecciona fotografías</b><small id="gcDropHelp">JPG / JPEG con GPS EXIF o ubicación manual · puedes elegir muchos archivos</small><span class="gc-pick">Explorar archivos</span><input id="gcFiles" type="file" accept=".jpg,.jpeg,image/jpeg" multiple hidden></label>'+
  '<div class="gc-settings"><h3>⚙ Opciones de importación</h3><label>Nombre de la capa<input id="gcLayerName" type="text" value="Fotografías de campo" maxlength="90"></label><label id="gcPointCrsRow" class="hidden">CRS de los puntos<select id="gcPointCrs"><option value="4326">WGS84 · EPSG:4326</option><option value="25831">ETRS89 / UTM 31N</option><option value="25830">ETRS89 / UTM 30N</option></select></label><label class="gc-check"><input id="gcDuplicates" type="checkbox" checked> Detectar y excluir duplicados</label><label class="gc-check"><input id="gcKeepUnlocated" type="checkbox" checked> Conservar fotografías sin coordenadas</label><label class="gc-check"><input id="gcThumbnails" type="checkbox" checked> Miniaturas de vista previa</label></div>'+
- '<div class="gc-work-actions"><button id="gcApplyFieldPoints" class="gc-field-positions hidden" type="button">📍 Asignar puntos 1a · 2 · 3a (revisar)</button><button id="gcImportCommit" class="gc-primary" type="button" disabled>Importar fotografías</button><div class="gc-import-progress hidden" id="gcImportProgress"><div><span id="gcProgressText"></span><span id="gcProgressCount"></span></div><progress id="gcProgressBar" max="1" value="0"></progress></div><p id="gcImportFeedback" aria-live="polite"></p></div></section>'+
+ '<div class="gc-work-actions"><button id="gcApplyFieldPoints" class="gc-field-positions hidden" type="button">📍 Asignar puntos 1a · 2 · 3a (revisar)</button><button id="gcImportCommit" class="gc-primary" type="button" disabled>Importar fotografías</button><button id="gcRetryFailed" class="gc-retry-failed hidden" type="button">↻ Reintentar archivos fallidos</button><div class="gc-import-progress hidden" id="gcImportProgress"><div><span id="gcProgressText"></span><span id="gcProgressCount"></span></div><progress id="gcProgressBar" max="1" value="0"></progress></div><p id="gcImportFeedback" aria-live="polite"></p></div></section>'+
  '<section class="gc-work-right"><div class="gc-preview-head"><div><b>◉ Vista previa</b><small>Revisa las posiciones antes de importar</small></div><span id="gcCountLabel">0 elementos</span></div>'+
  '<div class="gc-map-box"><canvas id="gcPreviewMap" aria-label="Mapa georreferenciado de vista previa"></canvas><div class="gc-map-controls"><button id="gcMapPlus" type="button">+</button><button id="gcMapMinus" type="button">−</button><button id="gcMapFit" type="button" title="Mostrar todos">⌗</button></div><p id="gcMapHint">Selecciona archivos para ver su ubicación</p></div>'+
  '<div class="gc-list-head"><b>☷ Lista de elementos</b><span id="gcCounters"></span></div><div id="gcImportRows" class="gc-import-rows"></div>'+
@@ -72,6 +72,7 @@ function show(){
   $('#gcMapMinus').onclick=()=>{view.scale/=1.6;paint();};
   $('#gcMapFit').onclick=fitAll;
   $('#gcImportCommit').onclick=commit;
+  $('#gcRetryFailed').onclick=()=>{if(busy)return;for(const row of rows)if(String(row.error||'').startsWith('Error al guardar:')){row.error=null;row.excluded=false;}$('#gcImportFeedback').textContent='Se han preparado los elementos fallidos para reintentar. Confirma el lote cuando quieras.';render();};
   map=$('#gcPreviewMap');ctx=map.getContext('2d');installMapControls();
  }
  tab='photos';rows=[];selected=-1;listPage=0;busy=false;seq++;
@@ -163,10 +164,14 @@ function parsePointFile(text,name,crs){
   const doc=new DOMParser().parseFromString(text,'application/xml');if(doc.querySelector('parsererror'))throw Error('XML inválido');
   if(format==='gpx'){
    const all=[...doc.getElementsByTagName('wpt'),...doc.getElementsByTagName('trkpt'),...doc.getElementsByTagName('rtept')];
-   all.forEach((n,i)=>points.push({name:n.getElementsByTagName('name')[0]?.textContent||'Punto '+(i+1),x:Number(n.getAttribute('lon')),y:Number(n.getAttribute('lat')),properties:{},crs:4326}));
+   all.forEach((n,i)=>{const read=tag=>n.getElementsByTagName(tag)[0]?.textContent||null;
+    points.push({name:read('name')||'Punto '+(i+1),x:Number(n.getAttribute('lon')),y:Number(n.getAttribute('lat')),
+     properties:{name:read('name'),description:read('desc'),elevation:read('ele'),time:read('time'),sourceFormat:'gpx'},crs:4326});});
   }else{
    const all=[...doc.getElementsByTagName('Placemark')];
-   all.forEach((n,i)=>{const c=n.getElementsByTagName('Point')[0]?.getElementsByTagName('coordinates')[0]?.textContent?.trim().split(',');if(c)points.push({name:n.getElementsByTagName('name')[0]?.textContent||'Punto '+(i+1),x:Number(c[0]),y:Number(c[1]),properties:{},crs:4326});});
+   all.forEach((n,i)=>{const c=n.getElementsByTagName('Point')[0]?.getElementsByTagName('coordinates')[0]?.textContent?.trim().split(',');if(c)points.push({name:n.getElementsByTagName('name')[0]?.textContent||'Punto '+(i+1),x:Number(c[0]),y:Number(c[1]),
+    properties:{name:n.getElementsByTagName('name')[0]?.textContent||null,description:n.getElementsByTagName('description')[0]?.textContent||null,
+      altitude:c[2]?Number(c[2]):null,sourceFormat:'kml'},crs:4326});});
   }
  }else throw Error('Formato de puntos no compatible');
  return points;
@@ -322,6 +327,10 @@ function render(){
  }
  const candidates=rows.filter(r=>!r.excluded&&!r.error&&(tab==='points'||locationOf(r)||$('#gcKeepUnlocated').checked));
  $('#gcImportCommit').disabled=busy||!candidates.length;
+ const failures=rows.filter(r=>String(r.error||'').startsWith('Error al guardar:')).length;
+ $('#gcRetryFailed').classList.toggle('hidden',!failures);
+ $('#gcRetryFailed').disabled=busy;
+ $('#gcRetryFailed').textContent='↻ Reintentar '+failures+' elementos fallidos';
  const ready=candidates.filter(r=>!r.duplicate).length;
  $('#gcImportCommit').textContent=tab==='photos'?(ready?'Importar fotografías ('+ready+')':'Verificar fotografías repetidas'):'Importar puntos ('+candidates.length+')';
  paint();
