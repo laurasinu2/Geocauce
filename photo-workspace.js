@@ -265,7 +265,7 @@ function render(){
   const item=el('div','gc-import-row'+(selected===i?' selected':'')+(r.excluded?' excluded':''));
   const preview=el('div','gc-import-thumb');
   if(tab==='photos'&&r.file&&!r.error&&$('#gcThumbnails').checked){
-   const u=URL.createObjectURL(r.file);previewUrls.push(u);const img=el('img');img.src=u;img.alt='';img.loading='lazy';preview.appendChild(img);
+   const u=URL.createObjectURL(r.file);previewUrls.push(u);const img=el('img');img.src=u;img.alt='';img.loading='lazy';img.onerror=()=>{if(!r.error){r.error='No se puede visualizar este JPEG';render();}};preview.appendChild(img);
   }else preview.textContent=tab==='photos'?'📷':'📍';
   const summary=el('div','gc-import-summary');summary.innerHTML='<b>'+escape(r.name)+'</b><small>'+escape(r.error||((r.gps?fmt(r.gps.lat)+', '+fmt(r.gps.lon):r.manualWorld?'Ubicación manual · EPSG:'+api.epsg():'Sin coordenadas')+(r.metadata?.dateOriginal?' · '+r.metadata.dateOriginal:'')))+'</small>';
   const pill=el('span','gc-import-state '+status(r),({valid:'Válida',duplicate:'Duplicada','no-coordinates':'Sin GPS',error:'Error',excluded:'Excluida'})[status(r)]);
@@ -315,7 +315,7 @@ async function commit(){
     const w=locationOf(row),id='p'+uid(),pointId=w?'hp'+uid():null;
     const exifDate=row.metadata?.dateOriginal||null;
     const captured=exifDate&&/^\d{4}:\d{2}:\d{2}/.test(exifDate)?exifDate.slice(0,10).replaceAll(':','-'):null;
-    const gnss=w?{x:w.x,y:w.y,crs:api.epsg(),lat:row.manualGps?.lat??row.gps?.lat??null,lon:row.manualGps?.lon??row.gps?.lon??null,accuracy:null,source:row.manualWorld?'manual':row.gps?'exif':'map'}:null;
+    const gnss=w?{x:w.x,y:w.y,crs:api.epsg(),lat:row.manualGps?.lat??row.gps?.lat??null,lon:row.manualGps?.lon??row.gps?.lon??null,accuracy:null,source:row.locationSource|| (row.manualWorld?'manual':row.gps?'exif':'map')}:null;
     const record={id,blob:row.file,name:row.name,date:Date.now(),captureDate:captured,captureDateSource:captured?'exif':'unknown',createdAt:Date.now(),campaignId:startedCampaign,featureId:null,contentHash:row.hash,importGroup:group,historicalPointId:pointId,gnss,heading:row.metadata?.heading??null,exifOrientation:row.metadata?.orientation??null,originalSize:row.file.size,originalMime:row.file.type,positionSource:gnss?.source||'none'};
     await api.savePhoto(record);
     const saved=await api.readPhoto(id);
@@ -454,7 +454,7 @@ function galleryDetail(photo){
   const timeline=el('div','gc-photo-timeline');
   for(const candidate of galleryRecords.filter(r=>r.id!==photo.id&&(r.seriesNames||[r.seriesName]).some(n=>n&&related.includes(n))).slice(0,15)){
    const url=URL.createObjectURL(candidate.blob);galleryDetailUrls.push(url);
-   const b=el('button','gc-time-thumb'),img=el('img');img.src=url;img.alt='';b.append(img,el('small','',candidate.captureDate||candidate.historicalDate||candidate.name));b.onclick=()=>{selectedGalleryId=candidate.id;galleryRender();galleryDetail(candidate);};timeline.appendChild(b);
+   const b=el('button','gc-time-thumb'),img=el('img');img.src=url;img.alt='';b.append(img,el('small','',candidate.documentDateRaw||candidate.captureDate||candidate.historicalDate||candidate.name));b.onclick=()=>{selectedGalleryId=candidate.id;galleryRender();galleryDetail(candidate);};timeline.appendChild(b);
   }
   if(timeline.childNodes.length){root.appendChild(el('b','gc-detail-section','Serie temporal'));root.appendChild(timeline);}
  }
@@ -464,8 +464,8 @@ function galleryDetail(photo){
  root.appendChild(position);
  const form=el('div','gc-gallery-form');
  form.innerHTML='<label>Título<input id="gcDetailTitle" maxlength="150"></label>'+
- '<label>Fecha documental<input id="gcDetailDate" type="date"></label>'+
- '<label>Tipo de fecha<select id="gcDetailDateType"><option value="exact">Exacta</option><option value="approx">Aproximada</option><option value="year">Solo año</option><option value="unknown">Desconocida</option></select></label>'+
+ '<label>Fecha documental<input id="gcDetailDate" type="text" placeholder="1925, ca. 1925 o AAAA-MM-DD"></label>'+
+ '<label>Tipo de fecha<select id="gcDetailDateType"><option value="exact">Exacta</option><option value="approx">Aproximada</option><option value="year">Solo año</option><option value="interval">Intervalo</option><option value="unknown">Desconocida</option></select></label>'+
  '<label>Certeza de fecha<select id="gcDetailDateCertainty"><option value="unknown">Desconocida</option><option value="high">Alta</option><option value="medium">Media</option><option value="low">Baja</option></select></label>'+
  '<label>Autor<input id="gcDetailAuthor" maxlength="150"></label>'+
  '<label>Institución / Archivo<input id="gcDetailInstitution" maxlength="150"></label>'+
@@ -481,7 +481,7 @@ function galleryDetail(photo){
  '<button id="gcDetailSave" class="gc-primary">Guardar cambios</button><p id="gcDetailMessage"></p>';
  root.appendChild(form);
  $('#gcDetailTitle').value=photo.title||'';
- $('#gcDetailDate').value=photo.captureDate||photo.historicalDate||'';
+ $('#gcDetailDate').value=photo.documentDateRaw||photo.captureDate||photo.historicalDate||'';
  $('#gcDetailDateType').value=photo.datePrecision||((photo.captureDate||photo.historicalDate)?'exact':'unknown');
  $('#gcDetailDateCertainty').value=photo.dateCertainty||'unknown';
  $('#gcDetailAuthor').value=photo.author||'';$('#gcDetailInstitution').value=photo.institution||'';
@@ -524,12 +524,13 @@ function galleryDetail(photo){
   if(!(fov>=5&&fov<=170)||!(distance>=10&&distance<=5000)){api.notify('Revisa el campo visual y la distancia');return;}
   const seriesNames=[...new Set($('#gcDetailSeries').value.split(',').map(x=>x.trim()).filter(Boolean))];
   const next={...photo,title:$('#gcDetailTitle').value.trim(),captureDate:$('#gcDetailDate').value||null,
-   datePrecision:$('#gcDetailDateType').value,dateCertainty:$('#gcDetailDateCertainty').value,
+   datePrecision:kind,dateCertainty:$('#gcDetailDateCertainty').value,
    author:$('#gcDetailAuthor').value.trim(),institution:$('#gcDetailInstitution').value.trim(),
    collection:$('#gcDetailCollection').value.trim(),documentReference:$('#gcDetailReference').value.trim(),
    sourceUrl:$('#gcDetailSource').value.trim(),seriesNames,description:$('#gcDetailDescription').value.trim(),
    referencePhotoId:$('#gcDetailCompare').value||null,heading,fieldOfViewDeg:fov,fieldOfViewDistanceM:distance,
-   showFieldOfView:$('#gcDetailShowCone').checked,stopId:$('#gcDetailStop').value||null,updatedAt:Date.now()};
+   showFieldOfView:$('#gcDetailShowCone').checked,stopId:$('#gcDetailStop').value||null,
+   historicalDate:photo.historicalDate!==undefined?exactDate:photo.historicalDate,updatedAt:Date.now()};
   let newWorld=null;
   if(a&&b){
    const latitude=Number(a),longitude=Number(b);
