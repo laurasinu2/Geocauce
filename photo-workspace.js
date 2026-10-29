@@ -98,7 +98,7 @@ function setTab(next){
  $('#gcImportCommit').textContent=tab==='photos'?'Importar fotografías':'Importar puntos';
  render();
 }
-async function hashes(){return new Set(await api.photoHashes());}
+async function hashes(sizes=[]){return new Set(await api.photoHashes(sizes));}
 async function stage(files){
  if(busy||!files.length)return;
  const run=++seq;rows=[];selected=-1;release(previewUrls);
@@ -106,7 +106,7 @@ async function stage(files){
  progress(true,0,files.length,'Leyendo archivos');
  if(tab==='points'){lastPointFiles=files;await stagePoints(files,run);return;}
  try{
-  const known=await hashes();
+  const known=await hashes(files.map(f=>f.size));
   const prepared=await root.GeoCauceUnifiedPhotos.analyzePhotoBatch(files,{existingHashes:[...known],onProgress:({processed,total})=>{if(run===seq)progress(true,processed,total,'Leyendo y verificando EXIF');}});
   if(run!==seq)return;
   rows=prepared.map((p,i)=>({
@@ -300,7 +300,7 @@ async function commit(){
  if(!candidates.length)return;
  busy=true;render();const startedProject=api.getState().projectId,startedCampaign=api.getState().campaign;
  const group=$('#gcLayerName').value.trim()||(tab==='photos'?'Fotografías de campo':'Puntos importados');
- const known=new Set(tab==='photos'?await api.photoHashes():[]);
+ const known=new Set(tab==='photos'?await api.photoHashes(candidates.map(r=>r.file?.size)):[]);
  let done=0,failed=0,skipped=0;
  progress(true,0,candidates.length,tab==='photos'?'Guardando fotografías localmente':'Guardando puntos localmente');
  for(const row of candidates){
