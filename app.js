@@ -3250,22 +3250,48 @@ function beginPointRelocation(kind,id,extra={}){
  toast('Toca el nuevo punto para anclar '+relocationLabel(request)+'; pulsa Cancelar para salir.',4800);
  return true;
 }
+
+function chooseRelocationCandidate(choices){
+ if(!choices.length)return false;
+ if(choices.length===1)return beginPointRelocation(choices[0].kind,choices[0].id,choices[0].extra||{});
+ let host=$('#gcRelocationChoose');
+ if(!host){
+  host=document.createElement('div');host.id='gcRelocationChoose';
+  host.className='gc-pin-move-actions hidden';
+  host.innerHTML='<div class="gc-pin-move-card"><header><b>¿Qué elemento quieres mover?</b><button id="gcRelocationChooseClose" type="button">✕</button></header><div id="gcRelocationChooseList" class="gc-relocation-choose-list"></div></div>';
+  document.body.appendChild(host);
+  $('#gcRelocationChooseClose').onclick=()=>host.classList.add('hidden');
+  host.addEventListener('click',e=>{if(e.target===host)host.classList.add('hidden');});
+ }
+ const root=$('#gcRelocationChooseList');root.replaceChildren();
+ for(const item of choices){
+  const button=document.createElement('button');button.type='button';
+  button.textContent=(item.icon||'📍')+' '+item.title;
+  button.onclick=()=>{host.classList.add('hidden');beginPointRelocation(item.kind,item.id,item.extra||{});};
+  root.appendChild(button);
+ }
+ host.classList.remove('hidden');return true;
+}
 function selectRelocationSource(sp){
- const core=relocationCore(),note=nearestNoteMarker(sp),hp=nearestHistoricalPhotoPoint(sp),pin=nearestMapPin(sp);
- if(hp)return beginPointRelocation('photoPoint',hp.id);
- if(pin)return beginPointRelocation(pin.kind==='photo'&&pin.photoId?'photo':'pin',pin.photoId||pin.id);
+ const choices=[],note=nearestNoteMarker(sp),hp=nearestHistoricalPhotoPoint(sp),pin=nearestMapPin(sp);
+ if(hp)choices.push({kind:'photoPoint',id:hp.id,title:'Punto fotográfico · '+historicalPointLabel(hp),icon:'📷'});
+ if(pin)choices.push({kind:pin.kind==='photo'&&pin.photoId?'photo':'pin',
+  id:pin.photoId||pin.id,title:(pin.kind==='stop'?'Parada':pin.kind==='gps'?'Punto GPS':pin.kind==='photo'?'Fotografía':'Nota')+' · '+(pin.label||pin.text||pin.id),icon:'📍'});
  if(note&&!note.featureId){
   const page=state.notebook?.pages?.find(p=>p.id===note.pageId);
   const index=page?.links?.findIndex(link=>link.type==='position'&&Math.hypot(link.x-note.x,link.y-note.y)<.001);
-  if(index>=0)return beginPointRelocation('notebook',note.pageId,{linkIndex:index});
+  if(index>=0)choices.push({kind:'notebook',id:note.pageId,extra:{linkIndex:index},
+   title:'Punto de la libreta · '+note.pageId,icon:'📒'});
  }
- const f=nearestFeature(screenToWorld(sp),false);
- if(f)return beginPointRelocation('feature',f.id);
+ const feature=nearestFeature(screenToWorld(sp),false);
+ if(feature)choices.push({kind:'feature',id:feature.id,title:'Geometría · '+(feature.name||feature.reachCode||feature.id),icon:'⬡'});
  const w=screenToWorld(sp),tol=Math.max(9/state.view.scale,1e-8);
  for(let i=(state.mapInk||[]).length-1;i>=0;i--){
-  const ink=state.mapInk[i];if(ink?.points?.length&&distanceToPolyline(w,ink.points)<=tol)
-   return beginPointRelocation('ink',String(i),{index:i});
+  const stroke=state.mapInk[i];if(stroke?.points?.length&&distanceToPolyline(w,stroke.points)<=tol){
+   choices.push({kind:'ink',id:String(i),extra:{index:i},title:'Anotación dibujada · '+(i+1),icon:'✎'});break;
+  }
  }
+ if(choices.length)return chooseRelocationCandidate(choices);
  toast('Toca una fotografía, punto, parada, nota, anotación, tramo, sección o polígono.',4800);
  return false;
 }
@@ -3400,7 +3426,9 @@ async function finishPointRelocation(sp){
  const dest=relocationTargetWorld(sp);
  if(!relocationCore()?.valid(dest)){toast('Selecciona una posición válida');return;}
  const label=relocationLabel(pending);
- if(!confirm('¿Anclar «'+label+'» en el nuevo punto? Las coordenadas cambiarán, pero se conservarán sus relaciones y los archivos originales.'))return;
+ const f=pending.kind==='feature'?state.features.find(x=>x.id===pending.id):null;
+ const caution=f?.type==='reach'?' Se trasladará también su cauce completo y las secciones asociadas.':f?.type==='watercourse'?' Sus tramos y secciones se trasladarán juntos.':pending.kind==='pin'?' Los puntos fotográficos vinculados no se desplazarán automáticamente.':'';
+ if(!confirm('¿Anclar «'+label+'» en el nuevo punto? Las coordenadas cambiarán, pero se conservarán sus relaciones y los archivos originales.'+caution))return;
  pending.busy=true;
  $('#gcRelocationText').textContent='Guardando nueva posición de '+label+'…';
  try{
