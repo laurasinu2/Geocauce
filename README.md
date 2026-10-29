@@ -7,6 +7,15 @@ La rama histórica `backup/r28-copia-20261027` permanece como referencia funcion
 **Plataforma principal de desarrollo y pruebas:** PWA (navegador e instalación como aplicación, principalmente Android). No exigir una app nativa ni conexión a Supabase para las funciones locales. Reutilizar IndexedDB, el almacenamiento binario y la cola incremental de sincronización existentes. Los datos de prueba sintéticos son suficientes para desarrollar e iniciar pruebas; fotografías reales y copias de proyectos son opcionales para validar compatibilidad con cámaras y proyectos concretos, no requisitos para empezar.
 
 ---
+### R29 · Mover cualquier elemento cartográfico creado
+
+En la versión `r29-20261029`, la herramienta **Mover elemento a otro punto** permite seleccionar un marcador, fotografía, punto fotográfico, parada, punto GPS importado, nota georreferenciada, anotación dibujada, sección, tramo, cauce o polígono; tocar un nuevo lugar del mapa y confirmar el anclaje. La posición y las coordenadas almacenadas se actualizan sin alterar los archivos originales. También hay botones **Mover** en fichas de fotos, paradas y geometrías.
+
+Los puntos y fotografías con ubicación original GNSS conservan ese origen documental, aunque la ubicación vigente pase a ser **manual-map**. Mover una fotografía individual no arrastra las otras de su punto; mover un punto fotográfico con varias fotos mueve todo el grupo. Mover una parada no arrastra fotografías vinculadas. Mover un tramo desplaza con él su cauce y secciones relacionadas, sin deformar su geometría. Se requiere permiso de edición de la campaña y confirmación antes de guardar.
+
+**Límites:** no modifica la georreferenciación de mapas GeoTIFF ni la geometría original de capas SHP de referencia; estas capas externas no son anotaciones creadas por el usuario. La comprobación física en PWA Android sigue pendiente. No exige SQL ni migraciones en Supabase.
+
+
 ## R29 · Fotos unificadas e importador georreferenciado (29/10/2026)
 
 La rama `r29-20261029` incorpora un importador PWA de fotografías JPEG por lotes, lectura EXIF por archivo, previsualización en mapa, puntos CSV/GPX/KML/GeoJSON, SHA-256, galería unificada, correcciones manuales y recuperación frente a fallos. Conserva IndexedDB y el sistema de sincronización incremental existente; no necesita SQL en Supabase para estos cambios. Es una versión de desarrollo pendiente de validación táctil y sincronización real entre dispositivos. Detalles y protocolo de pruebas: [Plan R29](R28_FOTOGRAFIAS_UNIFICADAS_PLAN.md).
