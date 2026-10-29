@@ -36,6 +36,7 @@ test('Moved photo preserves original binary, EXIF, heading and documentary relat
  assert.equal(newPhoto.historicalPointId,'hp-2');assert.equal(newPhoto.gnss.source,'manual-map');
  assert.equal(newPhoto.gnss.lat,41.6);assert.equal(newPhoto.positionHistory.length,1);
  assert.equal(p.gnss.x,402000);assert.equal(p.exifMetadata.originalGPS.lat,41.2);
+ assert.equal(newPhoto.originalGnss.x,402000);
 });
 test('Move stop to chosen coordinate without moving any other point',()=>{
  const creation={x:400000,y:4600000,source:'map'};
@@ -44,6 +45,7 @@ test('Move stop to chosen coordinate without moving any other point',()=>{
   utm:{x:410000,y:4601000,crs:25831}});
  assert.equal(moved.x,410000);assert.equal(moved.position.source,'manual-map');
  assert.equal(moved.position.lat,41.6);assert.equal(moved.position.utmCrs,25831);
+ assert.equal(moved.originalPosition.x,400000);
  assert.strictEqual(moved.creationPosition,creation);assert.equal(stop.x,400000);
 });
 test('Move complex river keeping all fragments and their relative arrangement',()=>{
@@ -66,6 +68,8 @@ test('Move section or polygon without distorting its original shape',()=>{
  const moved=core.moveFeature(feature,{x:100,y:200});
  assert.equal(moved.points[0].x,85);assert.equal(moved.points[1].x,115);
  assert.equal(moved.anchorPoint.y,200);
+ assert.equal(moved.derivedDataStale,true);
+ assert.deepEqual(moved.relocationPreviousDerived.sectionProfile,{old:true});
  assert.equal(moved.sectionProfile,null);assert.equal(moved.erasures[0].points[0].x,95);
  assert.deepEqual(Array.from(moved.points).map(p=>p.x),[85,115]);
 });
@@ -108,4 +112,18 @@ test('Moving an individual photo does not move every photo sharing its point',()
  assert.match(app,/point\.photos=point\.photos\.filter\(id=>id!==photoId\)/);
  assert.match(app,/await dbPut\('photos',next\)/);
  assert.match(app,/const failedRestores=\[\]/);
+});
+
+test('Moving a photograph without prior GPS does not invent a former position',()=>{
+ const image={id:'p-unlocated',blob:{size:20},exifMetadata:{dateTimeOriginal:null}};
+ const moved=core.movePhotoRecord(image,{x:410000,y:4600100},{crs:25831,lonLat:{lat:41.6,lon:1.8}});
+ assert.equal(moved.gnss.source,'manual-map');
+ assert.equal(moved.positionHistory.length,0);
+ assert.equal(moved.originalGnss,null);
+ assert.equal(image.gnss,undefined);
+});
+test('Relocation selection is explicit when markers overlap',()=>{
+ assert.match(app,/function chooseRelocationCandidate\(choices\)/);
+ assert.match(app,/gcRelocationChooseList/);
+ assert.match(app,/if\(choices\.length\)return chooseRelocationCandidate\(choices\)/);
 });
