@@ -3487,7 +3487,7 @@ function onMapPointerMove(e){
   }
 }
 function onMapPointerUp(e){
-  if(e.pointerType==='touch' && (appSettings.inputMode==='pen'||(appSettings.inputMode==='finger'&&state.tool==='pan'))){endTouchNavigation(e);return;}
+  if(e.pointerType==='touch' && (appSettings.inputMode==='pen'||state.tool==='relocate'||!!state.relocatingPoint||(appSettings.inputMode==='finger'&&state.tool==='pan'))){endTouchNavigation(e);return;}
   if(state.pointerPan && state.pointerPan.pointerId===e.pointerId){endPan();return;}
   if(endVectorEndpointDrag(e.pointerId))return;
   if(!state.currentStroke||state.currentStroke.pointerId!==e.pointerId)return;
