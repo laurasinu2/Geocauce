@@ -368,56 +368,198 @@ function galleryRender(){
  $('#gcGalleryPages').textContent=(galleryPage+1)+' / '+pages+' · '+filtered.length+' fotografías';
  $('#gcGalleryPrev').disabled=galleryPage===0;$('#gcGalleryNext').disabled=galleryPage>=pages-1;
 }
+
+function photoWorld(photo){
+ const g=photo.gnss||{};
+ if(Number.isFinite(g.lat)&&Number.isFinite(g.lon))return api.project(g.lon,g.lat);
+ if(validXY(g))return api.epsg()===Number(g.crs||api.epsg())?{x:g.x,y:g.y}:null;
+ const p=(api.getState().historicalPhotoPoints||[]).find(p=>(p.photos||[]).includes(photo.id)||p.id===photo.historicalPointId);
+ if(p&&validXY(p)){
+  if(!p.crs||Number(p.crs)===api.epsg())return{x:p.x,y:p.y};
+  const ll=api.unproject(p.x,p.y,Number(p.crs));return ll?api.project(ll.lon,ll.lat):null;
+ }
+ const pin=(api.getState().mapPins||[]).find(p=>p.kind==='photo'&&p.photoId===photo.id);
+ return validXY(pin)?{x:pin.x,y:pin.y}:null;
+}
+function photoDistance(a,b){
+ if(!validXY(a)||!validXY(b))return Infinity;
+ if(api.epsg()===4326){const lat=(a.y+b.y)/2*Math.PI/180;return Math.hypot((a.x-b.x)*111320*Math.cos(lat),(a.y-b.y)*111320);}
+ return Math.hypot(a.x-b.x,a.y-b.y);
+}
+function photoMapDraw(photo,coords){
+ const canvas=$('#gcDetailPhotoMap');if(!canvas)return;
+ const w=canvas.getBoundingClientRect().width||380,h=canvas.getBoundingClientRect().height||215,dpr=Math.min(2,root.devicePixelRatio||1);
+ canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);
+ const c=canvas.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);
+ c.fillStyle='#e4e9df';c.fillRect(0,0,w,h);
+ const center=coords||photoWorld(photo);
+ if(!validXY(center)){c.fillStyle='#506253';c.textAlign='center';c.font='13px system-ui';c.fillText('Fotografía sin ubicación · introduce coordenadas',w/2,h/2);return;}
+ const dist=api.epsg()===4326?.008:600,scale=Math.min(w,h)/dist;
+ for(const r of api.getState().rasters||[]){
+  if(r.visible===false||!r.image||!r.affine)continue;
+  const a=r.affine;c.save();c.globalAlpha=Number.isFinite(r.opacity)?r.opacity:1;
+  c.transform(scale*a.A,-scale*a.D,scale*a.B,-scale*a.E,w/2+scale*(a.C-center.x),h/2-scale*(a.F-center.y));
+  try{c.drawImage(r.image,0,0);}catch(e){}
+  c.restore();
+ }
+ const v=$('#gcDetailHeading')?.value.trim();
+ const heading=v===''?null:Number(v),fov=Number($('#gcDetailFov')?.value||60),lengthM=Number($('#gcDetailDistance')?.value||200);
+ const visible=$('#gcDetailShowCone')?.checked;
+ if(visible&&Number.isFinite(heading)&&heading>=0&&heading<360){
+  const len=(api.epsg()===4326?lengthM/111320:lengthM)*scale;
+  const rad=heading*Math.PI/180,wide=Math.max(5,Math.min(170,fov))*Math.PI/360;
+  c.save();c.beginPath();c.moveTo(w/2,h/2);
+  for(let i=0;i<=40;i++){const angle=rad-wide+2*wide*i/40;c.lineTo(w/2+Math.sin(angle)*len,h/2-Math.cos(angle)*len);}
+  c.closePath();c.fillStyle='rgba(48,117,73,.23)';c.strokeStyle='rgba(40,96,60,.6)';c.fill();c.stroke();c.restore();
+ }
+ c.beginPath();c.arc(w/2,h/2,10,0,Math.PI*2);c.fillStyle='#2f5d43';c.fill();c.lineWidth=3;c.strokeStyle='#fff';c.stroke();
+ c.textAlign='center';c.textBaseline='middle';c.font='bold 12px system-ui';c.fillStyle='#fff';c.fillText('▣',w/2,h/2);
+}
+let compareUrls=[];
+function closeComparison(){
+ const node=$('#gcCompareModal');if(node)node.remove();
+ release(compareUrls);
+}
+function comparePhotos(photo,reference){
+ if(!photo?.blob||!reference?.blob)return;
+ closeComparison();
+ const host=el('div','gc-compare-modal');host.id='gcCompareModal';
+ const a=URL.createObjectURL(photo.blob),b=URL.createObjectURL(reference.blob);compareUrls.push(a,b);
+ host.innerHTML='<section class="gc-compare-card"><header><div><b>Comparación temporal</b><small>'+escape(photo.name)+' · '+escape(reference.name)+'</small></div><button id="gcCompareClose">✕</button></header>'+
+ '<div class="gc-compare-tools"><label>Modo<select id="gcCompareMode"><option value="slider">Deslizador</option><option value="opacity">Transparencia</option><option value="parallel">Paralelo</option></select></label><label>Ajuste<input type="range" id="gcCompareRange" min="0" max="100" value="50"></label><label>Zoom referencia<input type="range" id="gcCompareZoom" min="50" max="200" value="100"></label><label>Rotación referencia<input id="gcCompareRotation" type="number" min="-180" max="180" value="0" step="1"></label></div>'+
+ '<div class="gc-compare-images"><img id="gcCompareOriginal" alt="Fotografía inicial"><div id="gcCompareSecond"><img id="gcCompareReference" alt="Fotografía de referencia"></div><div id="gcCompareLine"></div></div>'+
+ '<small class="gc-compare-note">Alineación visual, sin modificación de los originales.</small></section>';
+ document.body.appendChild(host);$('#gcCompareOriginal').src=a;$('#gcCompareReference').src=b;$('#gcCompareClose').onclick=closeComparison;
+ host.addEventListener('click',e=>{if(e.target===host)closeComparison();});
+ const redraw=()=>{
+  const mode=$('#gcCompareMode').value,pct=Number($('#gcCompareRange').value),zoom=Number($('#gcCompareZoom').value)/100,angle=Number($('#gcCompareRotation').value)||0;
+  host.dataset.mode=mode;$('#gcCompareSecond').style.clipPath=mode==='slider'?'inset(0 '+(100-pct)+'% 0 0)':'';
+  $('#gcCompareSecond').style.opacity=mode==='opacity'?String(pct/100):'1';
+  $('#gcCompareReference').style.transform='scale('+zoom+') rotate('+angle+'deg)';
+  $('#gcCompareLine').style.left=pct+'%';
+ };
+ ['gcCompareMode','gcCompareRange','gcCompareZoom','gcCompareRotation'].forEach(k=>$('#'+k).oninput=redraw);
+ redraw();
+}
 function galleryDetail(photo){
  release(galleryDetailUrls);const root=$('#gcGalleryDetails');root.replaceChildren();
  const p=(api.getState().historicalPhotoPoints||[]).find(p=>(p.photos||[]).includes(photo.id)||p.id===photo.historicalPointId);
- const gnss=photo.gnss||{},title=photo.title||photo.name||'Fotografía';
- const big=el('img','gc-gallery-big'),u=URL.createObjectURL(photo.blob);galleryDetailUrls.push(u);big.src=u;big.alt=title;big.onclick=()=>api.openImage(u,title);
- root.innerHTML='<div class="gc-detail-head"><h3>Fotografía · '+escape(title)+'</h3><button id="gcDetailFullscreen">⛶ Ver grande</button></div>';root.appendChild(big);
+ const gnss=photo.gnss||{},title=photo.title||photo.name||'Fotografía',known=photoWorld(photo);
+ const big=el('img','gc-gallery-big'),u=URL.createObjectURL(photo.blob);galleryDetailUrls.push(u);
+ big.src=u;big.alt=title;big.onclick=()=>api.openImage(u,title);
+ root.innerHTML='<div class="gc-detail-head"><h3>Fotografía · '+escape(title)+'</h3><button id="gcDetailFullscreen">⛶ Ver grande</button></div>';
+ root.appendChild(big);
+ const related=Array.isArray(photo.seriesNames)?photo.seriesNames:(photo.seriesName?[photo.seriesName]:[]);
+ if(related.length){
+  const timeline=el('div','gc-photo-timeline');
+  for(const candidate of galleryRecords.filter(r=>r.id!==photo.id&&(r.seriesNames||[r.seriesName]).some(n=>n&&related.includes(n))).slice(0,15)){
+   const url=URL.createObjectURL(candidate.blob);galleryDetailUrls.push(url);
+   const b=el('button','gc-time-thumb'),img=el('img');img.src=url;img.alt='';b.append(img,el('small','',candidate.captureDate||candidate.historicalDate||candidate.name));b.onclick=()=>{selectedGalleryId=candidate.id;galleryRender();galleryDetail(candidate);};timeline.appendChild(b);
+  }
+  if(timeline.childNodes.length){root.appendChild(el('b','gc-detail-section','Serie temporal'));root.appendChild(timeline);}
+ }
+ const position=el('section','gc-detail-map-section');
+ position.innerHTML='<div class="gc-detail-section">Localización y orientación · EPSG:'+api.epsg()+'</div><canvas id="gcDetailPhotoMap" aria-label="Localización fotográfica"></canvas>'+
+ '<div class="gc-detail-orientation"><label>Azimut (°)<input id="gcDetailHeading" type="number" min="0" max="359" step="1" placeholder="Desconocido"></label><label>Campo visual (°)<input id="gcDetailFov" type="number" min="5" max="170" value="60"></label><label>Distancia (m)<input id="gcDetailDistance" type="number" min="10" max="5000" value="200"></label><label class="gc-detail-show"><input type="checkbox" id="gcDetailShowCone" checked> Mostrar campo visual</label></div>';
+ root.appendChild(position);
  const form=el('div','gc-gallery-form');
- form.innerHTML='<label>Título<input id="gcDetailTitle" maxlength="150"></label><label>Fecha documental<input id="gcDetailDate" type="date"></label><label>Autor / Archivo<input id="gcDetailAuthor" maxlength="150"></label><label>Descripción<textarea id="gcDetailDescription" rows="3"></textarea></label>'+
+ form.innerHTML='<label>Título<input id="gcDetailTitle" maxlength="150"></label>'+
+ '<label>Fecha documental<input id="gcDetailDate" type="date"></label>'+
+ '<label>Tipo de fecha<select id="gcDetailDateType"><option value="exact">Exacta</option><option value="approx">Aproximada</option><option value="year">Solo año</option><option value="unknown">Desconocida</option></select></label>'+
+ '<label>Certeza de fecha<select id="gcDetailDateCertainty"><option value="unknown">Desconocida</option><option value="high">Alta</option><option value="medium">Media</option><option value="low">Baja</option></select></label>'+
+ '<label>Autor<input id="gcDetailAuthor" maxlength="150"></label>'+
+ '<label>Institución / Archivo<input id="gcDetailInstitution" maxlength="150"></label>'+
+ '<label>Colección<input id="gcDetailCollection" maxlength="120"></label>'+
+ '<label>Referencia documental<input id="gcDetailReference" maxlength="150"></label>'+
+ '<label class="gc-detail-full">Enlace / fuente<input id="gcDetailSource" type="url" placeholder="https://…"></label>'+
+ '<label class="gc-detail-full">Series temporales (separa varias con coma)<input id="gcDetailSeries" placeholder="Ej. Tormentas 2026, Evolución del cauce"></label>'+
+ '<label class="gc-detail-full">Descripción<textarea id="gcDetailDescription" rows="3"></textarea></label>'+
  '<div class="gc-detail-coords"><label>Latitud<input id="gcDetailLat" type="number" step="any" placeholder="Sin coordenadas"></label><label>Longitud<input id="gcDetailLon" type="number" step="any" placeholder="Sin coordenadas"></label></div>'+
- '<label>Parada vinculada<select id="gcDetailStop"><option value="">Ninguna</option></select></label><button id="gcDetailSave" class="gc-primary">Guardar cambios</button><p id="gcDetailMessage"></p>';
+ '<label>Parada vinculada<select id="gcDetailStop"><option value="">Ninguna</option></select></label>'+
+ '<label>Fotografía de referencia<select id="gcDetailCompare"><option value="">Sin fotografía de referencia</option></select></label>'+
+ '<button id="gcDetailOpenCompare" type="button">Abrir comparador</button>'+
+ '<button id="gcDetailSave" class="gc-primary">Guardar cambios</button><p id="gcDetailMessage"></p>';
  root.appendChild(form);
  $('#gcDetailTitle').value=photo.title||'';
  $('#gcDetailDate').value=photo.captureDate||photo.historicalDate||'';
- $('#gcDetailAuthor').value=photo.author||'';
+ $('#gcDetailDateType').value=photo.datePrecision||((photo.captureDate||photo.historicalDate)?'exact':'unknown');
+ $('#gcDetailDateCertainty').value=photo.dateCertainty||'unknown';
+ $('#gcDetailAuthor').value=photo.author||'';$('#gcDetailInstitution').value=photo.institution||'';
+ $('#gcDetailCollection').value=photo.collection||'';$('#gcDetailReference').value=photo.documentReference||'';
+ $('#gcDetailSource').value=photo.sourceUrl||'';
+ $('#gcDetailSeries').value=related.join(', ');
  $('#gcDetailDescription').value=photo.description||photo.caption||'';
+ $('#gcDetailHeading').value=Number.isFinite(photo.heading)?String(photo.heading):'';
+ $('#gcDetailFov').value=Number.isFinite(photo.fieldOfViewDeg)?photo.fieldOfViewDeg:60;
+ $('#gcDetailDistance').value=Number.isFinite(photo.fieldOfViewDistanceM)?photo.fieldOfViewDistanceM:200;
+ $('#gcDetailShowCone').checked=photo.showFieldOfView!==false;
  let lat=Number.isFinite(gnss.lat)?gnss.lat:null,lon=Number.isFinite(gnss.lon)?gnss.lon:null;
  if(lat===null&&p&&validXY(p)){const ll=api.unproject(p.x,p.y,Number(p.crs)||api.epsg());lat=ll?.lat??null;lon=ll?.lon??null;}
  $('#gcDetailLat').value=lat??'';$('#gcDetailLon').value=lon??'';
  const stops=(api.getState().mapPins||[]).filter(x=>x.kind==='stop');
  for(const stop of stops){const o=el('option','',stop.label||stop.id);o.value=stop.id;$('#gcDetailStop').appendChild(o);}
  $('#gcDetailStop').value=photo.stopId||p?.linkedStopId||'';
+ for(const candidate of galleryRecords.filter(r=>r.id!==photo.id)){
+  const o=el('option','',candidate.title||candidate.name);o.value=candidate.id;$('#gcDetailCompare').appendChild(o);
+ }
+ $('#gcDetailCompare').value=photo.referencePhotoId||'';
+ $('#gcDetailOpenCompare').onclick=()=>{const target=galleryRecords.find(r=>r.id===$('#gcDetailCompare').value);if(!target){api.notify('Elige una fotografía de referencia');return;}comparePhotos(photo,target);};
+ ['gcDetailHeading','gcDetailFov','gcDetailDistance','gcDetailShowCone'].forEach(k=>$('#'+k).oninput=()=>photoMapDraw(photo,known));
  $('#gcDetailFullscreen').onclick=()=>api.openImage(u,title);
+ const nearby=galleryRecords.filter(r=>r.id!==photo.id&&validXY(photoWorld(r))&&validXY(known)).map(r=>({photo:r,dist:photoDistance(known,photoWorld(r))})).sort((a,b)=>a.dist-b.dist).slice(0,5);
+ if(nearby.length){
+  root.appendChild(el('b','gc-detail-section','Fotografías cercanas'));
+  const tray=el('div','gc-photo-timeline');
+  for(const {photo:near,dist} of nearby){const uri=URL.createObjectURL(near.blob);galleryDetailUrls.push(uri);const b=el('button','gc-time-thumb'),img=el('img');img.src=uri;img.alt='';b.append(img,el('small','',near.name+' · '+Math.round(dist)+' m'));b.onclick=()=>{selectedGalleryId=near.id;galleryRender();galleryDetail(near);};tray.appendChild(b);}
+  root.appendChild(tray);
+ }
  $('#gcDetailSave').disabled=!api.canEdit();
  $('#gcDetailSave').onclick=async()=>{
   if(!api.canEdit())return;
   const a=$('#gcDetailLat').value.trim(),b=$('#gcDetailLon').value.trim();
   if((a&&!b)||(!a&&b)){api.notify('Introduce ambas coordenadas o deja las dos vacías');return;}
-  const next={...photo,title:$('#gcDetailTitle').value.trim(),captureDate:$('#gcDetailDate').value||null,author:$('#gcDetailAuthor').value.trim(),description:$('#gcDetailDescription').value.trim(),stopId:$('#gcDetailStop').value||null,updatedAt:Date.now()};
+  const rawHeading=$('#gcDetailHeading').value.trim(),heading=rawHeading===''?null:Number(rawHeading);
+  if(heading!==null&&(!Number.isFinite(heading)||heading<0||heading>=360)){api.notify('Azimut válido: 0 a 359 grados');return;}
+  const fov=Number($('#gcDetailFov').value),distance=Number($('#gcDetailDistance').value);
+  if(!(fov>=5&&fov<=170)||!(distance>=10&&distance<=5000)){api.notify('Revisa el campo visual y la distancia');return;}
+  const seriesNames=[...new Set($('#gcDetailSeries').value.split(',').map(x=>x.trim()).filter(Boolean))];
+  const next={...photo,title:$('#gcDetailTitle').value.trim(),captureDate:$('#gcDetailDate').value||null,
+   datePrecision:$('#gcDetailDateType').value,dateCertainty:$('#gcDetailDateCertainty').value,
+   author:$('#gcDetailAuthor').value.trim(),institution:$('#gcDetailInstitution').value.trim(),
+   collection:$('#gcDetailCollection').value.trim(),documentReference:$('#gcDetailReference').value.trim(),
+   sourceUrl:$('#gcDetailSource').value.trim(),seriesNames,description:$('#gcDetailDescription').value.trim(),
+   referencePhotoId:$('#gcDetailCompare').value||null,heading,fieldOfViewDeg:fov,fieldOfViewDistanceM:distance,
+   showFieldOfView:$('#gcDetailShowCone').checked,stopId:$('#gcDetailStop').value||null,updatedAt:Date.now()};
   let newWorld=null;
   if(a&&b){
    const latitude=Number(a),longitude=Number(b);
    if(!Number.isFinite(latitude)||!Number.isFinite(longitude)||Math.abs(latitude)>90||Math.abs(longitude)>180){api.notify('Coordenadas fuera de rango');return;}
-   newWorld=api.project(longitude,latitude);
-   next.gnss={...photo.gnss,x:newWorld.x,y:newWorld.y,crs:api.epsg(),lat:latitude,lon:longitude,source:'manual',accuracy:null};
-   next.positionSource='manual';
+   const oldLat=Number.isFinite(gnss.lat)?gnss.lat:lat,oldLon=Number.isFinite(gnss.lon)?gnss.lon:lon;
+   if(oldLat===null||oldLon===null||Math.abs(oldLat-lat)>1e-7||Math.abs(oldLon-lon)>1e-7){
+    newWorld=api.project(longitude,latitude);
+    next.gnss={...photo.gnss,x:newWorld.x,y:newWorld.y,crs:api.epsg(),lat:latitude,lon:longitude,source:'manual',accuracy:null};
+    next.positionSource='manual';
+   }
   }
   try{
    await api.savePhoto(next);
    if(newWorld){
     let point=p;
-    if(!point){point={id:'hp'+uid(),photos:[next.id],campaignId:api.getState().campaign,createdAt:Date.now(),name:next.title||next.name};api.getState().historicalPhotoPoints.push(point);next.historicalPointId=point.id;await api.savePhoto(next);}
-    // Coordinates belong to a photographic point. Keep unrelated photo positions untouched.
-    if((point.photos||[]).length>1){point.photos=point.photos.filter(id=>id!==next.id);const separate={id:'hp'+uid(),photos:[next.id],campaignId:api.getState().campaign,createdAt:Date.now(),name:next.title||next.name};api.getState().historicalPhotoPoints.push(separate);point=separate;next.historicalPointId=point.id;await api.savePhoto(next);}
+    if(!point||((point.photos||[]).length>1)){
+     if(point)point.photos=point.photos.filter(id=>id!==next.id);
+     point={id:'hp'+uid(),photos:[next.id],campaignId:api.getState().campaign,createdAt:Date.now(),name:next.title||next.name};
+     api.getState().historicalPhotoPoints.push(point);next.historicalPointId=point.id;await api.savePhoto(next);
+    }
     Object.assign(point,{x:newWorld.x,y:newWorld.y,crs:api.epsg(),photoPointPosition:{...newWorld,crs:api.epsg()}});
    }
    api.persist();api.redraw();Object.assign(photo,next);
-   $('#gcDetailMessage').textContent='Cambios guardados localmente';galleryRender();
+   $('#gcDetailMessage').textContent='Cambios guardados localmente';
+   galleryRender();
   }catch(e){$('#gcDetailMessage').textContent='Error al guardar: '+e.message;}
  };
+ requestAnimationFrame(()=>photoMapDraw(photo,known));
 }
+
 function install(hooks){api=hooks;return true;}
 return {install,show,showGallery};
 })(typeof window!=='undefined'?window:globalThis);
