@@ -6931,7 +6931,7 @@ function initPhotoWorkspaceR29(){
   },
   project:(lon,lat)=>{const w=lonLatToMapCoords(lon,lat,workingMapEpsg());return{x:w.x,y:w.y};},
   unproject:(x,y,crs)=>+crs===4326?{lon:x,lat:y}:fieldUtmToLonLat(x,y,+crs),
-  epsg:()=>workingMapEpsg(),persist:()=>persistState(),scheduleSync:()=>scheduleCloudSync(1000),redraw:()=>{drawAll();renderLayers();},
+  epsg:()=>workingMapEpsg(),persist:()=>persistState(),persistVerified:()=>{const result=persistStateLocalOnly();if(!result||!localStorage.getItem(projectStateKey(state.projectId)))throw new Error('No se ha guardado el estado local del proyecto');return true;},scheduleSync:()=>scheduleCloudSync(1000),redraw:()=>{drawAll();renderLayers();},
   openImage:(src,title)=>gcOpenPhotoLightbox(src,title),notify:message=>toast(message,4200)
  });
  $('#gcPhotoImportOpen').onclick=()=>tool.show();
