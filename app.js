@@ -3377,16 +3377,17 @@ async function applyPointRelocation(request,target){
   records.push(record);
  }
  const oldPoints=cloneAny(state.historicalPhotoPoints||[]),oldPins=cloneAny(state.mapPins||[]);
+ const uniquePhotoPointId=()=>{let candidate;do{candidate='hp'+cloudUuid();}while((state.historicalPhotoPoints||[]).some(p=>p.id===candidate));return candidate;};
  try{
   if(isIndividual){
    if(point&&(point.photos||[]).length>1){
     // Moving one photo never moves other photos that share the original point.
     point.photos=point.photos.filter(id=>id!==photoId);
-    const newPoint={...point,id:'hp'+cloudUuid(),name:records[0].name||'Fotografía',
+    const newPoint={...point,id:uniquePhotoPointId(),name:records[0].name||'Fotografía',
       linkedStopId:null,photos:[photoId],createdAt:Date.now()};
     state.historicalPhotoPoints.push(newPoint);point=newPoint;
    }else if(!point){
-    point={id:'hp'+cloudUuid(),name:records[0].name||'Fotografía',
+    point={id:uniquePhotoPointId(),name:records[0].name||'Fotografía',
       photos:[photoId],campaignId:state.campaign,createdAt:Date.now()};
     state.historicalPhotoPoints.push(point);
    }
@@ -3401,10 +3402,10 @@ async function applyPointRelocation(request,target){
   for(const original of records){
    const next=core.movePhotoRecord(original,target,{crs,lonLat:ll,pointId:updatedPoint.id});
    await dbPut('photos',next);
+   changes.push(original); // any failed verification can now restore this metadata
    const stored=await dbGet('photos',original.id);
    if(!stored?.blob||stored.blob.size!==original.blob.size||stored.historicalPointId!==updatedPoint.id)
     throw Error('No se ha verificado la actualización de '+original.id);
-   changes.push(original);
   }
   persistRelocatedState();
  }catch(error){
