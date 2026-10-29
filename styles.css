@@ -1461,10 +1461,9 @@ html{ -webkit-text-size-adjust:100%;text-size-adjust:100%; }
 .gc-relocation-choose-list button{min-height:44px;text-align:left;background:#f0f4ed;border:1px solid #c6d5c5;border-radius:9px;padding:10px 12px;color:#2d4e36;font-weight:600;cursor:pointer}
 .gc-relocation-choose-list button:hover{background:#e2ede1}
 
-/* A compact action even for material-only cards; the full-size Move button remains
-   visible for all other mapped geometries. */
+/* Material-only cards do not have 'Más opciones', so they retain their compact move control.
+   Normal feature cards expose Move exclusively inside 'Más opciones'. */
 #featureCard:not(.feature-card-material-only) #gcMoveMaterialBtn{display:none!important}
-#featureCard.feature-card-material-only #gcMoveFeatureBtn{display:none!important}
 #featureCard.feature-card-material-only #gcMoveMaterialBtn{position:absolute;right:37px;top:50%;transform:translateY(-50%);width:29px;height:29px;min-width:29px;min-height:29px;padding:4px;background:#e7eee6;border:1px solid #bed2c0;border-radius:7px;cursor:pointer}
 #featureCard.feature-card-material-only #gcMoveMaterialBtn img{width:17px;height:17px}
 #featureCard.feature-card-material-only #gcMoveMaterialBtn:disabled{opacity:.3;cursor:not-allowed}
