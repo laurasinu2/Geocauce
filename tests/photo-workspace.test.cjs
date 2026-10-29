@@ -10,9 +10,9 @@ const source=fs.readFileSync(path.join(root,'photo-workspace.js'),'utf8');
 const app=fs.readFileSync(path.join(root,'app.js'),'utf8');
 const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
 const sw=fs.readFileSync(path.join(root,'sw.js'),'utf8');
-const ctx={window:{}};
+const ctx={window:{crypto:require('node:crypto').webcrypto}};
 vm.runInNewContext(core,ctx);
-const withTestHooks=source.replace('return {install,show,showGallery};','return {install,show,showGallery,__test:{parsePointFile,photoDistance,locationOf,fieldSamplePositions,buttons}};');
+const withTestHooks=source.replace('return {install,show,showGallery};','return {install,show,showGallery,__test:{parsePointFile,photoDistance,locationOf,fieldSamplePositions,buttons,ensureSavedPhotoPoint,digestFile}};');
 assert.notEqual(withTestHooks,source,'Workspace test export must exist');
 vm.runInNewContext(withTestHooks,ctx);
 const ws=ctx.window.GeoCaucePhotoWorkspace,internal=ws.__test;
@@ -59,7 +59,7 @@ test('PWA loads the importer before the map application and caches it offline',(
 });
 test('Import persists via existing IndexedDB bridge and checks stored binary sizes',()=>{
  assert.match(source,/await api\.savePhoto\(record\)/);
- assert.match(source,/await api\.readPhoto\(id\)/);
+ assert.match(source,/await api\.readPhoto\(photoId\)/);
  assert.match(source,/saved\.blob\.size!==row\.file\.size/);
  assert.match(app,/savePhoto:record=>dbPut\('photos',record\)/);
  assert.match(app,/gcImportModal:not\(\.hidden\) #gcImportProgress/);
@@ -70,4 +70,45 @@ test('Photo metadata includes explicit date precision and reference photograph',
  assert.match(source,/referencePhotoId/);
  assert.match(source,/showFieldOfView/);
  assert.match(source,/seriesNames/);
+});
+
+test('Photo-point association is saved and survives repeated attempts',()=>{
+ const state={historicalPhotoPoints:[]};let writes=0;
+ ws.install({getState:()=>state,epsg:()=>25831,persistVerified:()=>{writes++;return true;}});
+ const record={id:'p-record-1',name:'JPEG',historicalPointId:'hp-record-1',campaignId:'D01',createdAt:123};
+ assert.equal(internal.ensureSavedPhotoPoint(record,{x:400000,y:4610000},'Campo','D01'),true);
+ assert.equal(state.historicalPhotoPoints.length,1);
+ assert.equal(state.historicalPhotoPoints[0].photos[0],'p-record-1');
+ assert.equal(state.historicalPhotoPoints[0].x,400000);
+ assert.equal(writes,1);
+ assert.equal(internal.ensureSavedPhotoPoint(record,{x:400000,y:4610000},'Campo','D01'),true);
+ assert.equal(state.historicalPhotoPoints.length,1);
+ assert.equal(writes,1);
+});
+test('Failed local-state persistence rolls back newly created map point',()=>{
+ const state={historicalPhotoPoints:[]};
+ ws.install({getState:()=>state,epsg:()=>25831,persistVerified:()=>{throw Error('QuotaExceededError');}});
+ const record={id:'p-record-2',historicalPointId:'hp-record-2',campaignId:'D01'};
+ assert.throws(()=>internal.ensureSavedPhotoPoint(record,{x:402000,y:4600000},'Campo','D01'),/QuotaExceededError/);
+ assert.equal(state.historicalPhotoPoints.length,0);
+});
+test('Repeated photo metadata is not inserted twice into a pre-existing point',()=>{
+ const point={id:'hp-record-3',photos:['p-record-3'],x:403000,y:4600000};
+ const state={historicalPhotoPoints:[point]};
+ ws.install({getState:()=>state,epsg:()=>25831,persistVerified:()=>{throw Error('Unexpected duplicate persistence');}});
+ const record={id:'p-record-3',historicalPointId:'hp-record-3'};
+ assert.equal(internal.ensureSavedPhotoPoint(record,{x:403000,y:4600000},'Campo','D01'),true);
+ assert.deepEqual(point.photos,['p-record-3']);
+});
+test('Same source file yields repeatable SHA-256 for point-import IDs',async()=>{
+ const file=new Blob(['name,latitude,longitude\nA,41.6,1.8\n'],{type:'text/csv'});
+ const hash1=await internal.digestFile(file),hash2=await internal.digestFile(file);
+ assert.equal(hash1,hash2);
+ assert.equal(hash1.length,64);
+ assert.match(source,/pointImportId:'mp-'\+fileHash\.slice\(0,32\)\+'-'\+pointIndex/);
+});
+test('Import list paginates and map selections navigate to matching page',()=>{
+ assert.match(source,/rows\.slice\(pageStart,pageStart\+maxRows\)/);
+ assert.match(source,/listPage=Math\.floor\(selected\/100\)/);
+ assert.match(source,/gc-row-pagination/);
 });
