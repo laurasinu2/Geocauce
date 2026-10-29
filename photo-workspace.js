@@ -4,7 +4,7 @@
  */
 (typeof window!=='undefined'?window:globalThis).GeoCaucePhotoWorkspace=(function(root){
 'use strict';
-let api=null,dialog=null,tab='photos',rows=[],selected=-1,busy=false,seq=0,map=null,ctx=null,view={cx:0,cy:0,scale:1},previewUrls=[],galleryUrls=[],galleryDetailUrls=[],galleryRecords=[],galleryPage=0,selectedGalleryId=null,lastPointFiles=[];
+let api=null,dialog=null,tab='photos',rows=[],selected=-1,listPage=0,busy=false,seq=0,map=null,ctx=null,view={cx:0,cy:0,scale:1},previewUrls=[],galleryUrls=[],galleryDetailUrls=[],galleryRecords=[],galleryPage=0,selectedGalleryId=null,lastPointFiles=[];
 const $=s=>document.querySelector(s);
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
 const fmt=n=>Number.isFinite(n)?Number(n).toFixed(5):'—';
@@ -171,15 +171,22 @@ function parsePointFile(text,name,crs){
  }else throw Error('Formato de puntos no compatible');
  return points;
 }
+async function digestFile(file){
+ if(!root.crypto?.subtle)throw Error('Se requiere SHA-256 disponible en una PWA segura (HTTPS)');
+ const bytes=new Uint8Array(await root.crypto.subtle.digest('SHA-256',await file.arrayBuffer()));
+ return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+}
 async function stagePoints(files=[],run=seq){
  if(!files.length)return;
- rows=[];selected=-1;const crs=Number($('#gcPointCrs').value);
+ rows=[];selected=-1;listPage=0;
+ const crs=Number($('#gcPointCrs').value);
  for(let index=0;index<files.length;index++){
   if(run!==seq)return;
   const f=files[index];
   try{
-   const entries=parsePointFile(await f.text(),f.name,crs);
-   for(const p of entries){
+   const fileHash=await digestFile(f),entries=parsePointFile(await f.text(),f.name,crs);
+   if(rows.length+entries.length>5000)throw Error('El lote supera los 5000 puntos; divídelo en varios archivos');
+   for(const [pointIndex,p] of entries.entries()){
     let world=null,error=null;
     if(!Number.isFinite(p.x)||!Number.isFinite(p.y))error='Coordenadas no numéricas';
     else if(p.crs===4326&&Math.abs(p.y)<=90&&Math.abs(p.x)<=180)world=api.project(p.x,p.y);
@@ -188,12 +195,16 @@ async function stagePoints(files=[],run=seq){
      if(ll&&Math.abs(ll.lat)<=90&&Math.abs(ll.lon)<=180)world=api.project(ll.lon,ll.lat);
      else error='No se pueden transformar las coordenadas UTM';
     }else error='Coordenadas fuera de rango';
-    rows.push({key:uid(),file:f,name:p.name,world,point:p,excluded:false,error,index:rows.length});
+    rows.push({key:uid(),file:f,name:p.name,world,point:p,
+      pointImportId:'mp-'+fileHash.slice(0,32)+'-'+pointIndex,
+      excluded:false,error,index:rows.length});
    }
-  }catch(e){rows.push({key:uid(),file:f,name:f.name,error:String(e.message||e),excluded:false});}
+  }catch(error){rows.push({key:uid(),file:f,name:f.name,error:String(error?.message||error),excluded:false});}
   progress(true,index+1,files.length,'Leyendo puntos');
  }
- progress(false);$('#gcImportFeedback').textContent='Revisa los puntos y confirma su importación.';fitAll();render();
+ progress(false);
+ $('#gcImportFeedback').textContent='Revisa los puntos y confirma su importación. Los reintentos no crearán puntos repetidos.';
+ fitAll();render();
 }
 function progress(on,done=0,total=1,title=''){
  const p=$('#gcImportProgress');if(!p)return;
