@@ -140,3 +140,8 @@
  .gc-detail-orientation{grid-template-columns:repeat(3,minmax(0,1fr))}
  .gc-gallery-form{grid-template-columns:1fr 1fr}
 }
+
+.gc-row-pagination{display:flex;align-items:center;justify-content:center;gap:10px;padding:11px;border-top:1px solid #e3e6dd;background:#f2f4ee;position:sticky;bottom:0}
+.gc-row-pagination span{font-size:12px;color:#526558}
+.gc-row-pagination button{border:1px solid #bcccbc;border-radius:9px;background:#fff;padding:7px 12px;min-height:38px;color:#304d38;cursor:pointer}
+.gc-row-pagination button:disabled{opacity:.4;cursor:default}
