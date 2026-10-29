@@ -2788,13 +2788,13 @@ function mapPinScreenPoint(pin){return pin&&Number.isFinite(+pin.x)&&Number.isFi
 function drawMapPins(){
   const pins=(state.mapPins||[]).filter(p=>campaignLineageIds().has(p.campaignId||state.campaign));if(!pins.length)return;
   mapCtx.save();mapCtx.textAlign='center';mapCtx.textBaseline='middle';
-  for(const pin of pins){const s=mapPinScreenPoint(pin);if(!s)continue;const isPhoto=pin.kind==='photo',isNote=pin.kind==='note',isGps=pin.kind==='gps';
-    mapCtx.beginPath();mapCtx.fillStyle=isPhoto?'#2473a7':isGps?'#16805d':isNote?'#d5892f':'#6846c7';mapCtx.strokeStyle='#fff';mapCtx.lineWidth=3;mapCtx.arc(s.x,s.y,10,0,Math.PI*2);mapCtx.fill();mapCtx.stroke();
-    mapCtx.fillStyle='#fff';mapCtx.font='700 11px system-ui,sans-serif';mapCtx.fillText(isPhoto?'●':isGps?'⌖':isNote?'N':'P',s.x,s.y+.5);
+  for(const pin of pins){const s=mapPinScreenPoint(pin);if(!s||(pin.kind==='photo'&&state.showHistoricalPhotoPoints===false))continue;const isPhoto=pin.kind==='photo',isNote=pin.kind==='note',isGps=pin.kind==='gps';
+    mapCtx.beginPath();mapCtx.fillStyle=isPhoto?'#315d43':isGps?'#16805d':isNote?'#d5892f':'#6846c7';mapCtx.strokeStyle='#fff';mapCtx.lineWidth=3;mapCtx.arc(s.x,s.y,10,0,Math.PI*2);mapCtx.fill();mapCtx.stroke();
+    mapCtx.fillStyle='#fff';mapCtx.font='700 11px system-ui,sans-serif';mapCtx.fillText(isPhoto?'▣':isGps?'⌖':isNote?'N':'P',s.x,s.y+.5);
     if(pin.kind==='stop'&&pin.label){mapCtx.font='700 11px system-ui,sans-serif';const linked=(state.historicalPhotoPoints||[]).some(h=>h.linkedStopId===pin.id),txt=String(pin.label)+(linked?' · 🧲':'');const tw=mapCtx.measureText(txt).width;mapCtx.fillStyle='rgba(255,255,255,.92)';mapCtx.fillRect(s.x+14,s.y-10,tw+9,20);mapCtx.fillStyle='#1f2b31';mapCtx.textAlign='left';mapCtx.fillText(txt,s.x+18,s.y+.5);mapCtx.textAlign='center';}
   }mapCtx.restore();
 }
-function nearestMapPin(sp){let best=null;for(const p of state.mapPins||[]){const s=mapPinScreenPoint(p);if(!s)continue;const d=Math.hypot(sp.x-s.x,sp.y-s.y);if(d<22&&(!best||d<best.d))best={...p,d};}return best;}
+function nearestMapPin(sp){let best=null;for(const p of state.mapPins||[]){if(p.kind==='photo'&&state.showHistoricalPhotoPoints===false)continue;const s=mapPinScreenPoint(p);if(!s)continue;const d=Math.hypot(sp.x-s.x,sp.y-s.y);if(d<22&&(!best||d<best.d))best={...p,d};}return best;}
 function hideMapContextMenu(){const m=$('#mapContextMenu');if(m)m.classList.add('hidden');state.mapContextPoint=null;}
 function showMapContextMenu(sp){
   if(!isEditableCampaign()){toast('Día anterior bloqueado · usa Nuevo día para editar');return;}
@@ -2824,18 +2824,18 @@ function deleteMapStop(id=state.currentStopId){const pin=mapStopById(id);if(!pin
 ${linked.length} punt${linked.length===1?'':'s'} històric${linked.length===1?'':'s'} quedarà${linked.length===1?'':'an'} desvinculat${linked.length===1?'':'s'}, però no s'eliminarà${linked.length===1?'':'an'}.`:'';if(!confirm(`Eliminar ${pin.label||'aquesta parada'}?${extra}`))return;for(const p of linked)delete p.linkedStopId;state.mapPins=(state.mapPins||[]).filter(p=>p.id!==pin.id);if(state.activeFieldStopId===pin.id)state.activeFieldStopId=null;closeMapStop();persistState();drawAll();toast('Punt de parada eliminat');}
 function addQuickNoteAt(point){if(!point||!requireEditable('afegir una nota ràpida'))return;const text=(prompt('Nota ràpida','')||'').trim();if(!text)return;state.mapPins=state.mapPins||[];state.mapPins.push({id:'mp-'+cloudUuid(),kind:'note',x:point.x,y:point.y,text,campaignId:state.campaign,...fieldCreationLinks(),createdAt:Date.now()});persistState();drawAll();toast('Nota ràpida guardada');}
 function createNotebookPageAt(point){if(!point||!requireEditable('crear una pàgina vinculada'))return;ensureNotebook();commitNotebookPage();const p=makeNotebookPage();p.campaignId=state.editableCampaign;p.stopId=fieldActiveStop()?.id||null;p.links=[{type:'position',x:point.x,y:point.y}];state.notebook.pages.push(p);state.notebook.currentPageId=p.id;persistState();drawAll();openNotebook(p.id);toast('Pàgina nova vinculada al punt del mapa');}
-function choosePhotoAt(point){if(!point||!requireEditable('afegir fotografies'))return;state.pendingPhotoFor=null;state.pendingPhotoLocation={x:point.x,y:point.y,crs:workingMapEpsg()};$('#photoInput').click();}
+function choosePhotoAt(point){if(!point)return;addHistoricalPhotoPointAt(point);}
 function handleMapContextAction(action){const p=state.mapContextPoint?{...state.mapContextPoint}:null;hideMapContextMenu();if(!p)return;if(action==='photo')choosePhotoAt(p);else if(action==='page')createNotebookPageAt(p);else if(action==='note')addQuickNoteAt(p);else if(action==='stop')addMapStopAt(p);}
 function historicalPointById(id){return (state.historicalPhotoPoints||[]).find(p=>p.id===id)||null;}
-function historicalPointLabel(point){return point?.name||point?.code||'Punt històric';}
+function historicalPointLabel(point){return point?.name||point?.code||'Punto fotográfico';}
 function drawHistoricalPhotoPoints(){
   if(state.showHistoricalPhotoPoints===false)return;const pts=state.historicalPhotoPoints||[];if(!pts.length)return;mapCtx.save();mapCtx.textAlign='center';mapCtx.textBaseline='middle';
-  for(const p of pts){const s=worldToScreen(p),n=(p.photos||[]).length;mapCtx.beginPath();mapCtx.fillStyle='#1768c5';mapCtx.strokeStyle='#fff';mapCtx.lineWidth=3;mapCtx.arc(s.x,s.y,13,0,Math.PI*2);mapCtx.fill();mapCtx.stroke();mapCtx.fillStyle='#fff';mapCtx.fillRect(s.x-7,s.y-5,14,10);mapCtx.beginPath();mapCtx.arc(s.x,s.y,3.6,0,Math.PI*2);mapCtx.fillStyle='#1768c5';mapCtx.fill();mapCtx.fillStyle='#fff';mapCtx.fillRect(s.x-4,s.y-8,7,3);if(p.linkedStopId){mapCtx.font='700 10px system-ui,sans-serif';mapCtx.fillStyle='#fff';mapCtx.strokeStyle='#1768c5';mapCtx.lineWidth=3;mapCtx.strokeText('🧲',s.x-15,s.y-15);mapCtx.fillText('🧲',s.x-15,s.y-15);}if(n){mapCtx.beginPath();mapCtx.fillStyle='#1f2b31';mapCtx.strokeStyle='#fff';mapCtx.lineWidth=2;mapCtx.arc(s.x+11,s.y-11,8,0,Math.PI*2);mapCtx.fill();mapCtx.stroke();mapCtx.font='700 9px system-ui,sans-serif';mapCtx.fillStyle='#fff';mapCtx.fillText(String(Math.min(99,n)),s.x+11,s.y-10.5);}}
+  for(const p of pts){const s=worldToScreen(p),n=(p.photos||[]).length;mapCtx.beginPath();mapCtx.fillStyle='#315d43';mapCtx.strokeStyle='#fff';mapCtx.lineWidth=3;mapCtx.arc(s.x,s.y,13,0,Math.PI*2);mapCtx.fill();mapCtx.stroke();mapCtx.fillStyle='#fff';mapCtx.fillRect(s.x-7,s.y-5,14,10);mapCtx.beginPath();mapCtx.arc(s.x,s.y,3.6,0,Math.PI*2);mapCtx.fillStyle='#1768c5';mapCtx.fill();mapCtx.fillStyle='#fff';mapCtx.fillRect(s.x-4,s.y-8,7,3);if(p.linkedStopId){mapCtx.font='700 10px system-ui,sans-serif';mapCtx.fillStyle='#fff';mapCtx.strokeStyle='#1768c5';mapCtx.lineWidth=3;mapCtx.strokeText('🧲',s.x-15,s.y-15);mapCtx.fillText('🧲',s.x-15,s.y-15);}if(n){mapCtx.beginPath();mapCtx.fillStyle='#1f2b31';mapCtx.strokeStyle='#fff';mapCtx.lineWidth=2;mapCtx.arc(s.x+11,s.y-11,8,0,Math.PI*2);mapCtx.fill();mapCtx.stroke();mapCtx.font='700 9px system-ui,sans-serif';mapCtx.fillStyle='#fff';mapCtx.fillText(String(Math.min(99,n)),s.x+11,s.y-10.5);}}
   mapCtx.restore();
 }
 function nearestHistoricalPhotoPoint(sp){if(state.showHistoricalPhotoPoints===false)return null;let best=null;for(const p of state.historicalPhotoPoints||[]){const s=worldToScreen(p),d=Math.hypot(sp.x-s.x,sp.y-s.y);if(d<=25&&(!best||d<best.d))best={...p,d};}return best;}
-function nextHistoricalPhotoPointName(){return `Punt històric ${String((state.historicalPhotoPoints||[]).length+1).padStart(2,'0')}`;}
-function addHistoricalPhotoPointAt(point){if(!point||!requireEditable('crear un punt fotogràfic històric'))return;const def=nextHistoricalPhotoPointName(),name=(prompt('Nom del punt fotogràfic',def)||'').trim();if(!name)return;const p={id:'hp'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),name,x:point.x,y:point.y,crs:workingMapEpsg(),photoPointPosition:{x:point.x,y:point.y,crs:workingMapEpsg()},photos:[],...fieldCreationLinks(),createdAt:Date.now(),campaignId:state.campaign};state.historicalPhotoPoints=state.historicalPhotoPoints||[];state.historicalPhotoPoints.push(p);persistState();drawAll();openHistoricalPhotoPoint(p.id);if(shouldReturnToPan())setTimeout(()=>setTool('pan',{quiet:true}),80);}
+function nextHistoricalPhotoPointName(){return `Punto fotográfico ${String((state.historicalPhotoPoints||[]).length+1).padStart(2,'0')}`;}
+function addHistoricalPhotoPointAt(point){if(!point||!requireEditable('crear un punt fotogràfic'))return;const def=nextHistoricalPhotoPointName(),name=(prompt('Nom del punt fotogràfic',def)||'').trim();if(!name)return;const p={id:'hp'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),name,x:point.x,y:point.y,crs:workingMapEpsg(),photoPointPosition:{x:point.x,y:point.y,crs:workingMapEpsg()},photos:[],...fieldCreationLinks(),createdAt:Date.now(),campaignId:state.campaign};state.historicalPhotoPoints=state.historicalPhotoPoints||[];state.historicalPhotoPoints.push(p);persistState();drawAll();openHistoricalPhotoPoint(p.id);if(shouldReturnToPan())setTimeout(()=>setTool('pan',{quiet:true}),80);}
 
 // Full-screen photo inspection. No persistence or changes to existing photo editing.
 let gcPhotoLightbox=null;
@@ -2892,9 +2892,9 @@ function cancelHistoricalStopLink(){if(!state.historicalLinkPointId)return;state
 function handleHistoricalLinkTap(sp){const point=historicalPointById(state.historicalLinkPointId);if(!point){state.historicalLinkPointId=null;return false;}const pin=nearestMapPin(sp);if(!pin||pin.kind!=='stop'){toast('🧲 Toca directament un punt de parada');return true;}point.linkedStopId=pin.id;point.x=pin.x;point.y=pin.y;point.crs=workingMapEpsg();state.historicalLinkPointId=null;persistState();drawAll();toast(`${historicalPointLabel(point)} vinculat a ${pin.label||'la parada'}`);setTimeout(()=>openHistoricalPhotoPoint(point.id),80);return true;}
 async function deleteHistoricalPhotoPoint(id=state.currentHistoricalPointId){const p=historicalPointById(id);if(!p||!requireEditable('eliminar un punt fotogràfic històric'))return;const n=(p.photos||[]).length;if(!confirm(`Eliminar ${historicalPointLabel(p)}${n?` i les seves ${n} foto${n===1?'':'s'}`:''}?`))return;for(const pid of p.photos||[]){try{await dbDelete('photos',pid);}catch{}if(ANDROID_NATIVE)nativeCall('deletePhoto',state.projectId,pid);}state.historicalPhotoPoints=(state.historicalPhotoPoints||[]).filter(x=>x.id!==p.id);if(state.historicalLinkPointId===p.id)state.historicalLinkPointId=null;closeHistoricalPhotoPoint();persistState();drawAll();toast('Punt fotogràfic històric eliminat');}
 function chooseHistoricalPhoto(mode){const id=state.currentHistoricalPointId,p=historicalPointById(id);if(!p||!requireEditable('afegir fotografies històriques'))return;state.pendingHistoricalPhotoPointId=id;state.pendingHistoricalPhotoMode=mode;(mode==='camera'?$('#historicalPhotoCameraInput'):$('#historicalPhotoImportInput')).click();}
-async function historicalPhotoChosen(file,mode){const pointId=state.pendingHistoricalPhotoPointId,p=historicalPointById(pointId);state.pendingHistoricalPhotoPointId=null;state.pendingHistoricalPhotoMode=null;if(!file||!p)return;let histDate=isoToday();if(mode==='import'){const v=(prompt('Data de la fotografia històrica (AAAA-MM-DD)',isoToday())||'').trim();if(v&&/^\d{4}-\d{2}-\d{2}$/.test(v))histDate=v;else if(v){toast('Data no vàlida; s’ha usat la data d’avui');}}
-  const id='p'+Date.now()+Math.random().toString(36).slice(2,5),g=state.gnss,rec={id,blob:file,name:file.name||`foto_${Date.now()}.jpg`,date:Date.now(),historicalDate:histDate,campaignId:state.campaign,featureId:null,historicalPointId:p.id,stopId:fieldActiveStop()?.id||p.stopId||null,source:mode==='camera'?'camera':'device',heading:appSettings.photoHeading?(Number.isFinite(state.deviceHeading)?state.deviceHeading:(Number.isFinite(g?.heading)?g.heading:null)):null,gnss:{x:(p.photoPointPosition||p).x,y:(p.photoPointPosition||p).y,crs:(p.photoPointPosition||p).crs||workingMapEpsg(),lat:null,lon:null,accuracy:g?.accuracy??null,altitude:appSettings.gpsAltitude?(g?.altitude??null):null,timestamp:Date.now(),source:'historicalPoint'}};await dbPut('photos',rec);nativeSyncPhotoMeta(rec);p.photos=p.photos||[];p.photos.push(id);persistState();drawAll();await openHistoricalPhotoPoint(p.id,(p.photos||[]).length-1);toast(mode==='camera'?'Foto afegida al punt històric':'Fotografia històrica importada');}
-function syncHistoricalPhotoToggle(){const b=$('#historicalPhotoToggle');if(!b)return;const on=state.showHistoricalPhotoPoints!==false;b.classList.toggle('active',on);b.setAttribute('aria-pressed',String(on));const span=b.querySelector('span');if(span)span.textContent=on?'Punts fotogràfics · visibles':'Punts fotogràfics · ocults';}
+async function historicalPhotoChosen(file,mode){const pointId=state.pendingHistoricalPhotoPointId,p=historicalPointById(pointId);state.pendingHistoricalPhotoPointId=null;state.pendingHistoricalPhotoMode=null;if(!file||!p)return;let histDate=null;if(mode==='import'){const v=(prompt('Fecha de la fotografía (AAAA-MM-DD, opcional)','')||'').trim();if(v&&/^\d{4}-\d{2}-\d{2}$/.test(v))histDate=v;}
+  const id='p'+Date.now()+Math.random().toString(36).slice(2,5),g=state.gnss,rec={id,blob:file,name:file.name||`foto_${Date.now()}.jpg`,date:Date.now(),historicalDate:histDate,campaignId:state.campaign,featureId:null,historicalPointId:p.id,stopId:fieldActiveStop()?.id||p.stopId||null,source:mode==='camera'?'camera':'device',heading:appSettings.photoHeading?(Number.isFinite(state.deviceHeading)?state.deviceHeading:(Number.isFinite(g?.heading)?g.heading:null)):null,gnss:{x:(p.photoPointPosition||p).x,y:(p.photoPointPosition||p).y,crs:(p.photoPointPosition||p).crs||workingMapEpsg(),lat:null,lon:null,accuracy:null,altitude:null,timestamp:Date.now(),source:'manual-point'}};await dbPut('photos',rec);nativeSyncPhotoMeta(rec);p.photos=p.photos||[];p.photos.push(id);persistState();drawAll();await openHistoricalPhotoPoint(p.id,(p.photos||[]).length-1);toast(mode==='camera'?'Fotografía añadida al punto':'Fotografía importada');}
+function syncHistoricalPhotoToggle(){const b=$('#historicalPhotoToggle');if(!b)return;const on=state.showHistoricalPhotoPoints!==false;b.classList.toggle('active',on);b.setAttribute('aria-pressed',String(on));const span=b.querySelector('span');if(span)span.textContent=on?'Fotografías · visibles':'Fotografías · ocultas';}
 function drawAll(){
   if(!mapCanvas.width)return;
   clearCtx(mapCtx,mapCanvas);
@@ -3034,7 +3034,7 @@ function replaceContourSegment(f,startSnap,endSnap,newPts){
 function setTool(tool,{quiet=false}={}){
   if(['mapInk','boundary','editContour','fill','paint','basin','watercourse','reach','channel','section','photo','historicalPhoto','stop','erase'].includes(tool)&&!requireEditable('usar esta herramienta'))return;
   state.tool=tool;
-  const labels={mapInk:'Anotar mapa',pan:'Mover',boundary:'Límite',editContour:'Editar contorno',fill:'Rellenar',paint:'Pintar',basin:'Conca',watercourse:'Curs / canal',reach:'Trams',channel:'Canal',section:'Sección',photo:'Foto',historicalPhoto:'Punt fotogràfic',stop:'Crear parada',gps:'GPS',select:'Seleccionar',erase:'Borrador'};
+  const labels={mapInk:'Anotar mapa',pan:'Mover',boundary:'Límite',editContour:'Editar contorno',fill:'Rellenar',paint:'Pintar',basin:'Conca',watercourse:'Curs / canal',reach:'Trams',channel:'Canal',section:'Sección',photo:'Foto',historicalPhoto:'Fotografía',stop:'Crear parada',gps:'GPS',select:'Seleccionar',erase:'Borrador'};
   $('#activeToolBtn span').textContent=labels[tool]||tool;
   const ai=$('#activeToolIcon');if(ai)ai.src=ICONS[tool]||ICONS.pan;
   $$('#toolMenu button[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool===tool));
@@ -3151,7 +3151,7 @@ function selectAt(sp){
   if(state.relocatingPoint){finishPointRelocation(sp);return;}
   if(state.historicalLinkPointId){handleHistoricalLinkTap(sp);return;}
   const hp=nearestHistoricalPhotoPoint(sp);if(hp){openHistoricalPhotoPoint(hp.id);return;}
-  const pin=nearestMapPin(sp);if(pin){if(pin.kind==='photo'&&pin.photoId){openPhotoEditor(pin.photoId);return;}if(pin.kind==='note'){alert(pin.text||'Nota ràpida');return;}if(pin.kind==='stop'){openMapStop(pin.id);return;}}
+  const pin=nearestMapPin(sp);if(pin){if(pin.kind==='photo'&&pin.photoId){window.GeoCaucePhotoWorkspace?.showGallery(pin.photoId);return;}if(pin.kind==='note'){alert(pin.text||'Nota ràpida');return;}if(pin.kind==='stop'){openMapStop(pin.id);return;}}
   const note=nearestNoteMarker(sp);if(note){openNotebook(note.pageId);return;}
   const rb=nearestReachBoundary(sp);if(rb){const id=rb.starts?.[0]||rb.ends?.[0],f=state.features.find(x=>x.id===id);if(f){state.selectedId=f.id;state.activeCourseId=f.courseId;updateHydroFab();showFeatureCard(f);drawAll();return;}}
   const f=nearestFeature(screenToWorld(sp),false);if(f){state.selectedId=f.id;if(f.type==='watercourse')state.activeCourseId=f.id;else if(f.type==='reach')state.activeCourseId=f.courseId||state.activeCourseId;updateHydroFab();showFeatureCard(f);}else{state.selectedId=null;hideFeatureCard();}drawAll();
@@ -3163,11 +3163,11 @@ function startMapAction(e,p){
   if(state.tool==='pan' || e.button===1 || e.button===2){beginPan(p,e.pointerId);return;}
   if(['mapInk','boundary','editContour','fill','paint','basin','watercourse','reach','channel','section','photo','historicalPhoto','stop','erase'].includes(state.tool)&&!isEditableCampaign()){beginPan(p,e.pointerId);toast('Día anterior bloqueado · usa Nuevo día para editar');return;}
   if(state.tool==='fill'||state.tool==='select'){handleTapAction(p);return;}
-  if(state.tool==='historicalPhoto'){addHistoricalPhotoPointAt(screenToWorld(p));return;}
+  if(state.tool==='historicalPhoto'||state.tool==='photo'){addHistoricalPhotoPointAt(screenToWorld(p));return;}
   if(state.tool==='stop'){addMapStopAt(screenToWorld(p));return;}
   if(state.tool==='reach'){handleReachTap(p);return;}
   if(state.tool==='erase'&&state.eraseMode==='feature'){eraseFeatureAt(p);return;}
-  if(state.tool==='photo'||state.tool==='gps')return;
+  if(state.tool==='gps')return;
   if(state.tool==='editContour'){
     const f=state.features.find(x=>x.id===state.editContourFeatureId&&x.closed);if(!f){toast('Selecciona un polígono cerrado');return;}
     const snap=nearestPointOnClosedRing(p,f);if(!snap||snap.d>28){toast('Empieza cerca del borde para activar el imán');return;}
@@ -6892,7 +6892,30 @@ function fieldReportInit(){
 }
 
 
-loadSectionPalette();loadProjectCatalog();initUi();fieldReportInit();initNativeAndroidUi();refreshAccountUi();applyAppSettings();renderMaterials();renderSectionColorChips();updateMaterialButton();$('#eraserSize').value=state.eraseSize;$$('[data-erase-mode]').forEach(b=>b.classList.toggle('active',b.dataset.eraseMode===state.eraseMode));setTool(state.tool,{quiet:true});updateCompass();renderProjectHome();window.addEventListener('beforeunload',()=>{if(state.projectId)persistState();});
+
+function initPhotoWorkspaceR29(){
+ const tool=window.GeoCaucePhotoWorkspace;if(!tool)return;
+ tool.install({
+  getState:()=>state,canEdit:()=>!!state.projectId&&isEditableCampaign()&&canEditCurrentProject(),
+  allPhotos:()=>dbAll('photos'),readPhoto:id=>dbGet('photos',id),savePhoto:record=>dbPut('photos',record),
+  findPhotoByHash:async hash=>{
+   if(!hash)return null;
+   const d=await db();return new Promise((resolve,reject)=>{
+    const cursor=d.transaction('photos','readonly').objectStore('photos').openCursor();
+    cursor.onsuccess=()=>{const c=cursor.result;if(!c){resolve(null);return;}if(c.value?.contentHash===hash){resolve(c.value);return;}c.continue();};
+    cursor.onerror=()=>reject(cursor.error);
+   });
+  },
+  project:(lon,lat)=>{const w=lonLatToMapCoords(lon,lat,workingMapEpsg());return{x:w.x,y:w.y};},
+  unproject:(x,y,crs)=>+crs===4326?{lon:x,lat:y}:fieldUtmToLonLat(x,y,+crs),
+  epsg:()=>workingMapEpsg(),persist:()=>persistState(),redraw:()=>{drawAll();renderLayers();},
+  openImage:(src,title)=>gcOpenPhotoLightbox(src,title),notify:message=>toast(message,4200)
+ });
+ $('#gcPhotoImportOpen').onclick=()=>tool.show();
+ $('#gcPhotoGalleryOpen').onclick=()=>tool.showGallery();
+}
+
+loadSectionPalette();loadProjectCatalog();initUi();initPhotoWorkspaceR29();fieldReportInit();initNativeAndroidUi();refreshAccountUi();applyAppSettings();renderMaterials();renderSectionColorChips();updateMaterialButton();$('#eraserSize').value=state.eraseSize;$$('[data-erase-mode]').forEach(b=>b.classList.toggle('active',b.dataset.eraseMode===state.eraseMode));setTool(state.tool,{quiet:true});updateCompass();renderProjectHome();window.addEventListener('beforeunload',()=>{if(state.projectId)persistState();});
 
 // Bindings added in v0.16.18
 installReachProfileEditor();renderReachProfileColors();renderFicQuickColors();
@@ -6985,6 +7008,8 @@ window.GeoCauceMobileApi={
   setTool,
   closeFloatingPanels,
   openHistoricalPhotoPoint,
+  openPhotoImport:()=>window.GeoCaucePhotoWorkspace?.show(),
+  openPhotos:()=>window.GeoCaucePhotoWorkspace?.showGallery(),
   openAccountManage,
   renderSettings,
   saveSettings:(patch)=>{Object.assign(appSettings,patch||{});saveAppSettings();},
