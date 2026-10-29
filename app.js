@@ -3641,7 +3641,6 @@ async function showFeatureCard(f){
     $('#featureCardTitle').textContent=label;
     $('#featureCardType').textContent='';
     $('#featureMoreMenu')?.classList.add('hidden');
-    $('#gcMoveFeatureBtn').disabled=!isEditableCampaign();
     $('#gcMoveMaterialBtn').disabled=!isEditableCampaign();
     positionFeatureCard(f);
     return;
@@ -3665,7 +3664,7 @@ async function showFeatureCard(f){
   const ro=!isEditableCampaign();
   $('#featurePhotoBtn').disabled=false;
   $('#deleteFeatureBtn').disabled=ro;
-  $('#gcMoveFeatureBtn').disabled=ro;$('#gcMoveFeatureMoreBtn').disabled=ro;$('#gcMoveMaterialBtn').disabled=ro;
+  $('#gcMoveFeatureMoreBtn').disabled=ro;$('#gcMoveMaterialBtn').disabled=ro;
   $('#editContourBtn').disabled=ro||(!(f.closed&&f.type!=='basin')&&f.type!=='reach');$('#editContourBtn span').textContent=f.type==='reach'?'Editar tram':'Editar';
   $('#featureMoreBtn').disabled=false;
   $('#featureMoreBtn').setAttribute('aria-expanded','false');
@@ -6625,7 +6624,6 @@ function initUi(){
   $('#changesBtn').onclick=()=>{$('#campaignPanel').classList.remove('hidden');updateCampaignUi();};
   $('#deleteFeatureBtn').onclick=()=>state.selectedId&&deleteFeature(state.selectedId,true);
   const moveSelectedFeature=()=>{const id=state.selectedId;if(!id)return;hideFeatureCard();beginPointRelocation('feature',id);};
-  $('#gcMoveFeatureBtn').onclick=moveSelectedFeature;
   $('#gcMoveFeatureMoreBtn').onclick=moveSelectedFeature;
   $('#gcMoveMaterialBtn').onclick=moveSelectedFeature;
   $('#photoInput').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)photoChosen(file).catch(err=>{console.error('Error guardando fotografía',err);toast('No se pudo guardar la foto: '+(err.message||err),6500);});};
