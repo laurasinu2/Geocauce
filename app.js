@@ -2817,11 +2817,11 @@ function addMapStopAt(point){
  persistState();drawAll();toast(label+' · coordenades del mapa guardades',3500);
 }
 function mapStopById(id){return (state.mapPins||[]).find(p=>p.id===id&&p.kind==='stop')||null;}
-function openMapStop(id){const pin=mapStopById(id);if(!pin)return;state.currentStopId=id;const linked=(state.historicalPhotoPoints||[]).filter(p=>p.linkedStopId===id);$('#mapStopTitle').textContent=pin.label||'Punt de parada';$('#mapStopSubtitle').textContent=linked.length?`${linked.length} punt${linked.length===1?'':'s'} històric${linked.length===1?'':'s'} vinculat${linked.length===1?'':'s'}`:'Sense punts històrics vinculats';$('#mapStopModal').classList.remove('hidden');}
+function openMapStop(id){const pin=mapStopById(id);if(!pin)return;state.currentStopId=id;const linked=(state.historicalPhotoPoints||[]).filter(p=>p.linkedStopId===id);$('#mapStopTitle').textContent=pin.label||'Punt de parada';$('#mapStopSubtitle').textContent=linked.length?`${linked.length} punt${linked.length===1?'':'s'} fotogràfic${linked.length===1?'':'s'} vinculat${linked.length===1?'':'s'}`:'Sense punts fotogràfics vinculats';$('#mapStopModal').classList.remove('hidden');}
 function closeMapStop(){state.currentStopId=null;$('#mapStopModal').classList.add('hidden');}
 function deleteMapStop(id=state.currentStopId){const pin=mapStopById(id);if(!pin||!requireEditable('eliminar un punt de parada'))return;const linked=(state.historicalPhotoPoints||[]).filter(p=>p.linkedStopId===pin.id);const extra=linked.length?`
 
-${linked.length} punt${linked.length===1?'':'s'} històric${linked.length===1?'':'s'} quedarà${linked.length===1?'':'an'} desvinculat${linked.length===1?'':'s'}, però no s'eliminarà${linked.length===1?'':'an'}.`:'';if(!confirm(`Eliminar ${pin.label||'aquesta parada'}?${extra}`))return;for(const p of linked)delete p.linkedStopId;state.mapPins=(state.mapPins||[]).filter(p=>p.id!==pin.id);if(state.activeFieldStopId===pin.id)state.activeFieldStopId=null;closeMapStop();persistState();drawAll();toast('Punt de parada eliminat');}
+${linked.length} punt${linked.length===1?'':'s'} fotogràfic${linked.length===1?'':'s'} quedarà${linked.length===1?'':'an'} desvinculat${linked.length===1?'':'s'}, però no s'eliminarà${linked.length===1?'':'an'}.`:'';if(!confirm(`Eliminar ${pin.label||'aquesta parada'}?${extra}`))return;for(const p of linked)delete p.linkedStopId;state.mapPins=(state.mapPins||[]).filter(p=>p.id!==pin.id);if(state.activeFieldStopId===pin.id)state.activeFieldStopId=null;closeMapStop();persistState();drawAll();toast('Punt de parada eliminat');}
 function addQuickNoteAt(point){if(!point||!requireEditable('afegir una nota ràpida'))return;const text=(prompt('Nota ràpida','')||'').trim();if(!text)return;state.mapPins=state.mapPins||[];state.mapPins.push({id:'mp-'+cloudUuid(),kind:'note',x:point.x,y:point.y,text,campaignId:state.campaign,...fieldCreationLinks(),createdAt:Date.now()});persistState();drawAll();toast('Nota ràpida guardada');}
 function createNotebookPageAt(point){if(!point||!requireEditable('crear una pàgina vinculada'))return;ensureNotebook();commitNotebookPage();const p=makeNotebookPage();p.campaignId=state.editableCampaign;p.stopId=fieldActiveStop()?.id||null;p.links=[{type:'position',x:point.x,y:point.y}];state.notebook.pages.push(p);state.notebook.currentPageId=p.id;persistState();drawAll();openNotebook(p.id);toast('Pàgina nova vinculada al punt del mapa');}
 function choosePhotoAt(point){if(!point)return;addHistoricalPhotoPointAt(point);}
@@ -6726,14 +6726,14 @@ function fieldReportPhoto(rec){
  return html+'</figure>';
 }
 function fieldReportHistorical(point,photos){
- let html=fieldReportHeading('PUNT FOTOGRÀFIC HISTÒRIC '+(point.name||point.code||point.id),4);
+ let html=fieldReportHeading('PUNT FOTOGRÀFIC '+(point.name||point.code||point.id),4);
  const own=point.photoPointPosition||point;
  html+=fieldReportCoords({x:own.x,y:own.y,crs:own.crs||workingMapEpsg(),lat:own.lat,lon:own.lon,utmX:own.utmX,utmY:own.utmY,utmCrs:own.utmCrs});
  if(Number.isFinite(point.heading))html+=fieldReportParagraph('Orientació del punt: '+point.heading.toFixed(0)+'°');
  if(Number.isFinite(point.accuracy))html+=fieldReportParagraph('Precisió GNSS del punt: ±'+point.accuracy.toFixed(1)+' m');
  if(fieldReportHas(point.observation||point.note))html+=fieldReportParagraph(point.observation||point.note);
  const list=photos.slice().sort((a,b)=>{const t=x=>x.historicalDate?Date.parse(x.historicalDate):Number(x.date||0);return t(a)-t(b)});
- for(const p of list){html+=fieldReportParagraph(p.historicalDate?'Fotografia de '+p.historicalDate:'Fotografia actual');html+=fieldReportPhoto(p);}
+ for(const p of list){const recorded=p.documentDateRaw||p.captureDate||p.historicalDate||null;html+=fieldReportParagraph(recorded?'Fotografia documentada: '+recorded:'Fotografia sense data documentada');html+=fieldReportPhoto(p);}
  return html;
 }
 function fieldReportMap(stops,historical,courseIds){
@@ -6750,7 +6750,7 @@ function fieldReportMap(stops,historical,courseIds){
  for(const section of secs){if(section.points?.length<2)continue;g.beginPath();let first=true;for(const p of section.points){const v=xy(p);if(first){g.moveTo(v.x,v.y);first=false;}else g.lineTo(v.x,v.y);}g.strokeStyle='#b97924';g.stroke();const it=fieldSectionIntersection(section);if(it){const p=xy(it);g.fillStyle='#b97924';g.fillRect(p.x-4,p.y-4,8,8);}}
  for(let i=0;i<stops.length;i++){const stop=stops[i],p=xy(stop);g.beginPath();g.arc(p.x,p.y,11,0,Math.PI*2);g.fillStyle='#58339f';g.fill();g.fillStyle='#fff';g.font='bold 13px sans-serif';g.textAlign='center';g.fillText(String(i+1),p.x,p.y+4);const coord=stop.position;g.font='11px sans-serif';g.fillStyle='#333';g.textAlign='left';if(Number.isFinite(coord?.utmX)&&Number.isFinite(coord?.utmY))g.fillText(Math.round(coord.utmX)+' / '+Math.round(coord.utmY),p.x+13,p.y+16);}
  for(const hp of historical){const p=xy(hp);g.fillStyle='#216c50';g.beginPath();g.moveTo(p.x,p.y-10);g.lineTo(p.x+10,p.y+8);g.lineTo(p.x-10,p.y+8);g.closePath();g.fill();}
- g.fillStyle='#333';g.textAlign='left';g.font='14px sans-serif';g.fillText('● Parades   ━ Cauces   ━ Seccions   ▲ Punts històrics',24,25);
+ g.fillStyle='#333';g.textAlign='left';g.font='14px sans-serif';g.fillText('● Parades   ━ Cauces   ━ Seccions   ▲ Punts fotogràfics',24,25);
  return c.toDataURL('image/png');
 }
 function fieldReportSummary(items){
