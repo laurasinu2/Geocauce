@@ -59,3 +59,23 @@ Esta versión es **de desarrollo**. Se han ejecutado pruebas automatizadas con i
 ## Convención de ramas
 
 Cada rama nueva equivale a una versión nueva: `rNN-AAAAMMDD`. No crear ramas `feature/*` o `backup/*` nuevas. La rama `backup/r28-copia-20261027` es una referencia histórica protegida; no modificarla.
+
+## R29: traslado de elementos sobre el mapa
+
+La edición de ubicación es explícita, reversible mediante las posiciones anteriores almacenadas y distinta de desplazar el mapa.
+
+**Flujo:** abrir un elemento → «Mover» → tocar la nueva posición → confirmar. Alternativamente usar «Mover elemento a otro punto» en el menú de herramientas, tocar el elemento de origen y después su destino. Si coinciden varios elementos, se muestra una selección de objetivos. Se puede cancelar con «Cancelar» o Escape. En móviles y tablets, el gesto de dos dedos sigue desplazando/ampliando el mapa sin aceptar por accidente una posición.
+
+Elementos admitidos:
+- Fotografías individuales, separándolas de un punto compartido cuando sea necesario
+- Puntos fotográficos, actualizando la posición vigente de todas las imágenes agrupadas
+- Paradas, puntos GPS importados, notas rápidas y posiciones de páginas de libreta
+- Secciones, canales, depósitos, límites y otros polígonos
+- Cauces y tramos, conservando la coherencia de los tramos y las secciones vinculadas
+- Anotaciones dibujadas sobre el mapa
+
+Al trasladar se conserva el identificador, el contenido binario, los atributos, los vínculos documentales y la ubicación anterior. El origen de la **ubicación actual** queda registrado como `manual-map`; las coordenadas originales EXIF o GNSS se mantienen por separado. Los perfiles automáticos afectados se conservan como datos anteriores y se marca su necesidad de recálculo.
+
+Los mapas raster y las capas vectoriales de referencia no se trasladan mediante esta herramienta porque tienen georreferenciación de origen, que requiere una operación explícita y separada de edición de georreferencia.
+
+No se requiere migración SQL ni actualización de tablas Supabase para este traslado. Las nuevas propiedades viajan con los metadatos del proyecto y los registros fotográficos existentes. Falta comprobar gestos e importación en una PWA Android real antes de usarlo en datos de campo irreemplazables.
