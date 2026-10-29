@@ -231,7 +231,8 @@ function fitAll(){
  }).flat();
  const pts=valid.length?valid:rasterBounds.length?rasterBounds:[{x:api.getState().view.cx||0,y:api.getState().view.cy||0}];
  const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys),{w,h}=dimensions();
- const spanX=Math.max(30,maxX-minX),spanY=Math.max(30,maxY-minY);
+ const minSpan=api.epsg()===4326?.0003:30;
+ const spanX=Math.max(minSpan,maxX-minX),spanY=Math.max(minSpan,maxY-minY);
  view={cx:(minX+maxX)/2,cy:(minY+maxY)/2,scale:Math.min(1000,Math.max(.000001,Math.min(w/spanX,h/spanY)*.77))};paint();
 }
 function paint(){
@@ -305,7 +306,7 @@ function render(){
    const u=URL.createObjectURL(r.thumbBlob||r.file);previewUrls.push(u);const img=el('img');img.src=u;img.alt='';img.loading='lazy';img.onerror=()=>{if(!r.error){r.error='No se puede visualizar este JPEG';render();}};preview.appendChild(img);
   }else preview.textContent=tab==='photos'?'📷':'📍';
   const summary=el('div','gc-import-summary');const coordInfo=r.manualGps?'Manual: '+fmt(r.manualGps.lat)+', '+fmt(r.manualGps.lon):r.manualWorld?'Ubicación manual en mapa · EPSG:'+api.epsg():r.gps?fmt(r.gps.lat)+', '+fmt(r.gps.lon):'Sin coordenadas';
-  summary.innerHTML='<b>'+escape(r.name)+'</b><small>'+escape(r.error||(coordInfo+(r.metadata?.dateOriginal?' · '+r.metadata.dateOriginal:'')))+'</small>';
+  summary.innerHTML='<b>'+escape(r.name)+'</b><small>'+escape(r.error||(coordInfo+(r.metadata?.dateOriginal?' · '+r.metadata.dateOriginal:'')+(r.metadata?.width?' · '+r.metadata.width+'×'+r.metadata.height:'') ))+'</small>';
   const pill=el('span','gc-import-state '+status(r),({valid:'Válida',duplicate:'Duplicada','no-coordinates':'Sin GPS',error:'Error',excluded:'Excluida'})[status(r)]);
   const edit=el('button','gc-row-edit','✎');edit.title='Editar ubicación';edit.disabled=tab!=='photos'||!!r.error||busy;
   edit.onclick=ev=>{ev.stopPropagation();editCoordinates(i);};
@@ -430,7 +431,11 @@ async function commit(){
       captureDate:captured,captureDateSource:captured?'exif':'unknown',createdAt:Date.now(),
       campaignId:startedCampaign,featureId:null,contentHash:row.hash,thumbnailBlob:row.thumbBlob||null,importGroup:group,
       historicalPointId:pointId,gnss,heading:row.metadata?.heading??null,
-      exifOrientation:row.metadata?.orientation??null,originalSize:row.file.size,
+      exifOrientation:row.metadata?.orientation??null,
+      exifMetadata:{dateTimeOriginal:exifDate,altitude:row.metadata?.gps?.altitude??null,
+        originalGPS:row.metadata?.gps||null,width:row.metadata?.width??null,height:row.metadata?.height??null,
+        cameraHeading:row.metadata?.heading??null,orientation:row.metadata?.orientation??null},
+      originalSize:row.file.size,
       originalMime:row.file.type,positionSource:gnss?.source||'none'};
     const collision=await api.readPhoto(photoId);
     if(collision&&collision.contentHash!==row.hash)throw Error('Conflicto de identificador; no se ha sobrescrito la fotografía');
