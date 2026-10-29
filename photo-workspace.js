@@ -577,7 +577,7 @@ function galleryDetail(photo){
  const gnss=photo.gnss||{},title=photo.title||photo.name||'Fotografía',known=photoWorld(photo);
  const big=el('img','gc-gallery-big'),u=URL.createObjectURL(photo.blob);galleryDetailUrls.push(u);
  big.src=u;big.alt=title;big.onclick=()=>api.openPreviewImage?.(photo.blob,title);
- root.innerHTML='<div class="gc-detail-head"><h3>Fotografía · '+escape(title)+'</h3><button id="gcDetailFullscreen">⛶ Ver grande</button></div>';
+ root.innerHTML='<div class="gc-detail-head"><h3>Fotografía · '+escape(title)+'</h3><div class="gc-detail-actions"><button id="gcDetailMove">📍 Mover en el mapa</button><button id="gcDetailFullscreen">⛶ Ver grande</button></div></div>';
  root.appendChild(big);
  const related=Array.isArray(photo.seriesNames)?photo.seriesNames:(photo.seriesName?[photo.seriesName]:[]);
  if(related.length){
@@ -636,6 +636,8 @@ function galleryDetail(photo){
  $('#gcDetailOpenCompare').onclick=()=>{const target=galleryRecords.find(r=>r.id===$('#gcDetailCompare').value);if(!target){api.notify('Elige una fotografía de referencia');return;}comparePhotos(photo,target);};
  ['gcDetailHeading','gcDetailFov','gcDetailDistance','gcDetailShowCone'].forEach(k=>$('#'+k).oninput=()=>photoMapDraw(photo,known));
  $('#gcDetailFullscreen').onclick=()=>api.openPreviewImage?.(photo.blob,title);
+ $('#gcDetailMove').disabled=!api.canEdit();
+ $('#gcDetailMove').onclick=()=>{if(!api.canEdit())return;$('#gcGalleryClose')?.click();api.relocatePhoto?.(photo.id);};
  const nearby=galleryRecords.filter(r=>r.id!==photo.id&&validXY(photoWorld(r))&&validXY(known)).map(r=>({photo:r,dist:photoDistance(known,photoWorld(r))})).sort((a,b)=>a.dist-b.dist).slice(0,5);
  if(nearby.length){
   root.appendChild(el('b','gc-detail-section','Fotografías cercanas'));
