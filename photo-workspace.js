@@ -523,7 +523,13 @@ function galleryDetail(photo){
   const fov=Number($('#gcDetailFov').value),distance=Number($('#gcDetailDistance').value);
   if(!(fov>=5&&fov<=170)||!(distance>=10&&distance<=5000)){api.notify('Revisa el campo visual y la distancia');return;}
   const seriesNames=[...new Set($('#gcDetailSeries').value.split(',').map(x=>x.trim()).filter(Boolean))];
-  const next={...photo,title:$('#gcDetailTitle').value.trim(),captureDate:$('#gcDetailDate').value||null,
+  const dateRaw=$('#gcDetailDate').value.trim(),kind=$('#gcDetailDateType').value;
+  if(kind==='exact'&&dateRaw&&!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)){api.notify('Para fecha exacta utiliza AAAA-MM-DD');return;}
+  if(kind==='year'&&dateRaw&&!/^\d{4}$/.test(dateRaw)){api.notify('Introduce el año con cuatro cifras');return;}
+  if(kind==='unknown'&&dateRaw){api.notify('Si la fecha es desconocida deja el campo vacío');return;}
+  if(kind==='interval'&&dateRaw&&!/^\d{4}\s*[-–]\s*\d{4}$/.test(dateRaw)){api.notify('Para intervalo: AAAA-AAAA');return;}
+  const exactDate=kind==='exact'&&dateRaw?dateRaw:null;
+  const next={...photo,title:$('#gcDetailTitle').value.trim(),documentDateRaw:dateRaw||null,captureDate:exactDate,
    datePrecision:kind,dateCertainty:$('#gcDetailDateCertainty').value,
    author:$('#gcDetailAuthor').value.trim(),institution:$('#gcDetailInstitution').value.trim(),
    collection:$('#gcDetailCollection').value.trim(),documentReference:$('#gcDetailReference').value.trim(),
