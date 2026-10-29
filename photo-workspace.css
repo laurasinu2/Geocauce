@@ -149,3 +149,8 @@
 .gc-retry-failed{padding:9px 13px;min-height:40px;border:1px solid #d4a75e;border-radius:9px;background:#fbefd9;color:#72511a;font-weight:650;cursor:pointer}
 .gc-retry-failed.hidden{display:none!important}
 .gc-retry-failed:disabled{opacity:.55;cursor:not-allowed}
+
+.gc-detail-actions{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
+#gcDetailMove{border:1px solid #abc3aa;background:#e5efe2;color:#325c3c;padding:9px 12px;border-radius:9px;min-height:44px;font-weight:700;cursor:pointer}
+#gcDetailMove:disabled{opacity:.48;cursor:not-allowed}
+@media(max-width:600px){.gc-detail-head{flex-direction:column;align-items:stretch}.gc-detail-actions>button{flex:1}.gc-detail-actions{width:100%}}
