@@ -121,7 +121,7 @@ async function stage(files){
  if(tab==='points'){lastPointFiles=files;await stagePoints(files,run);return;}
  try{
   const known=await hashes(files.map(f=>f.size));
-  const prepared=await root.GeoCauceUnifiedPhotos.analyzePhotoBatch(files,{existingHashes:[...known],onProgress:({processed,total})=>{if(run===seq)progress(true,processed,total,'Leyendo y verificando EXIF');}});
+  const prepared=await root.GeoCauceUnifiedPhotos.analyzePhotoBatch(files,{existingHashes:[...known],shouldCancel:()=>run!==seq,onProgress:({processed,total})=>{if(run===seq)progress(true,processed,total,'Leyendo y verificando EXIF');}});
   if(run!==seq)return;
   rows=prepared.map((p,i)=>({
    key:uid(),file:p.file,name:p.name,metadata:p.metadata,gps:p.gps,
