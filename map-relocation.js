@@ -60,12 +60,12 @@
  }
  function movePhotoRecord(photo,target,{crs,lonLat=null,pointId=photo.historicalPointId}={}){
   if(!valid(target))throw Error('Ubicación inválida');
-  const source=valid(photo.gnss)?photo.gnss:target;
+  const source=valid(photo.gnss)?photo.gnss:null;
   const gps={...photo.gnss,x:target.x,y:target.y,crs:crs||photo.gnss?.crs||null,
    lat:Number.isFinite(lonLat?.lat)?lonLat.lat:null,lon:Number.isFinite(lonLat?.lon)?lonLat.lon:null,
    accuracy:null,altitude:null,source:'manual-map',timestamp:Date.now()};
   return{...photo,gnss:gps,historicalPointId:pointId,
-   positionHistory:stamp(photo,source,target),positionSource:'manual-map',updatedAt:Date.now()};
+   positionHistory:source?stamp(photo,source,target):(photo.positionHistory||[]),positionSource:'manual-map',updatedAt:Date.now()};
  }
  function moveInkStroke(stroke,target){
   const anchor=center(stroke?.points);
