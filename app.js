@@ -154,7 +154,7 @@ function iconImg(src,cls=''){return `<img class="${cls}" src="${src}" alt="">`;}
 const ANDROID_NATIVE=!!window.GeoCauceNative;
 function nativeCall(name,...args){try{const fn=window.GeoCauceNative?.[name];return typeof fn==='function'?fn.apply(window.GeoCauceNative,args):null;}catch(e){console.warn('Native bridge',name,e);return null;}}
 function nativeSyncProject(payload){if(!ANDROID_NATIVE||!state.projectId||!state.project)return;nativeCall('syncProjectState',JSON.stringify(state.project),JSON.stringify(payload),JSON.stringify(sectionPalette||[]));}
-function nativeSyncPhotoMeta(rec){if(!ANDROID_NATIVE||!state.projectId||!rec)return;const x={...rec};delete x.blob;nativeCall('syncPhotoMeta',state.projectId,JSON.stringify(x));}
+function nativeSyncPhotoMeta(rec){if(!ANDROID_NATIVE||!state.projectId||!rec)return;const x={...rec};delete x.blob;delete x.thumbnailBlob;nativeCall('syncPhotoMeta',state.projectId,JSON.stringify(x));}
 function nativeSyncRasterMeta(r){if(!ANDROID_NATIVE||!state.projectId||!r)return;const x={id:r.id,name:r.name,affine:r.affine,georef:r.georef,visible:r.visible,opacity:r.opacity,meta:r.meta||null};nativeCall('syncMapMeta',state.projectId,JSON.stringify(x));}
 function nativeRestoreCatalogIfNeeded(){if(!ANDROID_NATIVE||projectCatalog?.length)return;try{const arr=JSON.parse(nativeCall('getProjectCatalog')||'[]');if(Array.isArray(arr)&&arr.length){projectCatalog=arr;localStorage.setItem(PROJECTS_KEY,JSON.stringify(projectCatalog));}}catch(e){console.warn(e);}}
 
@@ -426,14 +426,14 @@ async function cloudUploadProjectAssets(uid,projectId,{manual=false,remoteAssets
   if(manual)cloudProgressStart('Preparando archivos para subir',total+2);
   for(const rec of photos){
     if(!(rec.blob instanceof Blob))throw new Error('La fotografía '+(rec.name||rec.id)+' no tiene archivo local. No se ha creado un snapshot incompleto.');
-    const x={...rec};delete x.blob;
+    const x={...rec};delete x.blob;delete x.thumbnailBlob;
     const base=cloudObjectPath(uid,projectId,'photos',rec.id);
     const path=await put('photo:'+rec.id,base,rec.blob,sigBlob(rec.blob,rec.date||rec.importedAt||rec.updatedAt||''),rec.name||'foto','.bin');
     result.photos.push({...x,cloudBlobPath:path,cloudBlobType:rec.blob.type||null,cloudBlobSize:rec.blob.size,cloudBlobHash:cache['photo:'+rec.id].hash,cloudBlobParts:cache['photo:'+rec.id].parts||null});
   }
   for(const rec of rasters){
     if(!(rec.blob instanceof Blob)&&!(rec.sourceBlob instanceof Blob))throw new Error('El mapa '+(rec.name||rec.id)+' no tiene archivo local. No se ha creado un snapshot incompleto.');
-    const x={...rec};delete x.blob;delete x.sourceBlob;delete x.image;
+    const x={...rec};delete x.blob;delete x.thumbnailBlob;delete x.sourceBlob;delete x.image;
     const base=cloudObjectPath(uid,projectId,'rasters',rec.id),extra=rec.importedAt||rec.meta?.importedAt||rec.meta?.sourceWidth||'',previewRevision=extra+'|'+(rec.styleCache?.generatedAt||'');
     const previewPath=rec.blob instanceof Blob?await put('raster-preview:'+rec.id,base,rec.blob,sigBlob(rec.blob,previewRevision),rec.name||'mapa','.preview'):null;
     const sourcePath=rec.sourceBlob instanceof Blob?await put('raster-source:'+rec.id,base,rec.sourceBlob,sigBlob(rec.sourceBlob,extra),rec.name||'original','.source'):null;
@@ -1332,8 +1332,8 @@ async function cloudStructuredSnapshot(assetMetadata=null){
   const base=currentStatePayloadForCloud()||{};
   if(!assetMetadata){
     let photos=[],rasters=[],vectorLayers=[];
-    try{photos=(await dbAll('photos')).map(rec=>{const x={...rec};delete x.blob;return x;});}catch(e){console.warn('Cloud photo metadata',e);}
-    try{rasters=(await dbAll('rasters')).map(rec=>{const x={...rec};delete x.blob;delete x.sourceBlob;delete x.image;return x;});}catch(e){console.warn('Cloud raster metadata',e);}
+    try{photos=(await dbAll('photos')).map(rec=>{const x={...rec};delete x.blob;delete x.thumbnailBlob;return x;});}catch(e){console.warn('Cloud photo metadata',e);}
+    try{rasters=(await dbAll('rasters')).map(rec=>{const x={...rec};delete x.blob;delete x.thumbnailBlob;delete x.sourceBlob;delete x.image;return x;});}catch(e){console.warn('Cloud raster metadata',e);}
     try{vectorLayers=(await dbAll('vectorLayers')).map(rec=>{const x={...rec};delete x.features;delete x.renderBlob;return x;});}catch(e){console.warn('Cloud vector metadata',e);}
     assetMetadata={photos,rasters,vectorLayers};
   }
@@ -4844,7 +4844,7 @@ async function exportProjectPackage(){
   const sv=JSON.parse(localStorage.getItem(projectStateKey(state.projectId))||'{}'),rasters=await dbAll('rasters'),photos=await dbAll('photos'),vectorLayers=await dbAll('vectorLayers'),assets=[];
   const addAsset=(blob,name)=>{if(!(blob instanceof Blob))return null;const idx=assets.length;assets.push({blob,name:name||`asset_${idx}`,type:blob.type||'application/octet-stream',size:blob.size});return idx;};
   const rr=rasters.map(r=>{const x={...r};delete x.blob;delete x.sourceBlob;return{...x,blobAsset:addAsset(r.blob,r.name+'.preview'),sourceAsset:addAsset(r.sourceBlob,r.name)};});
-  const pp=photos.map(r=>{const x={...r};delete x.blob;return{...x,blobAsset:addAsset(r.blob,r.name)};});
+  const pp=photos.map(r=>{const x={...r};delete x.blob;delete x.thumbnailBlob;return{...x,blobAsset:addAsset(r.blob,r.name)};});
   const vv=vectorLayers.map(r=>{const x={...r};delete x.features;delete x.renderBlob;const geom=new Blob([JSON.stringify(r.features||[])],{type:'application/json'});return{...x,featuresAsset:addAsset(geom,(r.name||r.id)+'.geometry.json'),renderAsset:addAsset(r.renderBlob,(r.name||r.id)+'.vector.png')};});
   const header={format:'GeoCaucePackage',containerVersion:1,appVersion:'0.16.39',exportedAt:Date.now(),project:cloneAny(state.project),state:sv,sectionPalette:cloneAny(sectionPalette),rasters:rr,photos:pp,vectorLayers:vv,assets:assets.map(a=>({name:a.name,type:a.type,size:a.size}))};
   const enc=new TextEncoder(),magic=enc.encode(PACKAGE_MAGIC),hb=enc.encode(JSON.stringify(header)),len=new ArrayBuffer(4);new DataView(len).setUint32(0,hb.length,true);const parts=[magic,len,hb,...assets.map(a=>a.blob)];
