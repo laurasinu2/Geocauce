@@ -264,6 +264,7 @@ CON | Confluencia"></textarea></div>
         <button data-tool="historicalPhoto"><img src="icons/camara.png" alt=""><span>Fotografía</span></button>
         <button data-tool="gps"><img src="icons/gps.png" alt=""><span>Punto GPS</span></button>
         <button data-tool="select"><img src="icons/seleccionar.png" alt=""><span>Seleccionar</span></button>
+        <button data-tool="relocate" type="button"><img src="icons/mover.png" alt=""><span>Mover elemento a otro punto</span></button>
         <div class="menu-sep"></div>
         <button data-tool="erase"><img src="icons/borrador.png" alt=""><span>Borrador</span></button>
         <div id="toolModeHint" class="tool-option tool-mode-hint">✦ Modo lápiz: la herramienta permanece activa; usa el dedo para navegar.</div>
@@ -420,6 +421,7 @@ CON | Confluencia"></textarea></div>
           </div>
 
           <button id="openSheetBtn" class="primary feature-primary-action icon-text"><img id="openPrimaryIcon" src="icons/ficha.png" alt=""><span>Abrir</span></button>
+          <button id="gcMoveFeatureBtn" class="secondary feature-primary-action icon-text" type="button"><img src="icons/mover.png" alt=""><span>Mover a otro punto</span></button>
 
           <button id="featureMoreBtn" class="feature-more-toggle" type="button" aria-expanded="false"><span class="feature-more-chevron">⌄</span><span>Más opciones</span></button>
           <div id="featureMoreMenu" class="feature-secondary-actions hidden">
@@ -428,6 +430,7 @@ CON | Confluencia"></textarea></div>
             <button id="changesBtn" class="icon-text"><img src="icons/cambio.png" alt=""><span>Cambios</span></button>
             <button id="editContourBtn" class="icon-text"><img src="icons/editar_propiedad.png" alt=""><span>Editar</span></button>
             <button id="featureStyleBtn" class="icon-text"><img src="icons/material.png" alt=""><span>Estil</span></button>
+            <button id="gcMoveFeatureMoreBtn" class="icon-text" type="button"><img src="icons/mover.png" alt=""><span>Mover elemento</span></button>
             <button id="deleteFeatureBtn" class="danger-action icon-text"><img src="icons/eliminar.svg" alt=""><span>Eliminar</span></button>
           </div>
         </div>
@@ -1166,7 +1169,7 @@ CON | Confluencia"></textarea></div>
         </div>
         <button type="button" id="historicalPhotoEnlarge" class="historical-photo-enlarge">⛶ Ampliar fotografia</button><div id="historicalPhotoStrip" class="historical-photo-strip"></div>
         <div id="historicalPhotoMeta" class="historical-photo-meta"></div>
-        <footer class="historical-photo-actions"><button id="historicalPhotoOpenDetails" class="secondary icon-text" type="button"><img src="icons/ficha.png" alt=""><span>Ficha fotográfica</span></button><button id="historicalPhotoCamera" class="primary icon-text"><img src="icons/camara.png" alt=""><span>Fer foto</span></button><button id="historicalPhotoImport" class="secondary icon-text"><img src="icons/importar.png" alt=""><span>Importar</span></button><button id="historicalPhotoLinkStop" class="secondary magnet-action" type="button"><span class="magnet-glyph">🧲</span><span>Vincular parada</span></button><button id="historicalPhotoDelete" class="ghost danger-action" type="button"><img src="icons/eliminar.svg" alt=""><span>Eliminar punt</span></button></footer>
+        <footer class="historical-photo-actions"><button id="gcMovePhotoPoint" class="secondary icon-text" type="button"><img src="icons/mover.png" alt=""><span>Mover punto</span></button><button id="historicalPhotoOpenDetails" class="secondary icon-text" type="button"><img src="icons/ficha.png" alt=""><span>Ficha fotográfica</span></button><button id="historicalPhotoCamera" class="primary icon-text"><img src="icons/camara.png" alt=""><span>Fer foto</span></button><button id="historicalPhotoImport" class="secondary icon-text"><img src="icons/importar.png" alt=""><span>Importar</span></button><button id="historicalPhotoLinkStop" class="secondary magnet-action" type="button"><span class="magnet-glyph">🧲</span><span>Vincular parada</span></button><button id="historicalPhotoDelete" class="ghost danger-action" type="button"><img src="icons/eliminar.svg" alt=""><span>Eliminar punt</span></button></footer>
       </div>
     </div>
     <input id="historicalPhotoCameraInput" type="file" accept="image/*" capture="environment" hidden>
@@ -1177,7 +1180,7 @@ CON | Confluencia"></textarea></div>
       <div class="map-stop-card">
         <header><div><img src="icons/gps.png" alt=""><div><b id="mapStopTitle">Punt de parada</b><small id="mapStopSubtitle"></small></div></div><button id="mapStopClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
         <div class="map-stop-body"><span class="map-stop-pin">P</span><p>La parada queda guardada com a punt del mapa. Els punts fotogràfics vinculats es conserven encara que eliminis la parada.</p></div>
-        <footer><button id="mapStopDelete" class="ghost danger-action" type="button"><img src="icons/eliminar.svg" alt=""><span>Eliminar parada</span></button></footer>
+        <footer><button id="gcMoveStop" class="secondary icon-text" type="button"><img src="icons/mover.png" alt=""><span>Mover parada</span></button><button id="mapStopDelete" class="ghost danger-action" type="button"><img src="icons/eliminar.svg" alt=""><span>Eliminar parada</span></button></footer>
       </div>
     </div>
 
@@ -1315,6 +1318,7 @@ CON | Confluencia"></textarea></div>
   <script src="gpkg-import.js?v=20261016-gpkg-r28"></script>
   <script src="photo-unified-core.js?v=r29-20261029-b2"></script>
   <script src="photo-workspace.js?v=r29-20261029-b2"></script>
+  <script src="map-relocation.js?v=r29-20261029-move"></script>
   <script src="app.js?v=r29-20261029-b2"></script>
   <script src="mobile-pwa.js?v=r29-20261029-b2"></script>
 </body>
