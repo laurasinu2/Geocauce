@@ -6894,16 +6894,31 @@ function fieldReportInit(){
 
 
 function initPhotoWorkspaceR29(){
+ const photoHashCache=new Map();
  const tool=window.GeoCaucePhotoWorkspace;if(!tool)return;
  tool.install({
   getState:()=>state,canEdit:()=>!!state.projectId&&isEditableCampaign()&&canEditCurrentProject(),
   allPhotos:()=>dbAll('photos'),readPhoto:id=>dbGet('photos',id),savePhoto:record=>dbPut('photos',record),
-  photoHashes:async()=>{
-   const d=await db();return new Promise((resolve,reject)=>{
-    const hashes=[],cursor=d.transaction('photos','readonly').objectStore('photos').openCursor();
-    cursor.onsuccess=()=>{const c=cursor.result;if(!c){resolve(hashes);return;}if(c.value?.contentHash)hashes.push(c.value.contentHash);c.continue();};
+  photoHashes:async sizes=>{
+   const allowed=new Set((sizes||[]).filter(Number.isFinite));
+   const d=await db(),entries=await new Promise((resolve,reject)=>{
+    const records=[],cursor=d.transaction('photos','readonly').objectStore('photos').openCursor();
+    cursor.onsuccess=()=>{const c=cursor.result;if(!c){resolve(records);return;}const p=c.value;
+     if(p?.blob&&(!allowed.size||allowed.has(p.blob.size)))records.push(p);
+     c.continue();};
     cursor.onerror=()=>reject(cursor.error);
    });
+   const hashes=[];
+   for(const photo of entries){
+    if(photo.contentHash){hashes.push(photo.contentHash);continue;}
+    const key=photo.id+'|'+photo.blob.size;
+    if(photoHashCache.has(key)){hashes.push(photoHashCache.get(key));continue;}
+    if(!crypto?.subtle)continue;
+    const digest=await crypto.subtle.digest('SHA-256',await photo.blob.arrayBuffer());
+    const hash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+    photoHashCache.set(key,hash);hashes.push(hash);
+   }
+   return hashes;
   },
   findPhotoByHash:async hash=>{
    if(!hash)return null;
