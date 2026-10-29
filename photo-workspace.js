@@ -428,7 +428,7 @@ async function commit(){
       accuracy:null,source:row.locationSource||(row.manualWorld?'manual':row.gps?'exif':'map')}:null;
     const record={id:photoId,blob:row.file,name:row.name,date:Date.now(),importVersion:'r29',
       captureDate:captured,captureDateSource:captured?'exif':'unknown',createdAt:Date.now(),
-      campaignId:startedCampaign,featureId:null,contentHash:row.hash,importGroup:group,
+      campaignId:startedCampaign,featureId:null,contentHash:row.hash,thumbnailBlob:row.thumbBlob||null,importGroup:group,
       historicalPointId:pointId,gnss,heading:row.metadata?.heading??null,
       exifOrientation:row.metadata?.orientation??null,originalSize:row.file.size,
       originalMime:row.file.type,positionSource:gnss?.source||'none'};
@@ -486,7 +486,7 @@ function galleryRender(){
  const pageSize=24,pages=Math.max(1,Math.ceil(filtered.length/pageSize));galleryPage=Math.min(galleryPage,pages-1);
  const grid=$('#gcGalleryGrid');grid.replaceChildren();
  for(const photo of filtered.slice(galleryPage*pageSize,(galleryPage+1)*pageSize)){
-  const b=el('button','gc-gallery-tile'+(photo.id===selectedGalleryId?' active':'')),u=URL.createObjectURL(photo.blob);galleryUrls.push(u);
+  const b=el('button','gc-gallery-tile'+(photo.id===selectedGalleryId?' active':'')),u=URL.createObjectURL(photo.thumbnailBlob||photo.blob);galleryUrls.push(u);
   const img=el('img');img.src=u;img.loading='lazy';img.alt='';const n=el('span','',photo.title||photo.name||'Fotografía');b.append(img,n);
   b.onclick=()=>{selectedGalleryId=photo.id;galleryRender();galleryDetail(photo);};grid.appendChild(b);
  }
