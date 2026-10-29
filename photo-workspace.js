@@ -2,7 +2,7 @@
  * Uses existing IndexedDB photo records, legacy photo-point state and map rasters.
  * No network calls, new storage engine, or automatic data migrations.
  */
-(function(root){
+(typeof window!=='undefined'?window:globalThis).GeoCaucePhotoWorkspace=(function(root){
 'use strict';
 let api=null,dialog=null,tab='photos',rows=[],selected=-1,busy=false,seq=0,map=null,ctx=null,view={cx:0,cy:0,scale:1},previewUrls=[],galleryUrls=[],galleryDetailUrls=[],galleryRecords=[],galleryPage=0,selectedGalleryId=null,lastPointFiles=[];
 const $=s=>document.querySelector(s);
