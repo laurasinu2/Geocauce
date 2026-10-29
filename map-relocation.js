@@ -32,10 +32,16 @@
   if(Array.isArray(f.fragments))out.fragments=f.fragments.map(fr=>translatePoints(fr,dx,dy));
   if(Array.isArray(f.erasures))out.erasures=f.erasures.map(er=>({...er,points:translatePoints(er.points,dx,dy)}));
   if(valid(f.anchorPoint))out.anchorPoint=shift(f.anchorPoint,dx,dy);
-  // These are derived from exact placement in the terrain, never the original field measurements.
-  if(Object.prototype.hasOwnProperty.call(f,'mdeStats'))out.mdeStats=null;
-  if(Object.prototype.hasOwnProperty.call(f,'longitudinalProfile'))out.longitudinalProfile=null;
-  if(Object.prototype.hasOwnProperty.call(f,'sectionProfile'))out.sectionProfile=null;
+  // A moved profile no longer represents the same terrain location. Preserve
+  // its former values for recovery and flag the active derived data as outdated.
+  const derived={};
+  for(const key of ['mdeStats','longitudinalProfile','sectionProfile']){
+   if(f[key]!=null){derived[key]=f[key];out[key]=null;}
+  }
+  if(Object.keys(derived).length){
+   out.relocationPreviousDerived={...f.relocationPreviousDerived,...derived};
+   out.derivedDataStale=true;
+  }
   return out;
  }
  function movePin(pin,target,{crs,lonLat=null,utm=null}={}){
@@ -49,6 +55,7 @@
    position.utmX=utm.x;position.utmY=utm.y;position.utmCrs=utm.crs;
   }else{delete position.utmX;delete position.utmY;delete position.utmCrs;}
   return{...pin,x:target.x,y:target.y,crs:crs||pin.crs||null,position,
+   originalPosition:pin.originalPosition||(valid(pin)?{x:pin.x,y:pin.y,crs:pin.crs||null,position:pin.position||null}:null),
    positionHistory:stamp(pin,pin,target),positionSource:'manual-map',updatedAt:Date.now()};
  }
  function movePhotoPoint(point,target,options={}){
@@ -65,6 +72,7 @@
    lat:Number.isFinite(lonLat?.lat)?lonLat.lat:null,lon:Number.isFinite(lonLat?.lon)?lonLat.lon:null,
    accuracy:null,altitude:null,source:'manual-map',timestamp:Date.now()};
   return{...photo,gnss:gps,historicalPointId:pointId,
+   originalGnss:photo.originalGnss|| (photo.gnss?{...photo.gnss}:null),
    positionHistory:source?stamp(photo,source,target):(photo.positionHistory||[]),positionSource:'manual-map',updatedAt:Date.now()};
  }
  function moveInkStroke(stroke,target){
