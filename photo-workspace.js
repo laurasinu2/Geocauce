@@ -320,9 +320,10 @@ function render(){
   prev.onclick=()=>{listPage--;render();};next.onclick=()=>{listPage++;render();};
   pager.append(prev,label,next);root.appendChild(pager);
  }
- const candidates=rows.filter(r=>!r.excluded&&!r.error&&(!r.duplicate||!$('#gcDuplicates').checked)&&(tab==='points'||locationOf(r)||$('#gcKeepUnlocated').checked));
+ const candidates=rows.filter(r=>!r.excluded&&!r.error&&(tab==='points'||locationOf(r)||$('#gcKeepUnlocated').checked));
  $('#gcImportCommit').disabled=busy||!candidates.length;
- $('#gcImportCommit').textContent=tab==='photos'?'Importar fotografías ('+candidates.length+')':'Importar puntos ('+candidates.length+')';
+ const ready=candidates.filter(r=>!r.duplicate).length;
+ $('#gcImportCommit').textContent=tab==='photos'?(ready?'Importar fotografías ('+ready+')':'Verificar fotografías repetidas'):'Importar puntos ('+candidates.length+')';
  paint();
 }
 function editCoordinates(i){
@@ -360,7 +361,7 @@ function ensureSavedPhotoPoint(record,world,group,campaignId){
 }
 async function commit(){
  if(busy||!api.canEdit()){api.notify('Campaña de solo lectura');return;}
- const candidates=rows.filter(r=>!r.excluded&&!r.error&&(!r.duplicate||!$('#gcDuplicates').checked)&&(tab==='points'||locationOf(r)||$('#gcKeepUnlocated').checked));
+ const candidates=rows.filter(r=>!r.excluded&&!r.error&&(tab==='points'||locationOf(r)||$('#gcKeepUnlocated').checked));
  if(!candidates.length)return;
  busy=true;render();
  const startedProject=api.getState().projectId,startedCampaign=api.getState().campaign;
