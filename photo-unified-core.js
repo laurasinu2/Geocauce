@@ -33,6 +33,7 @@ function jpegExif(bytes){
   if(pos+2>v.byteLength)break;
   const length=take16(v,pos,false);
   if(length<2||pos+length>v.byteLength)break;
+  if([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf].includes(marker)&&length>=7){output.height=take16(v,pos+3,false);output.width=take16(v,pos+5,false);}
   if(marker===0xe1&&length>10&&String.fromCharCode(...new Uint8Array(bytes.buffer,bytes.byteOffset+pos+2,4))==='Exif'){
    const base=pos+8,end=pos+length;if(base+8>end)break;
    const bo=take16(v,base,false);if(bo!==0x4949&&bo!==0x4d4d)break;
@@ -67,14 +68,14 @@ function jpegExif(bytes){
    const lat=degree(gps[2]),lon=degree(gps[4]);
    if(lat!==null&&lon!==null){const ns=clean(gps[1]).toUpperCase(),ew=clean(gps[3]).toUpperCase();
     const latitude=lat*(ns==='S'?-1:1),longitude=lon*(ew==='W'?-1:1);
-    if(Math.abs(latitude)<=90&&Math.abs(longitude)<=180)output.gps={lat:latitude,lon:longitude,source:'exif'};
+    if(['N','S'].includes(ns)&&['E','W'].includes(ew)&&Math.abs(latitude)<=90&&Math.abs(longitude)<=180)output.gps={lat:latitude,lon:longitude,source:'exif'};
    }
    if(output.gps&&Number.isFinite(gps[6]))output.gps.altitude=(gps[5]===1?-1:1)*gps[6];
    if(Number.isFinite(gps[17]))output.heading=gps[17];
    output.dateOriginal=clean(exif[0x9003]||primary[0x132])||null;
+   if(Number.isInteger(primary[0x112]))output.orientation=primary[0x112];
    if(Number.isFinite(primary[0x100]))output.width=primary[0x100];
    if(Number.isFinite(primary[0x101]))output.height=primary[0x101];
-   return output;
   }
   pos+=length;
  }
@@ -107,5 +108,40 @@ function pointRecords(input,format='geojson'){
  }
  return [];
 }
-root.GeoCauceUnifiedPhotos={adapt,jpegExif,parseCsv,pointRecords};
+
+/* The preflight never writes, geolocates from the device or changes JPEG bytes.
+   Read one file at a time to bound memory usage on Android PWAs. */
+async function analyzePhotoBatch(files,{existingHashes=[],onProgress=null,digest=null}={}){
+ const items=Array.from(files||[]),seen=new Set(),known=new Set(existingHashes||[]),result=[];
+ const subtle=typeof crypto!=='undefined'?crypto.subtle:root.crypto?.subtle;
+ const hash=async file=>{
+  if(digest)return await digest(file);
+  if(!subtle)return null;
+  const buffer=await file.arrayBuffer();
+  const bytes=new Uint8Array(await subtle.digest('SHA-256',buffer));
+  return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+ };
+ for(let i=0;i<items.length;i++){
+  const file=items[i],item={file,name:file?.name||'Archivo',size:file?.size||0,
+   status:'error',gps:null,dateOriginal:null,heading:null,hash:null,error:null,metadata:null};
+  try{
+   if(!file||!/\.jpe?g$/i.test(file.name||'')&&!/image\/jpeg/i.test(file.type||''))throw Error('Formato no admitido. Usa JPEG/JPG');
+   if(!Number.isFinite(file.size)||file.size<4)throw Error('Archivo vacío o incompleto');
+   const head=new Uint8Array(await file.slice(0,Math.min(file.size,1024*1024)).arrayBuffer());
+   const exif=jpegExif(head);
+   item.metadata=exif;item.gps=exif.gps||null;item.dateOriginal=exif.dateOriginal||null;
+   item.heading=Number.isFinite(exif.heading)?exif.heading:null;
+   item.hash=await hash(file);
+   // No filename-only duplicate guesses: SHA-256 match is required.
+   if(item.hash&&(seen.has(item.hash)||known.has(item.hash)))item.status='duplicate';
+   else item.status=item.gps?'valid':'no-coordinates';
+   if(item.hash)seen.add(item.hash);
+  }catch(e){item.error=String(e?.message||e);}
+  result.push(item);
+  if(typeof onProgress==='function')onProgress({processed:i+1,total:items.length,item});
+ }
+ return result;
+}
+
+root.GeoCauceUnifiedPhotos={adapt,jpegExif,parseCsv,pointRecords,analyzePhotoBatch};
 })(typeof window!=='undefined'?window:globalThis);
