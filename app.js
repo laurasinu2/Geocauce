@@ -909,7 +909,7 @@ function lastKnownCloudSyncAt(){
 
 function cloudSyncEditingInProgress(){
  if(state.currentStroke||state.pendingStroke||state.notebookStroke)return true;
- return !!document.querySelector('#sectionModal:not(.hidden),#reachSheetModal:not(.hidden),#profileSheetModal:not(.hidden),#photoEditorModal:not(.hidden),#fieldNotebookModal:not(.hidden)');
+ return !!document.querySelector('#sectionModal:not(.hidden),#reachSheetModal:not(.hidden),#profileSheetModal:not(.hidden),#photoEditorModal:not(.hidden),#fieldNotebookModal:not(.hidden),#gcImportModal:not(.hidden) #gcImportProgress:not(.hidden),#gcGalleryModal:not(.hidden)');
 }
 function cloudDeltaFields(payload){
  const out={};for(const field of window.GeoCauceDeltaSync?.fields||[])if(payload&&Object.prototype.hasOwnProperty.call(payload,field))out[field]=payload[field];
@@ -6930,7 +6930,7 @@ function initPhotoWorkspaceR29(){
   },
   project:(lon,lat)=>{const w=lonLatToMapCoords(lon,lat,workingMapEpsg());return{x:w.x,y:w.y};},
   unproject:(x,y,crs)=>+crs===4326?{lon:x,lat:y}:fieldUtmToLonLat(x,y,+crs),
-  epsg:()=>workingMapEpsg(),persist:()=>persistState(),redraw:()=>{drawAll();renderLayers();},
+  epsg:()=>workingMapEpsg(),persist:()=>persistState(),scheduleSync:()=>scheduleCloudSync(1000),redraw:()=>{drawAll();renderLayers();},
   openImage:(src,title)=>gcOpenPhotoLightbox(src,title),notify:message=>toast(message,4200)
  });
  $('#gcPhotoImportOpen').onclick=()=>tool.show();
