@@ -100,6 +100,18 @@ function setTab(next){
  render();
 }
 async function hashes(sizes=[]){return new Set(await api.photoHashes(sizes));}
+
+async function makePreviewThumbnail(file){
+ if(typeof createImageBitmap!=='function')return null;
+ const bitmap=await createImageBitmap(file,{resizeWidth:180,resizeHeight:180,resizeQuality:'medium'});
+ try{
+  const scale=Math.min(1,180/Math.max(bitmap.width,bitmap.height));
+  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bitmap.width*scale));c.height=Math.max(1,Math.round(bitmap.height*scale));
+  c.getContext('2d').drawImage(bitmap,0,0,c.width,c.height);
+  return await new Promise(resolve=>c.toBlob(resolve,'image/jpeg',.72));
+ }finally{bitmap.close?.();}
+}
+
 async function stage(files){
  if(busy||!files.length)return;
  const run=++seq;rows=[];selected=-1;release(previewUrls);
@@ -115,6 +127,13 @@ async function stage(files){
    error:p.error,duplicateHash:p.status==='duplicate',duplicate:p.status==='duplicate',
    hash:p.hash,excluded:false,index:i,manualWorld:null,world:p.gps?api.project(p.gps.lon,p.gps.lat):null
   }));
+  if($('#gcThumbnails').checked){
+   for(let i=0;i<rows.length;i++){
+    if(run!==seq)return;
+    if(!rows[i].error){try{rows[i].thumbBlob=await makePreviewThumbnail(rows[i].file);}catch(e){console.warn('Miniatura JPEG',rows[i].name,e);}}
+    progress(true,i+1,rows.length,'Preparando miniaturas');
+   }
+  }
   $('#gcApplyFieldPoints').classList.toggle('hidden',!rows.some(row=>fieldSamplePositions[String(row.name||'').toUpperCase()]&&!row.gps));
   $('#gcImportFeedback').textContent='Revisa los elementos antes de confirmar. Puedes editar coordenadas desde cada fila.';
   progress(false);fitAll();render();
@@ -266,7 +285,7 @@ function render(){
   const item=el('div','gc-import-row'+(selected===i?' selected':'')+(r.excluded?' excluded':''));
   const preview=el('div','gc-import-thumb');
   if(tab==='photos'&&r.file&&!r.error&&$('#gcThumbnails').checked){
-   const u=URL.createObjectURL(r.file);previewUrls.push(u);const img=el('img');img.src=u;img.alt='';img.loading='lazy';img.onerror=()=>{if(!r.error){r.error='No se puede visualizar este JPEG';render();}};preview.appendChild(img);
+   const u=URL.createObjectURL(r.thumbBlob||r.file);previewUrls.push(u);const img=el('img');img.src=u;img.alt='';img.loading='lazy';img.onerror=()=>{if(!r.error){r.error='No se puede visualizar este JPEG';render();}};preview.appendChild(img);
   }else preview.textContent=tab==='photos'?'📷':'📍';
   const summary=el('div','gc-import-summary');summary.innerHTML='<b>'+escape(r.name)+'</b><small>'+escape(r.error||((r.gps?fmt(r.gps.lat)+', '+fmt(r.gps.lon):r.manualWorld?'Ubicación manual · EPSG:'+api.epsg():'Sin coordenadas')+(r.metadata?.dateOriginal?' · '+r.metadata.dateOriginal:'')))+'</small>';
   const pill=el('span','gc-import-state '+status(r),({valid:'Válida',duplicate:'Duplicada','no-coordinates':'Sin GPS',error:'Error',excluded:'Excluida'})[status(r)]);
