@@ -74,7 +74,7 @@ function show(){
   $('#gcImportCommit').onclick=commit;
   map=$('#gcPreviewMap');ctx=map.getContext('2d');installMapControls();
  }
- tab='photos';rows=[];selected=-1;busy=false;seq++;
+ tab='photos';rows=[];selected=-1;listPage=0;busy=false;seq++;
  setTab('photos');
  dialog.classList.remove('hidden');
  $('#gcApplyFieldPoints').classList.add('hidden');
@@ -86,7 +86,7 @@ function show(){
 function close(){if(busy){api.notify('La importación está guardando archivos; no cierres la ventana');return;}seq++;release(previewUrls);rows=[];selected=-1;lastPointFiles=[];dialog?.classList.add('hidden');api.scheduleSync?.();}
 function setTab(next){
  if(busy)return;
- const same=next===tab;tab=next;if(!same){rows=[];selected=-1;seq++;release(previewUrls);lastPointFiles=[];$('#gcApplyFieldPoints').classList.add('hidden');}
+ const same=next===tab;tab=next;if(!same){rows=[];selected=-1;listPage=0;seq++;release(previewUrls);lastPointFiles=[];$('#gcApplyFieldPoints').classList.add('hidden');}
  dialog.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
  $('#gcDropTitle').textContent=tab==='photos'?'Selecciona fotografías':'Selecciona archivos de puntos';
  $('#gcDropHelp').textContent=tab==='photos'?'JPG / JPEG con GPS EXIF o ubicación manual · selección múltiple':'CSV, GeoJSON, GPX o KML · varios puntos por archivo';
@@ -114,7 +114,7 @@ async function makePreviewThumbnail(file){
 
 async function stage(files){
  if(busy||!files.length)return;
- const run=++seq;rows=[];selected=-1;release(previewUrls);
+ const run=++seq;rows=[];selected=-1;listPage=0;release(previewUrls);
  $('#gcImportFeedback').textContent='Leyendo archivos…';
  progress(true,0,files.length,'Leyendo archivos');
  if(tab==='points'){lastPointFiles=files;await stagePoints(files,run);return;}
@@ -277,7 +277,7 @@ function installMapControls(){
     rows[manualIndex].manualWorld=world(p.x,p.y);rows[manualIndex].gps=null;rows[manualIndex].manualGps=null;rows[manualIndex].locationSource='manual-map';map.dataset.manualIndex='';selected=manualIndex;render();return;
    }
    const hit=(map._clusters||[]).find(b=>Math.hypot(b.x-p.x,b.y-p.y)<23);
-   if(hit){selected=hit.indices[0];render();}
+   if(hit){selected=hit.indices[0];listPage=Math.floor(selected/100);render();}
   }
  });
  map.addEventListener('pointercancel',e=>contacts.delete(e.pointerId));
@@ -291,24 +291,35 @@ function render(){
  $('#gcCountLabel').textContent=active.length+' elementos';
  $('#gcCounters').textContent=valid+' válidos · '+missing+' sin GPS · '+duplicate+' duplicados · '+error+' errores';
  const root=$('#gcImportRows');root.replaceChildren();release(previewUrls);
- const maxRows=100;const displayed=rows.slice(0,maxRows);
- displayed.forEach((r,i)=>{
+ const maxRows=100,pages=Math.max(1,Math.ceil(rows.length/maxRows));listPage=Math.min(listPage,pages-1);
+ const pageStart=listPage*maxRows,displayed=rows.slice(pageStart,pageStart+maxRows);
+ displayed.forEach((r,offset)=>{const i=pageStart+offset;
   const item=el('div','gc-import-row'+(selected===i?' selected':'')+(r.excluded?' excluded':''));
   const preview=el('div','gc-import-thumb');
   if(tab==='photos'&&r.file&&!r.error&&$('#gcThumbnails').checked){
    const u=URL.createObjectURL(r.thumbBlob||r.file);previewUrls.push(u);const img=el('img');img.src=u;img.alt='';img.loading='lazy';img.onerror=()=>{if(!r.error){r.error='No se puede visualizar este JPEG';render();}};preview.appendChild(img);
   }else preview.textContent=tab==='photos'?'📷':'📍';
-  const summary=el('div','gc-import-summary');summary.innerHTML='<b>'+escape(r.name)+'</b><small>'+escape(r.error||((r.gps?fmt(r.gps.lat)+', '+fmt(r.gps.lon):r.manualWorld?'Ubicación manual · EPSG:'+api.epsg():'Sin coordenadas')+(r.metadata?.dateOriginal?' · '+r.metadata.dateOriginal:'')))+'</small>';
+  const summary=el('div','gc-import-summary');const coordInfo=r.manualGps?'Manual: '+fmt(r.manualGps.lat)+', '+fmt(r.manualGps.lon):r.manualWorld?'Ubicación manual en mapa · EPSG:'+api.epsg():r.gps?fmt(r.gps.lat)+', '+fmt(r.gps.lon):'Sin coordenadas';
+  summary.innerHTML='<b>'+escape(r.name)+'</b><small>'+escape(r.error||(coordInfo+(r.metadata?.dateOriginal?' · '+r.metadata.dateOriginal:'')))+'</small>';
   const pill=el('span','gc-import-state '+status(r),({valid:'Válida',duplicate:'Duplicada','no-coordinates':'Sin GPS',error:'Error',excluded:'Excluida'})[status(r)]);
   const edit=el('button','gc-row-edit','✎');edit.title='Editar ubicación';edit.disabled=tab!=='photos'||!!r.error||busy;
   edit.onclick=ev=>{ev.stopPropagation();editCoordinates(i);};
   const del=el('button','gc-row-remove',r.excluded?'↺':'×');del.title=r.excluded?'Incluir':'Excluir';del.disabled=busy;
   del.onclick=ev=>{ev.stopPropagation();r.excluded=!r.excluded;render();};
-  item.append(preview,summary,pill,edit,del);
+  const inspect=el('button','gc-row-view','◉');inspect.title='Ver fotografía ampliada';inspect.disabled=tab!=='photos'||!r.file||!!r.error||busy;
+  inspect.onclick=ev=>{ev.stopPropagation();api.openPreviewImage?.(r.file,r.name);};
+  item.append(preview,summary,pill,inspect,edit,del);
   item.onclick=()=>{selected=i;const w=locationOf(r);if(validXY(w)){view.cx=w.x;view.cy=w.y;}render();};
   root.appendChild(item);
  });
- if(rows.length>maxRows){const note=el('p','gc-row-note','Se muestran los primeros '+maxRows+' elementos; el lote completo contiene '+rows.length+'.');root.appendChild(note);}
+ if(pages>1){
+  const pager=el('div','gc-row-pagination');
+  const prev=el('button','', '‹ Anterior'),next=el('button','','Siguiente ›');
+  const label=el('span','', 'Página '+(listPage+1)+' de '+pages+' · '+rows.length+' elementos');
+  prev.disabled=listPage===0;next.disabled=listPage>=pages-1;
+  prev.onclick=()=>{listPage--;render();};next.onclick=()=>{listPage++;render();};
+  pager.append(prev,label,next);root.appendChild(pager);
+ }
  const candidates=rows.filter(r=>!r.excluded&&!r.error&&(!r.duplicate||!$('#gcDuplicates').checked)&&(tab==='points'||locationOf(r)||$('#gcKeepUnlocated').checked));
  $('#gcImportCommit').disabled=busy||!candidates.length;
  $('#gcImportCommit').textContent=tab==='photos'?'Importar fotografías ('+candidates.length+')':'Importar puntos ('+candidates.length+')';
@@ -550,7 +561,7 @@ function galleryDetail(photo){
  const p=(api.getState().historicalPhotoPoints||[]).find(p=>(p.photos||[]).includes(photo.id)||p.id===photo.historicalPointId);
  const gnss=photo.gnss||{},title=photo.title||photo.name||'Fotografía',known=photoWorld(photo);
  const big=el('img','gc-gallery-big'),u=URL.createObjectURL(photo.blob);galleryDetailUrls.push(u);
- big.src=u;big.alt=title;big.onclick=()=>api.openImage(u,title);
+ big.src=u;big.alt=title;big.onclick=()=>api.openPreviewImage?.(photo.blob,title);
  root.innerHTML='<div class="gc-detail-head"><h3>Fotografía · '+escape(title)+'</h3><button id="gcDetailFullscreen">⛶ Ver grande</button></div>';
  root.appendChild(big);
  const related=Array.isArray(photo.seriesNames)?photo.seriesNames:(photo.seriesName?[photo.seriesName]:[]);
@@ -609,7 +620,7 @@ function galleryDetail(photo){
  $('#gcDetailCompare').value=photo.referencePhotoId||'';
  $('#gcDetailOpenCompare').onclick=()=>{const target=galleryRecords.find(r=>r.id===$('#gcDetailCompare').value);if(!target){api.notify('Elige una fotografía de referencia');return;}comparePhotos(photo,target);};
  ['gcDetailHeading','gcDetailFov','gcDetailDistance','gcDetailShowCone'].forEach(k=>$('#'+k).oninput=()=>photoMapDraw(photo,known));
- $('#gcDetailFullscreen').onclick=()=>api.openImage(u,title);
+ $('#gcDetailFullscreen').onclick=()=>api.openPreviewImage?.(photo.blob,title);
  const nearby=galleryRecords.filter(r=>r.id!==photo.id&&validXY(photoWorld(r))&&validXY(known)).map(r=>({photo:r,dist:photoDistance(known,photoWorld(r))})).sort((a,b)=>a.dist-b.dist).slice(0,5);
  if(nearby.length){
   root.appendChild(el('b','gc-detail-section','Fotografías cercanas'));
