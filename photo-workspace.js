@@ -314,42 +314,115 @@ function editCoordinates(i){
  const lat=Number(normalized[0]),lon=Number(normalized[1]);if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180){api.notify('Coordenadas fuera de rango');return;}
  row.manualWorld=api.project(lon,lat);row.manualGps={lat,lon};row.locationSource='manual';selected=i;fitAll();render();
 }
+function ensureSavedPhotoPoint(record,world,group,campaignId){
+ if(!validXY(world)||!record.historicalPointId)return false;
+ const list=api.getState().historicalPhotoPoints||(api.getState().historicalPhotoPoints=[]);
+ const existing=list.find(p=>p.id===record.historicalPointId||(p.photos||[]).includes(record.id));
+ if(existing){
+  if((existing.photos||[]).includes(record.id))return true;
+  existing.photos=Array.isArray(existing.photos)?existing.photos:[];
+  existing.photos.push(record.id);
+  try{api.persistVerified();}catch(error){existing.photos=existing.photos.filter(id=>id!==record.id);throw error;}
+  return true;
+ }
+ const point={id:record.historicalPointId,name:record.title||record.name||'Fotografía',
+  x:world.x,y:world.y,crs:api.epsg(),photoPointPosition:{x:world.x,y:world.y,crs:api.epsg()},
+  photos:[record.id],importGroup:group||record.importGroup||'Fotografías de campo',
+  campaignId:campaignId||record.campaignId,createdAt:record.createdAt||Date.now()};
+ list.push(point);
+ try{api.persistVerified();}catch(error){
+  const index=list.indexOf(point);if(index!==-1)list.splice(index,1);
+  throw error;
+ }
+ return true;
+}
 async function commit(){
  if(busy||!api.canEdit()){api.notify('Campaña de solo lectura');return;}
  const candidates=rows.filter(r=>!r.excluded&&!r.error&&(!r.duplicate||!$('#gcDuplicates').checked)&&(tab==='points'||locationOf(r)||$('#gcKeepUnlocated').checked));
  if(!candidates.length)return;
- busy=true;render();const startedProject=api.getState().projectId,startedCampaign=api.getState().campaign;
+ busy=true;render();
+ const startedProject=api.getState().projectId,startedCampaign=api.getState().campaign;
  const group=$('#gcLayerName').value.trim()||(tab==='photos'?'Fotografías de campo':'Puntos importados');
- const known=new Set(tab==='photos'?await api.photoHashes(candidates.map(r=>r.file?.size)):[]);
- let done=0,failed=0,skipped=0;
+ let known;
+ try{
+  progress(true,0,candidates.length,tab==='photos'?'Comprobando duplicados':'Comprobando puntos');
+  known=new Set(tab==='photos'?await api.photoHashes(candidates.map(r=>r.file?.size)):[]);
+ }catch(error){
+  busy=false;progress(false);render();
+  $('#gcImportFeedback').textContent='No se pudo comprobar el contenido existente; no se ha importado ningún archivo: '+(error?.message||error);
+  return;
+ }
+ let done=0,failed=0,skipped=0,restored=0;
  progress(true,0,candidates.length,tab==='photos'?'Guardando fotografías localmente':'Guardando puntos localmente');
  for(const row of candidates){
   try{
-   if(startedProject!==api.getState().projectId)throw Error('Se ha cambiado de proyecto durante la importación');
+   if(startedProject!==api.getState().projectId||startedCampaign!==api.getState().campaign)
+    throw Error('El proyecto o la campaña ha cambiado durante la importación');
    if(tab==='points'){
-    if(!validXY(locationOf(row)))throw Error('Punto sin coordenadas');
-    const w=locationOf(row);api.getState().mapPins.push({id:'mp-'+uid(),kind:'gps',x:w.x,y:w.y,crs:api.epsg(),label:row.name,attributes:row.point?.properties||{},importGroup:group,createdAt:Date.now(),campaignId:startedCampaign});
-    api.persist();done++;
+    const worldPoint=locationOf(row);
+    if(!validXY(worldPoint))throw Error('Punto sin coordenadas');
+    const pointId=row.pointImportId;if(!pointId)throw Error('No se puede identificar de forma estable este punto');
+    const pins=api.getState().mapPins||(api.getState().mapPins=[]);
+    if(pins.some(p=>p.id===pointId)){skipped++;row.excluded=true;continue;}
+    const pin={id:pointId,kind:'gps',x:worldPoint.x,y:worldPoint.y,crs:api.epsg(),
+      sourceCrs:row.point?.crs,originalX:row.point?.x,originalY:row.point?.y,
+      label:row.name,attributes:row.point?.properties||{},importGroup:group,
+      createdAt:Date.now(),campaignId:startedCampaign};
+    pins.push(pin);
+    try{api.persistVerified();}catch(error){pins.splice(pins.indexOf(pin),1);throw error;}
+    done++;
    }else{
-    if(row.hash&&known.has(row.hash)){skipped++;row.excluded=true;continue;}
-    const w=locationOf(row),id='p'+uid(),pointId=w?'hp'+uid():null;
+    const worldPoint=locationOf(row);
+    if(row.hash&&known.has(row.hash)){
+     const existing=await api.findPhotoByHash(row.hash);
+     // After an interrupted import a verified photo binary may have no map point.
+     // Repair only points created by this importer, never silently migrate older records.
+     if(existing?.importVersion==='r29'&&existing.historicalPointId){
+      const savedWorld=existing.gnss&&validXY(existing.gnss)?existing.gnss:worldPoint;
+      if(validXY(savedWorld)) {
+       const already=(api.getState().historicalPhotoPoints||[]).some(p=>
+        p.id===existing.historicalPointId||(p.photos||[]).includes(existing.id));
+       if(!already){ensureSavedPhotoPoint(existing,savedWorld,existing.importGroup,existing.campaignId);restored++;}
+      }
+     }
+     skipped++;row.excluded=true;continue;
+    }
+    if(!row.hash)throw Error('Huella SHA-256 no disponible; no se puede garantizar una importación recuperable');
+    const photoId='p'+row.hash.slice(0,32),pointId=worldPoint?'hp'+row.hash.slice(0,32):null;
     const exifDate=row.metadata?.dateOriginal||null;
     const captured=exifDate&&/^\d{4}:\d{2}:\d{2}/.test(exifDate)?exifDate.slice(0,10).replaceAll(':','-'):null;
-    const gnss=w?{x:w.x,y:w.y,crs:api.epsg(),lat:row.manualGps?.lat??row.gps?.lat??null,lon:row.manualGps?.lon??row.gps?.lon??null,accuracy:null,source:row.locationSource|| (row.manualWorld?'manual':row.gps?'exif':'map')}:null;
-    const record={id,blob:row.file,name:row.name,date:Date.now(),captureDate:captured,captureDateSource:captured?'exif':'unknown',createdAt:Date.now(),campaignId:startedCampaign,featureId:null,contentHash:row.hash,importGroup:group,historicalPointId:pointId,gnss,heading:row.metadata?.heading??null,exifOrientation:row.metadata?.orientation??null,originalSize:row.file.size,originalMime:row.file.type,positionSource:gnss?.source||'none'};
-    await api.savePhoto(record);
-    const saved=await api.readPhoto(id);
-    if(!saved?.blob||saved.blob.size!==row.file.size)throw Error('No se ha verificado el guardado local');
-    if(pointId){api.getState().historicalPhotoPoints.push({id:pointId,name:row.name,x:w.x,y:w.y,crs:api.epsg(),photoPointPosition:{x:w.x,y:w.y,crs:api.epsg()},photos:[id],importGroup:group,campaignId:startedCampaign,createdAt:Date.now()});api.persist();}
-    if(row.hash)known.add(row.hash);
-    done++;
+    const gnss=worldPoint?{x:worldPoint.x,y:worldPoint.y,crs:api.epsg(),
+      lat:row.manualGps?.lat??row.gps?.lat??null,lon:row.manualGps?.lon??row.gps?.lon??null,
+      accuracy:null,source:row.locationSource||(row.manualWorld?'manual':row.gps?'exif':'map')}:null;
+    const record={id:photoId,blob:row.file,name:row.name,date:Date.now(),importVersion:'r29',
+      captureDate:captured,captureDateSource:captured?'exif':'unknown',createdAt:Date.now(),
+      campaignId:startedCampaign,featureId:null,contentHash:row.hash,importGroup:group,
+      historicalPointId:pointId,gnss,heading:row.metadata?.heading??null,
+      exifOrientation:row.metadata?.orientation??null,originalSize:row.file.size,
+      originalMime:row.file.type,positionSource:gnss?.source||'none'};
+    const collision=await api.readPhoto(photoId);
+    if(collision&&collision.contentHash!==row.hash)throw Error('Conflicto de identificador; no se ha sobrescrito la fotografía');
+    if(!collision)await api.savePhoto(record);
+    const saved=await api.readPhoto(photoId);
+    if(!saved?.blob||saved.blob.size!==row.file.size||saved.contentHash!==row.hash)
+     throw Error('No se ha verificado el guardado local');
+    if(pointId)ensureSavedPhotoPoint(saved,worldPoint,group,startedCampaign);
+    known.add(row.hash);done++;
    }
    row.excluded=true;
-  }catch(e){failed++;row.error='Error al guardar: '+(e.message||e);console.warn('GeoCauce: importación parcial',row.name,e);}
-  finally{progress(true,done+failed+skipped,candidates.length,tab==='photos'?'Almacenamiento local confirmado':'Registrando puntos');await new Promise(resolve=>setTimeout(resolve,0));}
+  }catch(error){
+   failed++;row.error='Error al guardar: '+(error?.message||error);
+   console.warn('GeoCauce: importación parcial',row.name,error);
+  }finally{
+   progress(true,done+failed+skipped,candidates.length,tab==='photos'?'Almacenamiento local confirmado':'Registrando puntos');
+   await new Promise(resolve=>setTimeout(resolve,0));
+  }
  }
- api.redraw();busy=false;progress(false);api.scheduleSync?.();
- $('#gcImportFeedback').textContent=done+' '+(tab==='photos'?'fotografías':'puntos')+' guardados localmente; '+failed+' con error; '+skipped+' ya existentes. La sincronización con la nube seguirá la cola habitual.';
+ try{api.redraw();}catch(error){console.warn('GeoCauce map refresh after import',error);}
+ busy=false;progress(false);api.scheduleSync?.();
+ $('#gcImportFeedback').textContent=done+' '+(tab==='photos'?'fotografías':'puntos')+' guardados localmente; '+failed+' con error; '+skipped+' ya existentes.'+
+  (restored?' '+restored+' marcador(es) recuperados.':'')+
+  ' La sincronización con la nube seguirá la cola habitual.';
  render();
 }
 async function showGallery(initialPhotoId=null){
