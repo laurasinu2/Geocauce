@@ -7,6 +7,10 @@ La rama histórica `backup/r28-copia-20261027` permanece como referencia funcion
 **Plataforma principal de desarrollo y pruebas:** PWA (navegador e instalación como aplicación, principalmente Android). No exigir una app nativa ni conexión a Supabase para las funciones locales. Reutilizar IndexedDB, el almacenamiento binario y la cola incremental de sincronización existentes. Los datos de prueba sintéticos son suficientes para desarrollar e iniciar pruebas; fotografías reales y copias de proyectos son opcionales para validar compatibilidad con cámaras y proyectos concretos, no requisitos para empezar.
 
 ---
+## R29 · Fotos unificadas e importador georreferenciado (29/10/2026)
+
+La rama `r29-20261029` incorpora un importador PWA de fotografías JPEG por lotes, lectura EXIF por archivo, previsualización en mapa, puntos CSV/GPX/KML/GeoJSON, SHA-256, galería unificada, correcciones manuales y recuperación frente a fallos. Conserva IndexedDB y el sistema de sincronización incremental existente; no necesita SQL en Supabase para estos cambios. Es una versión de desarrollo pendiente de validación táctil y sincronización real entre dispositivos. Detalles y protocolo de pruebas: [Plan R29](R28_FOTOGRAFIAS_UNIFICADAS_PLAN.md).
+
 ## v0.16.38 · punts fotogràfics històrics i selecció SHP directa
 
 Punts fotogràfics amb sèrie temporal i control de visibilitat, més selecció successiva de geometries SHP directament sobre el mapa.
