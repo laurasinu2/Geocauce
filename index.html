@@ -13,6 +13,7 @@
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="stylesheet" href="styles.css?v=20261029-r28-photo-layer-fix" />
   <link rel="stylesheet" href="mobile-pwa.css?v=20261029-r28-photo-layer-fix" />
+  <link rel="stylesheet" href="photo-workspace.css?v=r29-20261029" />
 </head>
 <body>
   <div id="app">
@@ -260,8 +261,7 @@ CON | Confluencia"></textarea></div>
         <button data-tool="watercourse"><img src="icons/rio.png" alt=""><span>Curs / canal</span></button>
         <button data-tool="reach"><img src="icons/etiqueta.png" alt=""><span>Dividir per trams</span></button>
         <button data-tool="section"><img src="icons/seccion.svg" alt=""><span>Sección</span></button>
-        <button data-tool="photo"><img src="icons/camara.png" alt=""><span>Foto</span></button>
-        <button data-tool="historicalPhoto"><img src="icons/fotos.png" alt=""><span>Punt fotogràfic històric</span></button>
+        <button data-tool="historicalPhoto"><img src="icons/camara.png" alt=""><span>Fotografía</span></button>
         <button data-tool="gps"><img src="icons/gps.png" alt=""><span>Punto GPS</span></button>
         <button data-tool="select"><img src="icons/seleccionar.png" alt=""><span>Seleccionar</span></button>
         <div class="menu-sep"></div>
@@ -332,7 +332,9 @@ CON | Confluencia"></textarea></div>
 
       <aside id="layersPanel" class="side-panel right-panel hidden">
         <header><strong><img class="header-icon" src="icons/capas.png" alt=""> Mapas y capas</strong><button class="panel-close icon-only" data-close="layersPanel"><img src="icons/cerrar.png" alt=""></button></header>
-        <button id="historicalPhotoToggle" class="secondary full layer-global-btn icon-text active" type="button" aria-pressed="true"><img src="icons/fotos.png" alt=""><span>Punts fotogràfics · visibles</span></button>
+        <button id="historicalPhotoToggle" class="secondary full layer-global-btn icon-text active" type="button" aria-pressed="true"><img src="icons/fotos.png" alt=""><span>Fotografías · visibles</span></button>
+        <button id="gcPhotoGalleryOpen" class="secondary full layer-global-btn icon-text" type="button"><img src="icons/fotos.png" alt=""><span>Galería de fotografías</span></button>
+        <button id="gcPhotoImportOpen" class="primary full icon-text" type="button"><img src="icons/importar.png" alt=""><span>Importar puntos / fotografías</span></button>
         <button id="fitVisibleBtn" class="secondary full layer-global-btn icon-text"><img src="icons/centrar.png" alt=""> Ver mapas visibles</button>
         <button id="demGroupsBtn" class="secondary full layer-global-btn icon-text"><img src="icons/mapa.png" alt=""> Combinar MDT</button>
         <div id="demGroupsList" class="dem-groups-list"></div>
@@ -1155,11 +1157,11 @@ CON | Confluencia"></textarea></div>
     <div id="historicalPhotoModal" class="modal hidden">
       <div class="modal-backdrop"></div>
       <div class="historical-photo-card">
-        <header><div><img src="icons/fotos.png" alt=""><div><b id="historicalPhotoTitle">Punt fotogràfic històric</b><small id="historicalPhotoSubtitle"></small></div></div><button id="historicalPhotoClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
+        <header><div><img src="icons/fotos.png" alt=""><div><b id="historicalPhotoTitle">Punto fotográfico</b><small id="historicalPhotoSubtitle"></small></div></div><button id="historicalPhotoClose" class="icon-only"><img src="icons/cerrar.png" alt=""></button></header>
         <div class="historical-photo-stage">
           <button id="historicalPhotoPrev" class="historical-photo-nav" type="button">‹</button>
-          <img id="historicalPhotoMain" class="hidden" alt="Fotografia històrica" title="Toca per ampliar a pantalla completa">
-          <div id="historicalPhotoEmpty" class="historical-photo-empty"><img src="icons/fotos.png" alt=""><b>Encara no hi ha fotos</b><span>Fes una foto nova o importa una fotografia històrica del dispositiu.</span></div>
+          <img id="historicalPhotoMain" class="hidden" alt="Fotografía" title="Toca per ampliar a pantalla completa">
+          <div id="historicalPhotoEmpty" class="historical-photo-empty"><img src="icons/fotos.png" alt=""><b>Encara no hi ha fotos</b><span>Añade una fotografía nueva o importa una imagen desde el dispositivo.</span></div>
           <button id="historicalPhotoNext" class="historical-photo-nav" type="button">›</button>
         </div>
         <button type="button" id="historicalPhotoEnlarge" class="historical-photo-enlarge">⛶ Ampliar fotografia</button><div id="historicalPhotoStrip" class="historical-photo-strip"></div>
@@ -1311,7 +1313,9 @@ CON | Confluencia"></textarea></div>
   <script src="project-sharing-ui.js?v=20261029-r28-photo-layer-fix"></script>
   <script src="gpkg-lite.js?v=20261016-gpkg-r28"></script>
   <script src="gpkg-import.js?v=20261016-gpkg-r28"></script>
-  <script src="app.js?v=20261029-r28-photo-layer-fix"></script>
+  <script src="photo-unified-core.js?v=r29-20261029"></script>
+  <script src="photo-workspace.js?v=r29-20261029"></script>
+  <script src="app.js?v=r29-20261029"></script>
   <script src="mobile-pwa.js?v=20261029-r28-photo-layer-fix"></script>
 </body>
 </html>
