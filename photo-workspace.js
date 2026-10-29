@@ -77,12 +77,13 @@ function show(){
  tab='photos';rows=[];selected=-1;busy=false;seq++;
  setTab('photos');
  dialog.classList.remove('hidden');
+ $('#gcApplyFieldPoints').classList.add('hidden');
  lastPointFiles=[];
  $('#gcLayerName').value='Fotografías de campo';
  $('#gcImportFeedback').textContent='';
  requestAnimationFrame(()=>{resizeMap();fitAll();render();});
 }
-function close(){if(busy){api.notify('La importación está guardando archivos; no cierres la ventana');return;}seq++;release(previewUrls);rows=[];selected=-1;lastPointFiles=[];dialog?.classList.add('hidden');}
+function close(){if(busy){api.notify('La importación está guardando archivos; no cierres la ventana');return;}seq++;release(previewUrls);rows=[];selected=-1;lastPointFiles=[];dialog?.classList.add('hidden');api.scheduleSync?.();}
 function setTab(next){
  if(busy)return;
  const same=next===tab;tab=next;if(!same){rows=[];selected=-1;seq++;release(previewUrls);lastPointFiles=[];$('#gcApplyFieldPoints').classList.add('hidden');}
@@ -328,7 +329,7 @@ async function commit(){
   }catch(e){failed++;row.error='Error al guardar: '+(e.message||e);console.warn('GeoCauce: importación parcial',row.name,e);}
   finally{progress(true,done+failed+skipped,candidates.length,tab==='photos'?'Almacenamiento local confirmado':'Registrando puntos');await new Promise(resolve=>setTimeout(resolve,0));}
  }
- api.redraw();busy=false;progress(false);
+ api.redraw();busy=false;progress(false);api.scheduleSync?.();
  $('#gcImportFeedback').textContent=done+' '+(tab==='photos'?'fotografías':'puntos')+' guardados localmente; '+failed+' con error; '+skipped+' ya existentes. La sincronización con la nube seguirá la cola habitual.';
  render();
 }
@@ -338,7 +339,7 @@ async function showGallery(initialPhotoId=null){
   const host=el('div','gc-gallery-modal hidden');host.id='gcGalleryModal';
   host.innerHTML='<div class="gc-gallery-shade"></div><section class="gc-gallery-card"><header><div><h2>Fotografías</h2><small>Imágenes de campo y archivo · todas las fechas</small></div><div><button id="gcGalleryImport">＋ Importar</button><button id="gcGalleryClose">✕</button></div></header><div class="gc-gallery-body"><aside><div class="gc-gallery-filters"><input id="gcPhotoSearch" placeholder="Buscar fotografía"><select id="gcPhotoFilter"><option value="all">Todas</option><option value="located">Con coordenadas</option><option value="unlocated">Sin coordenadas</option></select></div><div id="gcGalleryGrid" class="gc-gallery-grid"></div><footer><button id="gcGalleryPrev">‹</button><span id="gcGalleryPages"></span><button id="gcGalleryNext">›</button></footer></aside><article id="gcGalleryDetails"><p>Selecciona una fotografía para editar sus metadatos.</p></article></div></section>';
   document.body.appendChild(host);host.querySelector('.gc-gallery-shade').onclick=()=>host.classList.add('hidden');
-  $('#gcGalleryClose').onclick=()=>{release(galleryUrls);release(galleryDetailUrls);host.classList.add('hidden');};
+  $('#gcGalleryClose').onclick=()=>{release(galleryUrls);release(galleryDetailUrls);host.classList.add('hidden');api.scheduleSync?.();};
   $('#gcGalleryImport').onclick=()=>{host.classList.add('hidden');show();};
   $('#gcPhotoSearch').oninput=()=>{galleryPage=0;galleryRender();};
   $('#gcPhotoFilter').onchange=()=>{galleryPage=0;galleryRender();};
