@@ -111,7 +111,7 @@ function pointRecords(input,format='geojson'){
 
 /* The preflight never writes, geolocates from the device or changes JPEG bytes.
    Read one file at a time to bound memory usage on Android PWAs. */
-async function analyzePhotoBatch(files,{existingHashes=[],onProgress=null,digest=null}={}){
+async function analyzePhotoBatch(files,{existingHashes=[],onProgress=null,digest=null,shouldCancel=null}={}){
  const items=Array.from(files||[]),seen=new Set(),known=new Set(existingHashes||[]),result=[];
  const subtle=typeof crypto!=='undefined'?crypto.subtle:root.crypto?.subtle;
  const hash=async file=>{
@@ -122,6 +122,7 @@ async function analyzePhotoBatch(files,{existingHashes=[],onProgress=null,digest
   return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
  };
  for(let i=0;i<items.length;i++){
+  if(shouldCancel?.())break;
   const file=items[i],item={file,name:file?.name||'Archivo',size:file?.size||0,
    status:'error',gps:null,dateOriginal:null,heading:null,hash:null,error:null,metadata:null};
   try{
@@ -132,11 +133,13 @@ async function analyzePhotoBatch(files,{existingHashes=[],onProgress=null,digest
    item.metadata=exif;item.gps=exif.gps||null;item.dateOriginal=exif.dateOriginal||null;
    item.heading=Number.isFinite(exif.heading)?exif.heading:null;
    item.hash=await hash(file);
+   if(!item.hash)throw Error('SHA-256 no disponible. Abre GeoCauce por HTTPS como PWA.');
    // No filename-only duplicate guesses: SHA-256 match is required.
    if(item.hash&&(seen.has(item.hash)||known.has(item.hash)))item.status='duplicate';
    else item.status=item.gps?'valid':'no-coordinates';
    if(item.hash)seen.add(item.hash);
   }catch(e){item.error=String(e?.message||e);}
+  if(shouldCancel?.())break;
   result.push(item);
   if(typeof onProgress==='function')onProgress({processed:i+1,total:items.length,item});
  }
