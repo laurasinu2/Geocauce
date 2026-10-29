@@ -148,7 +148,7 @@ function materialStyleConfig(id){
 }
 function materialOutlineDash(style){return style?.outlineDash==='dash'?[8,5]:style?.outlineDash==='dot'?[2,4]:[];}
 
-const ICONS={historicalPhoto:'icons/fotos.png',mapInk:'icons/editar.png',pan:'icons/mover.png',boundary:'icons/editar.png',editContour:'icons/editar_propiedad.png',fill:'icons/rellenar.png',paint:'icons/pintar.png',basin:'icons/mapa.png',watercourse:'icons/rio.png',reach:'icons/etiqueta.png',channel:'icons/canal.png',section:'icons/seccion.svg',photo:'icons/camara.png',gps:'icons/gps.png',select:'icons/seleccionar.png',erase:'icons/borrador.png'};
+const ICONS={relocate:'icons/mover.png',historicalPhoto:'icons/fotos.png',mapInk:'icons/editar.png',pan:'icons/mover.png',boundary:'icons/editar.png',editContour:'icons/editar_propiedad.png',fill:'icons/rellenar.png',paint:'icons/pintar.png',basin:'icons/mapa.png',watercourse:'icons/rio.png',reach:'icons/etiqueta.png',channel:'icons/canal.png',section:'icons/seccion.svg',photo:'icons/camara.png',gps:'icons/gps.png',select:'icons/seleccionar.png',erase:'icons/borrador.png'};
 function iconImg(src,cls=''){return `<img class="${cls}" src="${src}" alt="">`;}
 
 const ANDROID_NATIVE=!!window.GeoCauceNative;
@@ -908,6 +908,7 @@ function lastKnownCloudSyncAt(){
 }
 
 function cloudSyncEditingInProgress(){
+ if(state.relocatingPoint)return true;
  if(state.currentStroke||state.pendingStroke||state.notebookStroke)return true;
  return !!document.querySelector('#sectionModal:not(.hidden),#reachSheetModal:not(.hidden),#profileSheetModal:not(.hidden),#photoEditorModal:not(.hidden),#fieldNotebookModal:not(.hidden),#gcImportModal:not(.hidden) #gcImportProgress:not(.hidden),#gcGalleryModal:not(.hidden)');
 }
@@ -1902,7 +1903,7 @@ function updateReadOnlyUi(){
   const ro=!isEditableCampaign();
   const badge=$('#readOnlyBadge');if(badge){badge.classList.toggle('hidden',!ro);badge.textContent=ro?`🔒 ${currentCampaign()?.name||'Día anterior'} · solo lectura`:'';}
   document.body.classList.toggle('viewing-readonly',ro);
-  const editTools=new Set(['boundary','editContour','fill','paint','basin','watercourse','reach','channel','section','photo','historicalPhoto','erase']);
+  const editTools=new Set(['boundary','editContour','fill','paint','basin','watercourse','reach','channel','section','photo','historicalPhoto','erase','relocate']);
   $$('#toolMenu button[data-tool]').forEach(b=>{b.disabled=ro&&editTools.has(b.dataset.tool);b.title=b.disabled?'Día anterior: crea un Nuevo día para editar':'';});
   const photo=$('#featurePhotoBtn'),del=$('#deleteFeatureBtn');if(photo)photo.disabled=false;if(del)del.disabled=ro;
   $$('.section-del').forEach(b=>b.disabled=ro);
@@ -2911,6 +2912,12 @@ function drawAll(){
   drawHistoricalPhotoPoints();
   drawNoteMarkers();
   drawGnss();
+  if(state.relocatingPoint&&relocationCore()){
+   const r=state.relocatingPoint,source=r.kind==='photoPoint'?historicalPointById(r.id):r.kind==='pin'?(state.mapPins||[]).find(p=>p.id===r.id):null;
+   if(source&&Number.isFinite(source.x)&&Number.isFinite(source.y)){
+    const center=worldToScreen(source);mapCtx.save();mapCtx.strokeStyle='#cf7426';mapCtx.lineWidth=3;mapCtx.setLineDash([8,5]);mapCtx.beginPath();mapCtx.arc(center.x,center.y,22,0,Math.PI*2);mapCtx.stroke();mapCtx.restore();
+   }
+  }
   drawCurrentStroke();
   drawPendingReachMarker();
   updateScaleBar();
@@ -3032,9 +3039,10 @@ function replaceContourSegment(f,startSnap,endSnap,newPts){
 }
 
 function setTool(tool,{quiet=false}={}){
-  if(['mapInk','boundary','editContour','fill','paint','basin','watercourse','reach','channel','section','photo','historicalPhoto','stop','erase'].includes(tool)&&!requireEditable('usar esta herramienta'))return;
+  if(['mapInk','boundary','editContour','fill','paint','basin','watercourse','reach','channel','section','photo','historicalPhoto','stop','erase','relocate'].includes(tool)&&!requireEditable('usar esta herramienta'))return;
+  if(state.relocatingPoint&&tool!=='relocate'&&tool!=='select')cancelPointRelocation(true);
   state.tool=tool;
-  const labels={mapInk:'Anotar mapa',pan:'Mover',boundary:'Límite',editContour:'Editar contorno',fill:'Rellenar',paint:'Pintar',basin:'Conca',watercourse:'Curs / canal',reach:'Trams',channel:'Canal',section:'Sección',photo:'Foto',historicalPhoto:'Fotografía',stop:'Crear parada',gps:'GPS',select:'Seleccionar',erase:'Borrador'};
+  const labels={relocate:'Mover elemento',mapInk:'Anotar mapa',pan:'Mover',boundary:'Límite',editContour:'Editar contorno',fill:'Rellenar',paint:'Pintar',basin:'Conca',watercourse:'Curs / canal',reach:'Trams',channel:'Canal',section:'Sección',photo:'Foto',historicalPhoto:'Fotografía',stop:'Crear parada',gps:'GPS',select:'Seleccionar',erase:'Borrador'};
   $('#activeToolBtn span').textContent=labels[tool]||tool;
   const ai=$('#activeToolIcon');if(ai)ai.src=ICONS[tool]||ICONS.pan;
   $$('#toolMenu button[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool===tool));
@@ -3049,6 +3057,7 @@ function setTool(tool,{quiet=false}={}){
   updateMaterialButton();
   persistState();
   if(!quiet && tool==='pan') toast('Mover mapa');
+  if(!quiet && tool==='relocate')toast('Toca el elemento que quieres mover y después su nueva ubicación.',5500);
 }
 function updateMaterialButton(){
   const m=materialById(state.material);
@@ -3147,8 +3156,243 @@ function beginPan(p,pointerId){state.pointerPan={pointerId,p,center:{...state.vi
 function movePan(p){if(!state.pointerPan)return;markMapMotion();const dx=p.x-state.pointerPan.p.x,dy=p.y-state.pointerPan.p.y,d=screenOffsetToWorld(dx,dy,state.pointerPan.center.scale,state.pointerPan.center.rotation||0);state.view.cx=state.pointerPan.center.cx-d.x;state.view.cy=state.pointerPan.center.cy-d.y;drawAll();}
 function endPan(){if(state.pointerPan){state.pointerPan=null;inkCanvas.style.cursor=state.tool==='pan'?'grab':'crosshair';persistState();}}
 
+
+/* R29: universal two-tap relocation. All map coordinates remain in working CRS.
+   Original EXIF, identifiers, binaries, photos and associations are retained. */
+function relocationCore(){return window.GeoCauceMapRelocation;}
+function relocationTargetWorld(sp){return screenToWorld(sp);}
+function relocationWgs(point){
+ const epsg=workingMapEpsg();
+ if(epsg===4326||epsg===4258)return{lat:point.y,lon:point.x};
+ const ll=fieldUtmToLonLat(point.x,point.y,epsg);
+ return ll&&Number.isFinite(ll.lat)&&Number.isFinite(ll.lon)?ll:null;
+}
+function relocationUtm(point,ll){
+ const epsg=projectCrsEpsg();
+ if(!ll||!utmZoneForEpsg(epsg))return null;
+ const p=lonLatToMapCoords(ll.lon,ll.lat,epsg);
+ return Number.isFinite(p.x)&&Number.isFinite(p.y)?{...p,crs:epsg}:null;
+}
+function relocationLabel(p){
+ if(p.kind==='photoPoint')return historicalPointLabel(historicalPointById(p.id));
+ if(p.kind==='feature'){const f=state.features.find(f=>f.id===p.id);return f?.name||f?.reachCode||f?.id||'Elemento';}
+ if(p.kind==='pin'){const pin=(state.mapPins||[]).find(p0=>p0.id===p.id);return pin?.label||pin?.text||'Punto del mapa';}
+ if(p.kind==='photo')return'Fotografía';
+ if(p.kind==='notebook')return'Nota de la libreta';
+ if(p.kind==='ink')return'Anotación del mapa';
+ return'Elemento del mapa';
+}
+function relocationBanner(){
+ let node=$('#gcRelocationBanner');
+ if(!node){
+  node=document.createElement('div');node.id='gcRelocationBanner';node.className='gc-relocation-banner hidden';
+  node.setAttribute('role','status');
+  node.innerHTML='<span id="gcRelocationText">Selecciona la nueva ubicación</span><button id="gcRelocationCancel" type="button">Cancelar</button>';
+  document.body.appendChild(node);
+  $('#gcRelocationCancel').onclick=()=>cancelPointRelocation();
+ }
+ return node;
+}
+function cancelPointRelocation(silent=false){
+ if(!state.relocatingPoint)return;
+ if(state.relocatingPoint.busy){toast('El traslado se está guardando; no cierres GeoCauce.');return;}
+ state.relocatingPoint=null;
+ relocationBanner().classList.add('hidden');document.body.classList.remove('gc-relocating');
+ if(state.tool==='relocate')setTool('select',{quiet:true});
+ if(!silent)toast('Traslado cancelado');
+}
+function beginPointRelocation(kind,id,extra={}){
+ if(!requireEditable('mover elementos del mapa'))return false;
+ if(!relocationCore()){toast('Actualiza GeoCauce para activar Mover elemento');return false;}
+ if(state.relocatingPoint?.busy)return false;
+ let found=false;
+ if(kind==='photoPoint')found=!!historicalPointById(id);
+ else if(kind==='pin')found=(state.mapPins||[]).some(p=>p.id===id);
+ else if(kind==='feature')found=!!state.features.find(f=>f.id===id&&f.points?.length);
+ else if(kind==='photo')found=!!id;
+ else if(kind==='ink')found=!!state.mapInk?.[extra.index];
+ else if(kind==='notebook')found=!!state.notebook?.pages?.some(p=>p.id===id);
+ if(!found){toast('El elemento seleccionado ya no está disponible');return false;}
+ const request={kind,id,...extra,projectId:state.projectId,campaign:state.campaign,busy:false};
+ const mode=state.tool;
+ // Map taps must reach relocation even if the default tool was pan.
+ if(mode==='pan'||mode==='gps')setTool('select',{quiet:true});
+ state.relocatingPoint=request;
+ hideMapContextMenu();
+ const banner=relocationBanner();
+ $('#gcRelocationText').textContent='📍 Mover '+relocationLabel(request)+': toca la nueva posición del mapa.';
+ banner.classList.remove('hidden');document.body.classList.add('gc-relocating');
+ toast('Toca el nuevo punto para anclar '+relocationLabel(request)+'; pulsa Cancelar para salir.',4800);
+ return true;
+}
+function selectRelocationSource(sp){
+ const core=relocationCore(),note=nearestNoteMarker(sp),hp=nearestHistoricalPhotoPoint(sp),pin=nearestMapPin(sp);
+ if(hp)return beginPointRelocation('photoPoint',hp.id);
+ if(pin)return beginPointRelocation(pin.kind==='photo'&&pin.photoId?'photo':'pin',pin.photoId||pin.id);
+ if(note&&!note.featureId){
+  const page=state.notebook?.pages?.find(p=>p.id===note.pageId);
+  const index=page?.links?.findIndex(link=>link.type==='position'&&Math.hypot(link.x-note.x,link.y-note.y)<.001);
+  if(index>=0)return beginPointRelocation('notebook',note.pageId,{linkIndex:index});
+ }
+ const f=nearestFeature(screenToWorld(sp),false);
+ if(f)return beginPointRelocation('feature',f.id);
+ const w=screenToWorld(sp),tol=Math.max(9/state.view.scale,1e-8);
+ for(let i=(state.mapInk||[]).length-1;i>=0;i--){
+  const ink=state.mapInk[i];if(ink?.points?.length&&distanceToPolyline(w,ink.points)<=tol)
+   return beginPointRelocation('ink',String(i),{index:i});
+ }
+ toast('Toca una fotografía, punto, parada, nota, anotación, tramo, sección o polígono.',4800);
+ return false;
+}
+function relocationFeatureGroup(f){
+ if(f?.type==='reach'&&f.courseId){
+  const parent=state.features.find(x=>x.id===f.courseId&&x.type==='watercourse');
+  if(parent)f=parent; // reach boundaries and source course must remain coherent
+ }
+ const selected=[f],ids=new Set([f.id]);
+ if(f.type==='watercourse'){
+  const reaches=state.features.filter(x=>x.type==='reach'&&(x.courseId===f.id||x.watercourseId===f.id));
+  for(const reach of reaches){ids.add(reach.id);selected.push(reach);}
+  for(const section of state.features.filter(x=>x.type==='section'&&
+   (x.courseId===f.id||x.watercourseId===f.id||ids.has(x.reachId))))
+   if(!ids.has(section.id)){ids.add(section.id);selected.push(section);}
+ }
+ return selected;
+}
+function persistRelocatedState(){
+ const saved=persistStateLocalOnly();
+ if(!saved)throw new Error('No se ha guardado el nuevo emplazamiento');
+ scheduleCloudSync(900);
+}
+async function applyPointRelocation(request,target){
+ const core=relocationCore();
+ if(!core?.valid(target))throw new Error('Selecciona una posición válida del mapa');
+ const crs=workingMapEpsg(),ll=relocationWgs(target);
+ if(!ll||Math.abs(ll.lat)>90||Math.abs(ll.lon)>180)throw new Error('La posición elegida está fuera de los límites geográficos');
+ const opts={crs,lonLat:ll,utm:relocationUtm(target,ll)};
+ if(request.kind==='feature'){
+  const feature=state.features.find(f=>f.id===request.id);
+  if(!feature)throw Error('La geometría ya no existe');
+  const group=relocationFeatureGroup(feature),root=group[0],anchor=core.featureAnchor(root);
+  if(!anchor)throw Error('La geometría no tiene un centro válido');
+  const dx=target.x-anchor.x,dy=target.y-anchor.y;
+  const snapshot=cloneFeatures(),original=state.features;
+  try{
+   const ids=new Set(group.map(g=>g.id));
+   state.features=state.features.map(f=>{
+    if(!ids.has(f.id))return f;
+    const center=core.featureAnchor(f);
+    return core.moveFeature(f,{x:center.x+dx,y:center.y+dy},center);
+   });
+   persistRelocatedState();
+   state.history.push(snapshot);if(state.history.length>20)state.history.shift();
+   renderSectionList();updateHydroFab();
+  }catch(error){state.features=original;throw error;}
+  return group.length>1?'Cauce, tramos y secciones trasladados':'Geometría trasladada sin deformarla';
+ }
+ if(request.kind==='pin'){
+  const index=(state.mapPins||[]).findIndex(p=>p.id===request.id);
+  if(index<0)throw Error('El punto ya no existe');
+  const old=state.mapPins[index];
+  const moved=core.movePin(old,target,opts);
+  state.mapPins[index]=moved;
+  try{persistRelocatedState();}catch(error){state.mapPins[index]=old;throw error;}
+  return old.kind==='stop'?'Parada trasladada; fotografías vinculadas sin desplazar':'Punto trasladado';
+ }
+ if(request.kind==='ink'){
+  const index=request.index,old=state.mapInk?.[index];
+  if(!old)throw Error('Anotación no encontrada');
+  state.mapInk[index]=core.moveInkStroke(old,target);
+  try{persistRelocatedState();}catch(error){state.mapInk[index]=old;throw error;}
+  return 'Anotación trasladada';
+ }
+ if(request.kind==='notebook'){
+  const page=state.notebook?.pages?.find(p=>p.id===request.id),link=page?.links?.[request.linkIndex];
+  if(!page||link?.type!=='position')throw Error('Posición de nota no encontrada');
+  const original=page.links[request.linkIndex];
+  page.links[request.linkIndex]=core.moveNotebookLink(link,target);
+  try{persistRelocatedState();}catch(error){page.links[request.linkIndex]=original;throw error;}
+  return 'Punto vinculado a la libreta trasladado';
+ }
+ if(!['photoPoint','photo'].includes(request.kind))throw Error('Tipo de elemento no compatible');
+ const isIndividual=request.kind==='photo',photoId=isIndividual?request.id:null;
+ let point=isIndividual?(state.historicalPhotoPoints||[]).find(p=>(p.photos||[]).includes(photoId)):historicalPointById(request.id);
+ const records=[],changes=[];
+ if(!isIndividual&&!point)throw Error('Punto fotográfico no encontrado');
+ const photoIds=isIndividual?[photoId]:(point.photos||[]).slice();
+ for(const id of photoIds){
+  const record=await dbGet('photos',id);
+  if(!record?.blob)throw new Error('No se encontró el archivo original de '+id+'. No se ha movido ningún elemento');
+  records.push(record);
+ }
+ const oldPoints=cloneAny(state.historicalPhotoPoints||[]),oldPins=cloneAny(state.mapPins||[]);
+ try{
+  if(isIndividual){
+   if(point&&(point.photos||[]).length>1){
+    // Moving one photo never moves other photos that share the original point.
+    point.photos=point.photos.filter(id=>id!==photoId);
+    const newPoint={...point,id:'hp'+cloudUuid(),name:records[0].name||'Fotografía',
+      linkedStopId:null,photos:[photoId],createdAt:Date.now()};
+    state.historicalPhotoPoints.push(newPoint);point=newPoint;
+   }else if(!point){
+    point={id:'hp'+cloudUuid(),name:records[0].name||'Fotografía',
+      photos:[photoId],campaignId:state.campaign,createdAt:Date.now()};
+    state.historicalPhotoPoints.push(point);
+   }
+  }
+  const updatedPoint=core.movePhotoPoint(point,target,opts);
+  const index=state.historicalPhotoPoints.findIndex(p=>p.id===point.id);
+  if(index<0)throw Error('No se ha encontrado el punto tras modificarlo');
+  state.historicalPhotoPoints[index]=updatedPoint;
+  for(const pin of state.mapPins||[])if(pin.kind==='photo'&&photoIds.includes(pin.photoId)){
+   Object.assign(pin,core.movePin(pin,target,opts));
+  }
+  for(const original of records){
+   const next=core.movePhotoRecord(original,target,{crs,lonLat:ll,pointId:updatedPoint.id});
+   await dbPut('photos',next);
+   const stored=await dbGet('photos',original.id);
+   if(!stored?.blob||stored.blob.size!==original.blob.size||stored.historicalPointId!==updatedPoint.id)
+    throw Error('No se ha verificado la actualización de '+original.id);
+   changes.push(original);
+  }
+  persistRelocatedState();
+ }catch(error){
+  state.historicalPhotoPoints=oldPoints;state.mapPins=oldPins;
+  const failedRestores=[];
+  for(const original of changes)try{await dbPut('photos',original);}catch(e){failedRestores.push(original.id);}
+  if(failedRestores.length)throw Error('No se pudo restaurar la posición anterior de '+failedRestores.join(', ')+'. '+error.message);
+  throw error;
+ }
+ return isIndividual?'Fotografía trasladada; las demás conservan su ubicación':
+  'Punto fotográfico y sus '+photoIds.length+' fotografía(s) trasladados';
+}
+async function finishPointRelocation(sp){
+ const pending=state.relocatingPoint;
+ if(!pending||pending.busy)return;
+ if(!isEditableCampaign()||pending.projectId!==state.projectId||pending.campaign!==state.campaign){
+  cancelPointRelocation();toast('El proyecto o el día han cambiado; no se ha movido ningún elemento');return;
+ }
+ const dest=relocationTargetWorld(sp);
+ if(!relocationCore()?.valid(dest)){toast('Selecciona una posición válida');return;}
+ const label=relocationLabel(pending);
+ if(!confirm('¿Anclar «'+label+'» en el nuevo punto? Las coordenadas cambiarán, pero se conservarán sus relaciones y los archivos originales.'))return;
+ pending.busy=true;
+ $('#gcRelocationText').textContent='Guardando nueva posición de '+label+'…';
+ try{
+  const message=await applyPointRelocation(pending,dest);
+  state.relocatingPoint=null;
+  relocationBanner().classList.add('hidden');document.body.classList.remove('gc-relocating');
+  if(state.tool==='relocate')setTool('select',{quiet:true});
+  drawAll();toast('✓ '+message,5000);
+ }catch(error){
+  console.error('R29 · trasladar elemento',error);
+  toast('No se ha completado el traslado: '+(error.message||error),6500);
+ }finally{pending.busy=false;}
+}
+
 function selectAt(sp){
-  if(state.relocatingPoint){finishPointRelocation(sp);return;}
+  if(state.relocatingPoint){void finishPointRelocation(sp);return;}
+  if(state.tool==='relocate'){selectRelocationSource(sp);return;}
   if(state.historicalLinkPointId){handleHistoricalLinkTap(sp);return;}
   const hp=nearestHistoricalPhotoPoint(sp);if(hp){openHistoricalPhotoPoint(hp.id);return;}
   const pin=nearestMapPin(sp);if(pin){if(pin.kind==='photo'&&pin.photoId){window.GeoCaucePhotoWorkspace?.showGallery(pin.photoId);return;}if(pin.kind==='note'){alert(pin.text||'Nota ràpida');return;}if(pin.kind==='stop'){openMapStop(pin.id);return;}}
@@ -3157,7 +3401,8 @@ function selectAt(sp){
   const f=nearestFeature(screenToWorld(sp),false);if(f){state.selectedId=f.id;if(f.type==='watercourse')state.activeCourseId=f.id;else if(f.type==='reach')state.activeCourseId=f.courseId||state.activeCourseId;updateHydroFab();showFeatureCard(f);}else{state.selectedId=null;hideFeatureCard();}drawAll();
 }
 function startMapAction(e,p){
-  if(state.relocatingPoint){finishPointRelocation(p);return;}
+  if(state.relocatingPoint){void finishPointRelocation(p);return;}
+  if(state.tool==='relocate'){selectRelocationSource(p);return;}
   if(state.historicalLinkPointId){handleHistoricalLinkTap(p);return;}
   if(state.vectorExtract){if(beginVectorEndpointDrag(p,e.pointerId))return;handleVectorExtractTap(p);return;}
   if(state.tool==='pan' || e.button===1 || e.button===2){beginPan(p,e.pointerId);return;}
