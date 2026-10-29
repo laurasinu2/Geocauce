@@ -23,7 +23,8 @@ function scenario({features=[],points=[],pins=[],photos=[],persistFailure=false}
   dbGet:async(_,id)=>records.get(id),
   dbPut:async(_,record)=>{records.set(record.id,record);},
   cloneAny:clone,cloneFeatures:()=>clone(state.features),
-  cloudUuid:()=>String(++sequence),persistStateLocalOnly:()=>{
+  cloudUuid:()=>('unique-'+(++sequence)),historicalPointById:id=>state.historicalPhotoPoints.find(p=>p.id===id)||null,
+  persistStateLocalOnly:()=>{
    persistCalls++;if(persistFailure)throw Error('Local storage denied');
    return{projectId:'test'};
   },scheduleCloudSync:()=>{},renderSectionList:()=>{},updateHydroFab:()=>{}
