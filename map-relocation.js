@@ -52,7 +52,9 @@
    positionHistory:stamp(pin,pin,target),positionSource:'manual-map',updatedAt:Date.now()};
  }
  function movePhotoPoint(point,target,options={}){
-  const moved=movePin(point,target,options);
+  if(!valid(target)||!point)throw Error('Posición fotográfica inválida');
+  const moved=valid(point)?movePin(point,target,options):{...point,x:target.x,y:target.y,
+   crs:options.crs||point.crs||null,positionSource:'manual-map',updatedAt:Date.now()};
   return{...moved,photoPointPosition:{...point.photoPointPosition,x:target.x,y:target.y,
    crs:options.crs||point.crs||null,source:'manual-map'}};
  }
