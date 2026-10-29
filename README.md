@@ -1,3 +1,12 @@
+# Convención de versiones y ramas de GeoCauce
+
+**Norma de desarrollo desde el 29/10/2026:** cada rama nueva representa una versión nueva y su nombre debe incluir **solamente el número de revisión y la fecha de creación**, con el formato `rNN-AAAAMMDD`, por ejemplo `r29-20261029`, `r30-20261030`. No utilizar prefijos `feature/`, `backup/` ni sufijos descriptivos en las ramas nuevas. Incrementar `NN` en cada rama creada, aunque el trabajo sea una continuación de la versión anterior. Consultar las ramas existentes antes de asignar el siguiente número.
+
+La rama histórica `backup/r28-copia-20261027` permanece como referencia funcional sin modificar. La rama `r29-20261029` se creó desde el trabajo inicial de fotografías unificadas y es el desarrollo activo. Mantener `main` intacta salvo petición expresa. Los nombres anteriores se conservan por compatibilidad histórica; esta norma se aplica a las nuevas ramas.
+
+**Plataforma principal de desarrollo y pruebas:** PWA (navegador e instalación como aplicación, principalmente Android). No exigir una app nativa ni conexión a Supabase para las funciones locales. Reutilizar IndexedDB, el almacenamiento binario y la cola incremental de sincronización existentes. Los datos de prueba sintéticos son suficientes para desarrollar e iniciar pruebas; fotografías reales y copias de proyectos son opcionales para validar compatibilidad con cámaras y proyectos concretos, no requisitos para empezar.
+
+---
 ## v0.16.38 · punts fotogràfics històrics i selecció SHP directa
 
 Punts fotogràfics amb sèrie temporal i control de visibilitat, més selecció successiva de geometries SHP directament sobre el mapa.
