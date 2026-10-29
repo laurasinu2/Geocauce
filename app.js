@@ -3641,6 +3641,7 @@ async function showFeatureCard(f){
     $('#featureCardType').textContent='';
     $('#featureMoreMenu')?.classList.add('hidden');
     $('#gcMoveFeatureBtn').disabled=!isEditableCampaign();
+    $('#gcMoveMaterialBtn').disabled=!isEditableCampaign();
     positionFeatureCard(f);
     return;
   }
@@ -3663,7 +3664,7 @@ async function showFeatureCard(f){
   const ro=!isEditableCampaign();
   $('#featurePhotoBtn').disabled=false;
   $('#deleteFeatureBtn').disabled=ro;
-  $('#gcMoveFeatureBtn').disabled=ro;$('#gcMoveFeatureMoreBtn').disabled=ro;
+  $('#gcMoveFeatureBtn').disabled=ro;$('#gcMoveFeatureMoreBtn').disabled=ro;$('#gcMoveMaterialBtn').disabled=ro;
   $('#editContourBtn').disabled=ro||(!(f.closed&&f.type!=='basin')&&f.type!=='reach');$('#editContourBtn span').textContent=f.type==='reach'?'Editar tram':'Editar';
   $('#featureMoreBtn').disabled=false;
   $('#featureMoreBtn').setAttribute('aria-expanded','false');
@@ -6625,6 +6626,7 @@ function initUi(){
   const moveSelectedFeature=()=>{const id=state.selectedId;if(!id)return;hideFeatureCard();beginPointRelocation('feature',id);};
   $('#gcMoveFeatureBtn').onclick=moveSelectedFeature;
   $('#gcMoveFeatureMoreBtn').onclick=moveSelectedFeature;
+  $('#gcMoveMaterialBtn').onclick=moveSelectedFeature;
   $('#photoInput').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)photoChosen(file).catch(err=>{console.error('Error guardando fotografía',err);toast('No se pudo guardar la foto: '+(err.message||err),6500);});};
   $('#projectImportInput').onchange=e=>{const f=e.target.files?.[0];e.target.value='';if(f)importProjectPackage(f);};$('#gnssBadge').onclick=()=>{updateGnssUi();$('#gnssPopover').classList.toggle('hidden');};$('#gnssPopoverClose').onclick=()=>$('#gnssPopover').classList.add('hidden');$('#gnssRefreshBtn').onclick=locateMe;
   $('#sheetClose').onclick=closeSheet;$('#sheetUndo').onclick=()=>{const c=$('#sheetCanvas');if(c._readOnly){toast('Ficha en solo lectura');return;}c._inkStore?.pop();redrawInkStore(c);};
