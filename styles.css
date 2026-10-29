@@ -1456,3 +1456,7 @@ html{ -webkit-text-size-adjust:100%;text-size-adjust:100%; }
 .gc-pin-move-card>div button{width:100%;min-height:44px;padding:11px;border:0;border-radius:10px;background:#355e42;color:white;font-size:14px;font-weight:700;cursor:pointer}
 .gc-pin-move-card>div button:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:600px){.gc-relocation-banner{top:calc(env(safe-area-inset-top) + 7px);left:8px;right:8px;transform:none;width:auto;padding:9px 9px 9px 11px;font-size:12px;gap:7px}.gc-relocation-banner button{padding:7px 9px}.gc-pin-move-actions{padding:10px}}
+
+.gc-relocation-choose-list{display:flex;flex-direction:column;gap:7px;margin-top:14px;max-height:55dvh;overflow-y:auto}
+.gc-relocation-choose-list button{min-height:44px;text-align:left;background:#f0f4ed;border:1px solid #c6d5c5;border-radius:9px;padding:10px 12px;color:#2d4e36;font-weight:600;cursor:pointer}
+.gc-relocation-choose-list button:hover{background:#e2ede1}
