@@ -3298,7 +3298,7 @@ async function applyPointRelocation(request,target){
  if(request.kind==='feature'){
   const feature=state.features.find(f=>f.id===request.id);
   if(!feature)throw Error('La geometría ya no existe');
-  const group=relocationFeatureGroup(feature),root=group[0],anchor=core.featureAnchor(root);
+  const group=relocationFeatureGroup(feature),anchor=core.featureAnchor(feature);
   if(!anchor)throw Error('La geometría no tiene un centro válido');
   const dx=target.x-anchor.x,dy=target.y-anchor.y;
   const snapshot=cloneFeatures(),original=state.features;
@@ -3466,7 +3466,7 @@ function moveTouchNavigation(e,p){
 function endTouchNavigation(e){
   const c=state.touchTapCandidates?.get(e.pointerId),wasPenMode=appSettings.inputMode==='pen';
   if(c?.holdTimer)clearTimeout(c.holdTimer);state.touches.delete(e.pointerId);state.touchTapCandidates?.delete(e.pointerId);if(state.touches.size<2)state.pinch=null;if(state.touches.size===1){const [rp]=state.touches.values();state.panStart={p:{...rp},center:{...state.view}};}if(state.touches.size===0){state.panStart=null;persistState();}
-  if((wasPenMode||!!state.relocatingPoint||state.tool==='relocate')&&c&&!c.multi&&!c.held&&Date.now()-c.time<600&&Math.hypot(c.last.x-c.start.x,c.last.y-c.start.y)<8)selectAt(c.last);
+  if(e.type!=='pointercancel'&&(wasPenMode||!!state.relocatingPoint||state.tool==='relocate')&&c&&!c.multi&&!c.held&&Date.now()-c.time<600&&Math.hypot(c.last.x-c.start.x,c.last.y-c.start.y)<8)selectAt(c.last);
 }
 function onMapPointerDown(e){
   if($('#mapScreen').classList.contains('hidden'))return;if(!$('#mapContextMenu')?.classList.contains('hidden'))hideMapContextMenu();
