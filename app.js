@@ -3041,7 +3041,7 @@ function replaceContourSegment(f,startSnap,endSnap,newPts){
 
 function setTool(tool,{quiet=false}={}){
   if(['mapInk','boundary','editContour','fill','paint','basin','watercourse','reach','channel','section','photo','historicalPhoto','stop','erase','relocate'].includes(tool)&&!requireEditable('usar esta herramienta'))return;
-  if(state.relocatingPoint&&tool!=='relocate'&&tool!=='select')cancelPointRelocation(true);
+  if(state.relocatingPoint&&tool!==state.tool)cancelPointRelocation(true);
   state.tool=tool;
   const labels={relocate:'Mover elemento',mapInk:'Anotar mapa',pan:'Mover',boundary:'Límite',editContour:'Editar contorno',fill:'Rellenar',paint:'Pintar',basin:'Conca',watercourse:'Curs / canal',reach:'Trams',channel:'Canal',section:'Sección',photo:'Foto',historicalPhoto:'Fotografía',stop:'Crear parada',gps:'GPS',select:'Seleccionar',erase:'Borrador'};
   $('#activeToolBtn span').textContent=labels[tool]||tool;
@@ -3161,6 +3161,27 @@ function endPan(){if(state.pointerPan){state.pointerPan=null;inkCanvas.style.cur
 /* R29: universal two-tap relocation. All map coordinates remain in working CRS.
    Original EXIF, identifiers, binaries, photos and associations are retained. */
 function relocationCore(){return window.GeoCauceMapRelocation;}
+
+function openPinRelocationActions(pin){
+ if(!pin)return;
+ let host=$('#gcPinMoveActions');
+ if(!host){
+  host=document.createElement('div');
+  host.id='gcPinMoveActions';host.className='gc-pin-move-actions hidden';
+  host.innerHTML='<div class="gc-pin-move-card"><header><b id="gcPinMoveName">Punto del mapa</b><button id="gcPinMoveClose" type="button" aria-label="Cerrar">✕</button></header><p id="gcPinMoveCoords"></p><div><button id="gcPinMoveStart" type="button">📍 Mover a otro punto</button></div></div>';
+  document.body.appendChild(host);
+  $('#gcPinMoveClose').onclick=()=>host.classList.add('hidden');
+  host.addEventListener('click',e=>{if(e.target===host)host.classList.add('hidden');});
+ }
+ $('#gcPinMoveName').textContent=pin.kind==='gps'?'Punto GPS':pin.kind==='note'?'Nota rápida':'Punto';
+ $('#gcPinMoveCoords').textContent=(pin.label||pin.text||'')+' · EPSG:'+workingMapEpsg()+' · X '+Number(pin.x).toFixed(2)+' · Y '+Number(pin.y).toFixed(2);
+ $('#gcPinMoveStart').disabled=!isEditableCampaign();
+ $('#gcPinMoveStart').onclick=()=>{
+  host.classList.add('hidden');beginPointRelocation('pin',pin.id);
+ };
+ host.classList.remove('hidden');
+}
+
 function relocationTargetWorld(sp){return screenToWorld(sp);}
 function relocationWgs(point){
  const epsg=workingMapEpsg();
@@ -3202,6 +3223,7 @@ function cancelPointRelocation(silent=false){
  if(state.tool==='relocate')setTool('select',{quiet:true});
  if(!silent)toast('Traslado cancelado');
 }
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.relocatingPoint){e.preventDefault();e.stopPropagation();cancelPointRelocation();}});
 function beginPointRelocation(kind,id,extra={}){
  if(!requireEditable('mover elementos del mapa'))return false;
  if(!relocationCore()){toast('Actualiza GeoCauce para activar Mover elemento');return false;}
@@ -3216,6 +3238,8 @@ function beginPointRelocation(kind,id,extra={}){
  if(!found){toast('El elemento seleccionado ya no está disponible');return false;}
  const request={kind,id,...extra,projectId:state.projectId,campaign:state.campaign,busy:false};
  const mode=state.tool;
+ $('#layersPanel')?.classList.add('hidden');
+ if(!$('#mobileShell')?.classList.contains('hidden'))window.GeoCauceShowMapForRelocation?.();
  // Map taps must reach relocation even if the default tool was pan.
  if(mode==='pan'||mode==='gps')setTool('select',{quiet:true});
  state.relocatingPoint=request;
@@ -3396,7 +3420,7 @@ function selectAt(sp){
   if(state.tool==='relocate'){selectRelocationSource(sp);return;}
   if(state.historicalLinkPointId){handleHistoricalLinkTap(sp);return;}
   const hp=nearestHistoricalPhotoPoint(sp);if(hp){openHistoricalPhotoPoint(hp.id);return;}
-  const pin=nearestMapPin(sp);if(pin){if(pin.kind==='photo'&&pin.photoId){window.GeoCaucePhotoWorkspace?.showGallery(pin.photoId);return;}if(pin.kind==='note'){alert(pin.text||'Nota ràpida');return;}if(pin.kind==='stop'){openMapStop(pin.id);return;}}
+  const pin=nearestMapPin(sp);if(pin){if(pin.kind==='photo'&&pin.photoId){window.GeoCaucePhotoWorkspace?.showGallery(pin.photoId);return;}if(pin.kind==='stop'){openMapStop(pin.id);return;}openPinRelocationActions(pin);return;}
   const note=nearestNoteMarker(sp);if(note){openNotebook(note.pageId);return;}
   const rb=nearestReachBoundary(sp);if(rb){const id=rb.starts?.[0]||rb.ends?.[0],f=state.features.find(x=>x.id===id);if(f){state.selectedId=f.id;state.activeCourseId=f.courseId;updateHydroFab();showFeatureCard(f);drawAll();return;}}
   const f=nearestFeature(screenToWorld(sp),false);if(f){state.selectedId=f.id;if(f.type==='watercourse')state.activeCourseId=f.id;else if(f.type==='reach')state.activeCourseId=f.courseId||state.activeCourseId;updateHydroFab();showFeatureCard(f);}else{state.selectedId=null;hideFeatureCard();}drawAll();
@@ -3423,7 +3447,7 @@ function startMapAction(e,p){
   inkCanvas.setPointerCapture?.(e.pointerId);
 }
 function beginTouchNavigation(e,p){
-  hideMapContextMenu();state.touches.set(e.pointerId,p);state.touchTapCandidates=state.touchTapCandidates||new Map();const candidate={start:{...p},last:{...p},time:Date.now(),multi:false,held:false,holdTimer:null};state.touchTapCandidates.set(e.pointerId,candidate);inkCanvas.setPointerCapture?.(e.pointerId);candidate.holdTimer=setTimeout(()=>{if(candidate.multi||Math.hypot(candidate.last.x-candidate.start.x,candidate.last.y-candidate.start.y)>9||state.touches.size!==1)return;candidate.held=true;state.panStart=null;showMapContextMenu(candidate.start);},620);
+  hideMapContextMenu();state.touches.set(e.pointerId,p);state.touchTapCandidates=state.touchTapCandidates||new Map();const candidate={start:{...p},last:{...p},time:Date.now(),multi:false,held:false,holdTimer:null};state.touchTapCandidates.set(e.pointerId,candidate);inkCanvas.setPointerCapture?.(e.pointerId);candidate.holdTimer=setTimeout(()=>{if(state.relocatingPoint||state.tool==='relocate'||candidate.multi||Math.hypot(candidate.last.x-candidate.start.x,candidate.last.y-candidate.start.y)>9||state.touches.size!==1)return;candidate.held=true;state.panStart=null;showMapContextMenu(candidate.start);},620);
   if(state.touches.size===2){
     for(const c of state.touchTapCandidates.values()){c.multi=true;if(c.holdTimer){clearTimeout(c.holdTimer);c.holdTimer=null;}}
     const vals=[...state.touches.values()],mid={x:(vals[0].x+vals[1].x)/2,y:(vals[0].y+vals[1].y)/2};
@@ -3442,18 +3466,18 @@ function moveTouchNavigation(e,p){
 function endTouchNavigation(e){
   const c=state.touchTapCandidates?.get(e.pointerId),wasPenMode=appSettings.inputMode==='pen';
   if(c?.holdTimer)clearTimeout(c.holdTimer);state.touches.delete(e.pointerId);state.touchTapCandidates?.delete(e.pointerId);if(state.touches.size<2)state.pinch=null;if(state.touches.size===1){const [rp]=state.touches.values();state.panStart={p:{...rp},center:{...state.view}};}if(state.touches.size===0){state.panStart=null;persistState();}
-  if(wasPenMode&&c&&!c.multi&&!c.held&&Date.now()-c.time<420&&Math.hypot(c.last.x-c.start.x,c.last.y-c.start.y)<8)selectAt(c.last);
+  if((wasPenMode||!!state.relocatingPoint||state.tool==='relocate')&&c&&!c.multi&&!c.held&&Date.now()-c.time<600&&Math.hypot(c.last.x-c.start.x,c.last.y-c.start.y)<8)selectAt(c.last);
 }
 function onMapPointerDown(e){
   if($('#mapScreen').classList.contains('hidden'))return;if(!$('#mapContextMenu')?.classList.contains('hidden'))hideMapContextMenu();
   const p=eventPoint(e,inkCanvas);
-  if(e.pointerType==='touch' && appSettings.inputMode==='pen' && state.tool!=='stop'){beginTouchNavigation(e,p);return;}
+  if(e.pointerType==='touch' && ((appSettings.inputMode==='pen' && state.tool!=='stop')||state.tool==='relocate'||!!state.relocatingPoint)){beginTouchNavigation(e,p);return;}
   if(e.pointerType==='touch' && appSettings.inputMode==='finger' && state.tool==='pan'){beginTouchNavigation(e,p);return;}
   startMapAction(e,p);
 }
 function onMapPointerMove(e){
   const p=eventPoint(e,inkCanvas);
-  if(e.pointerType==='touch' && (appSettings.inputMode==='pen'||(appSettings.inputMode==='finger'&&state.tool==='pan'))){moveTouchNavigation(e,p);return;}
+  if(e.pointerType==='touch' && (appSettings.inputMode==='pen'||state.tool==='relocate'||!!state.relocatingPoint||(appSettings.inputMode==='finger'&&state.tool==='pan'))){moveTouchNavigation(e,p);return;}
   if(state.pointerPan && state.pointerPan.pointerId===e.pointerId){movePan(p);return;}
   if(moveVectorEndpointDrag(p,e.pointerId))return;
   if(state.currentStroke&&state.currentStroke.pointerId===e.pointerId){
