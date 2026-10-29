@@ -84,3 +84,11 @@ test('Repeated image is flagged by content hash, not by name',async()=>{
  const second=await api.analyzePhotoBatch([file(bytes,'C.jpg')],{existingHashes:[first[0].hash]});
  assert.equal(second[0].status,'duplicate');
 });
+
+test('Cancelling a large batch stops EXIF work without saving new data',async()=>{
+ const inputs=Array.from({length:85},(_,i)=>file(syntheticJpeg({lat:41.2+i*.001}),'GPS_'+i+'.jpg'));
+ let processed=0;
+ const result=await api.analyzePhotoBatch(inputs,{shouldCancel:()=>processed>=4,onProgress:()=>processed++});
+ assert.equal(processed,4);
+ assert.equal(result.length,4);
+});
