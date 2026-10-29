@@ -6898,6 +6898,13 @@ function initPhotoWorkspaceR29(){
  tool.install({
   getState:()=>state,canEdit:()=>!!state.projectId&&isEditableCampaign()&&canEditCurrentProject(),
   allPhotos:()=>dbAll('photos'),readPhoto:id=>dbGet('photos',id),savePhoto:record=>dbPut('photos',record),
+  photoHashes:async()=>{
+   const d=await db();return new Promise((resolve,reject)=>{
+    const hashes=[],cursor=d.transaction('photos','readonly').objectStore('photos').openCursor();
+    cursor.onsuccess=()=>{const c=cursor.result;if(!c){resolve(hashes);return;}if(c.value?.contentHash)hashes.push(c.value.contentHash);c.continue();};
+    cursor.onerror=()=>reject(cursor.error);
+   });
+  },
   findPhotoByHash:async hash=>{
    if(!hash)return null;
    const d=await db();return new Promise((resolve,reject)=>{
