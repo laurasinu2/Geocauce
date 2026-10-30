@@ -7241,11 +7241,24 @@ function initPhotoWorkspaceR29(){
   },
   findPhotoByHash:async hash=>{
    if(!hash)return null;
-   const d=await db();return new Promise((resolve,reject)=>{
-    const cursor=d.transaction('photos','readonly').objectStore('photos').openCursor();
-    cursor.onsuccess=()=>{const c=cursor.result;if(!c){resolve(null);return;}if(c.value?.contentHash===hash){resolve(c.value);return;}c.continue();};
-    cursor.onerror=()=>reject(cursor.error);
-   });
+   const entries=await dbAll('photos');
+   const direct=entries.find(p=>p.contentHash===hash);
+   if(direct)return direct;
+   // Older photo imports have no stored contentHash. Compare their actual binary
+   // so a legacy duplicate can be repaired without inserting a second record.
+   if(!crypto?.subtle)return null;
+   for(const photo of entries){
+    if(photo.contentHash||!(photo.blob instanceof Blob))continue;
+    const key=photo.id+'|'+photo.blob.size;
+    let digest=photoHashCache.get(key);
+    if(!digest){
+     const bytes=await crypto.subtle.digest('SHA-256',await photo.blob.arrayBuffer());
+     digest=Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
+     photoHashCache.set(key,digest);
+    }
+    if(digest===hash)return photo;
+   }
+   return null;
   },
   project:(lon,lat)=>{const w=lonLatToMapCoords(lon,lat,workingMapEpsg());return{x:w.x,y:w.y};},
   unproject:(x,y,crs)=>+crs===4326?{lon:x,lat:y}:fieldUtmToLonLat(x,y,+crs),
