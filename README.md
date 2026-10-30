@@ -1,3 +1,7 @@
+## R31 · recuperación de fotografías duplicadas sin marcador (30/10/2026)
+
+El importador de fotografías recupera la posición cartográfica cuando una fotografía R29 con SHA-256 idéntico ya existe en IndexedDB pero no tiene punto asociado por una subida interrumpida. Al reimportar el archivo original, se reutiliza el registro y se recupera el marcador con la posición guardada o con las coordenadas de la nueva importación, sin duplicar el binario ni desplazar puntos válidos. Si el original no tiene coordenadas, es necesario introducirlas manualmente. Respeta el interruptor de visibilidad de puntos fotográficos. No precisa cambios en Supabase. Pendiente de validación funcional con datos reales.
+
 ## R30 · corrección de perfiles MDE/LiDAR (30/10/2026)
 
 - Se recalculan perfiles de secciones, tramos y cauces cuando un cálculo anterior carece de elevaciones válidas; no se reutilizan resultados vacíos como si fueran correctos.
