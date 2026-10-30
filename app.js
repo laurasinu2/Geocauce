@@ -3787,7 +3787,7 @@ async function ensureSectionProfile(f,{force=false,preserveManual=true}={}){
   const raster=chooseDemRasterForSection(f),status=$('#sectionDemStatus'),metaEl=$('#sectionDemMeta'),grp=activeDemGroup();
   if(!raster){if(status)status.textContent='Sin MDT/LiDAR disponible';if(metaEl)metaEl.textContent='Importa un GeoTIFF de elevación para generar el perfil automáticamente.';redrawInkStore($('#sectionCanvas'));return;}
   const sourceKey=grp?`group:${grp.id}`:raster.id,same=f.sectionProfile?.sourceRasterId===sourceKey;
-  if(f.sectionProfile?.samples?.some(s=>Number.isFinite(s.z))&&!force&&same&&f.sectionProfile.geometryKey===JSON.stringify(f.points)&&f.sectionProfile.sourceSize===raster.sourceBlob?.size{updateSectionProfileStatus(f,raster);redrawInkStore($('#sectionCanvas'));return;}
+  if(f.sectionProfile?.samples?.some(s=>Number.isFinite(s.z))&&!force&&same&&f.sectionProfile.geometryKey===JSON.stringify(f.points)&&f.sectionProfile.sourceSize===raster.sourceBlob?.size){updateSectionProfileStatus(f,raster);redrawInkStore($('#sectionCanvas'));return;}
   if(status)status.textContent='Calculando perfil topográfico…';if(metaEl)metaEl.textContent=grp?grp.name:raster.name;
   try{
     const a=f.points[0],b=f.points[f.points.length-1],len=Math.hypot(b.x-a.x,b.y-a.y),res=Math.max(.001,demGroupResolution(grp)||sourceResolution(raster)||len/200),step=Math.max(res,len/700),n=Math.max(2,Math.min(800,Math.ceil(len/step)+1)),world=[];
