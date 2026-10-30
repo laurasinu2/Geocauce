@@ -408,14 +408,30 @@ async function commit(){
     const worldPoint=locationOf(row);
     if(row.hash&&known.has(row.hash)){
      const existing=await api.findPhotoByHash(row.hash);
-     // After an interrupted import a verified photo binary may have no map point.
-     // Repair only points created by this importer, never silently migrate older records.
-     if(existing?.importVersion==='r29'&&existing.historicalPointId){
-      const savedWorld=existing.gnss&&validXY(existing.gnss)?existing.gnss:worldPoint;
-      if(validXY(savedWorld)) {
-       const already=(api.getState().historicalPhotoPoints||[]).some(p=>
-        p.id===existing.historicalPointId||(p.photos||[]).includes(existing.id));
-       if(!already){ensureSavedPhotoPoint(existing,savedWorld,existing.importGroup,existing.campaignId);restored++;}
+     // A duplicate binary may have no linked marker after an interrupted import.
+     // Recover the existing record; never add a second photo or move a valid marker.
+     if(existing?.importVersion==='r29'&&existing.contentHash===row.hash){
+      const currentPoint=(api.getState().historicalPhotoPoints||[]).find(p=>
+       p.id===existing.historicalPointId||(p.photos||[]).includes(existing.id));
+      const savedWorld=currentPoint&&validXY(currentPoint)?currentPoint:
+       existing.gnss&&validXY(existing.gnss)?existing.gnss:worldPoint;
+      if(validXY(savedWorld)&&!currentPoint){
+       const previous={...existing};
+       const recovered={...existing,historicalPointId:existing.historicalPointId||'hp'+row.hash.slice(0,32)};
+       if(!validXY(recovered.gnss)){
+        const gps=row.manualGps||row.gps;
+        recovered.gnss={x:savedWorld.x,y:savedWorld.y,crs:api.epsg(),
+         lat:gps?.lat??null,lon:gps?.lon??null,source:row.manualWorld?'manual':gps?'exif':'recovered'};
+        recovered.positionSource=recovered.gnss.source;
+       }
+       try{
+        await api.savePhoto(recovered);
+        ensureSavedPhotoPoint(recovered,savedWorld,recovered.importGroup,recovered.campaignId);
+        restored++;
+       }catch(repairError){
+        await api.savePhoto(previous);
+        throw repairError;
+       }
       }
      }
      skipped++;row.excluded=true;continue;
