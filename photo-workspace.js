@@ -306,7 +306,7 @@ function render(){
    const u=URL.createObjectURL(r.thumbBlob||r.file);previewUrls.push(u);const img=el('img');img.src=u;img.alt='';img.loading='lazy';img.onerror=()=>{if(!r.error){r.error='No se puede visualizar este JPEG';render();}};preview.appendChild(img);
   }else preview.textContent=tab==='photos'?'📷':'📍';
   const summary=el('div','gc-import-summary');const coordInfo=r.manualGps?'Manual: '+fmt(r.manualGps.lat)+', '+fmt(r.manualGps.lon):r.manualWorld?'Ubicación manual en mapa · EPSG:'+api.epsg():r.gps?fmt(r.gps.lat)+', '+fmt(r.gps.lon):'Sin coordenadas';
-  summary.innerHTML='<b>'+escape(r.name)+'</b><small>'+escape(r.error||(coordInfo+(r.metadata?.dateOriginal?' · '+r.metadata.dateOriginal:'')+(r.metadata?.width?' · '+r.metadata.width+'×'+r.metadata.height:'') ))+'</small>';
+  summary.innerHTML='<b>'+escape(r.name)+'</b><small>'+escape(r.error||(r.repairNote||coordInfo+(r.metadata?.dateOriginal?' · '+r.metadata.dateOriginal:'')+(r.metadata?.width?' · '+r.metadata.width+'×'+r.metadata.height:'') ))+'</small>';
   const pill=el('span','gc-import-state '+status(r),({valid:'Válida',duplicate:'Duplicada','no-coordinates':'Sin GPS',error:'Error',excluded:'Excluida'})[status(r)]);
   const edit=el('button','gc-row-edit','✎');edit.title='Editar ubicación';edit.disabled=tab!=='photos'||!!r.error||busy;
   edit.onclick=ev=>{ev.stopPropagation();editCoordinates(i);};
@@ -385,7 +385,7 @@ async function commit(){
   $('#gcImportFeedback').textContent='No se pudo comprobar el contenido existente; no se ha importado ningún archivo: '+(error?.message||error);
   return;
  }
- let done=0,failed=0,skipped=0,restored=0;
+ let done=0,failed=0,skipped=0,restored=0,unlocated=0;
  progress(true,0,candidates.length,tab==='photos'?'Guardando fotografías localmente':'Guardando puntos localmente');
  for(const row of candidates){
   try{
@@ -408,17 +408,18 @@ async function commit(){
     const worldPoint=locationOf(row);
     if(row.hash&&known.has(row.hash)){
      const existing=await api.findPhotoByHash(row.hash);
-     // A duplicate binary may have no linked marker after an interrupted import.
-     // Recover the existing record; never add a second photo or move a valid marker.
-     if(existing?.importVersion==='r29'&&existing.contentHash===row.hash){
+     // Re-link exact duplicates, including legacy photos without a contentHash.
+     // Never duplicate the binary or replace a valid map position.
+     if(existing?.blob&&existing.blob.size===row.file?.size){
       const currentPoint=(api.getState().historicalPhotoPoints||[]).find(p=>
        p.id===existing.historicalPointId||(p.photos||[]).includes(existing.id));
-      const savedWorld=currentPoint&&validXY(currentPoint)?currentPoint:
-       existing.gnss&&validXY(existing.gnss)?existing.gnss:worldPoint;
-      if(validXY(savedWorld)&&!currentPoint){
+      const existingWorld=currentPoint&&validXY(currentPoint)?currentPoint:
+       existing.gnss&&validXY(existing.gnss)?existing.gnss:null;
+      const savedWorld=existingWorld||worldPoint;
+      if(validXY(savedWorld)&&(!currentPoint||!validXY(currentPoint))){
        const previous={...existing};
        const recovered={...existing,historicalPointId:existing.historicalPointId||'hp'+row.hash.slice(0,32)};
-       if(!validXY(recovered.gnss)){
+       if(!existingWorld){
         const gps=row.manualGps||row.gps;
         recovered.gnss={x:savedWorld.x,y:savedWorld.y,crs:api.epsg(),
          lat:gps?.lat??null,lon:gps?.lon??null,source:row.manualWorld?'manual':gps?'exif':'recovered'};
@@ -426,13 +427,22 @@ async function commit(){
        }
        try{
         await api.savePhoto(recovered);
-        ensureSavedPhotoPoint(recovered,savedWorld,recovered.importGroup,recovered.campaignId);
+        if(currentPoint&&!validXY(currentPoint)){
+         Object.assign(currentPoint,{x:savedWorld.x,y:savedWorld.y,crs:api.epsg(),
+          photoPointPosition:{x:savedWorld.x,y:savedWorld.y,crs:api.epsg()}});
+         currentPoint.photos=Array.from(new Set([...(currentPoint.photos||[]),existing.id]));
+         api.persistVerified();
+        }else ensureSavedPhotoPoint(recovered,savedWorld,recovered.importGroup,recovered.campaignId);
         restored++;
        }catch(repairError){
         await api.savePhoto(previous);
         throw repairError;
        }
+      }else if(!validXY(savedWorld)){
+       row.repairNote='Ya existe, pero no tiene coordenadas. Usa el lápiz para situarla y vuelve a verificar.';unlocated++;
       }
+     }else if(!existing){
+      row.repairNote='No se encontró el registro original. Comprueba que estás en el mismo proyecto.';
      }
      skipped++;row.excluded=true;continue;
     }
@@ -475,6 +485,7 @@ async function commit(){
  busy=false;progress(false);api.scheduleSync?.();
  $('#gcImportFeedback').textContent=done+' '+(tab==='photos'?'fotografías':'puntos')+' guardados localmente; '+failed+' con error; '+skipped+' ya existentes.'+
   (restored?' '+restored+' marcador(es) recuperados.':'')+
+  (unlocated?' '+unlocated+' duplicado(s) sin coordenadas: asigna una posición desde el lápiz y vuelve a verificar.':'')+
   ' La sincronización con la nube seguirá la cola habitual.';
  render();
 }
