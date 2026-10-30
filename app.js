@@ -3787,7 +3787,7 @@ async function ensureSectionProfile(f,{force=false,preserveManual=true}={}){
   const raster=chooseDemRasterForSection(f),status=$('#sectionDemStatus'),metaEl=$('#sectionDemMeta'),grp=activeDemGroup();
   if(!raster){if(status)status.textContent='Sin MDT/LiDAR disponible';if(metaEl)metaEl.textContent='Importa un GeoTIFF de elevación para generar el perfil automáticamente.';redrawInkStore($('#sectionCanvas'));return;}
   const sourceKey=grp?`group:${grp.id}`:raster.id,same=f.sectionProfile?.sourceRasterId===sourceKey;
-  if(f.sectionProfile?.samples?.length&&!force&&same){updateSectionProfileStatus(f,raster);redrawInkStore($('#sectionCanvas'));return;}
+  if(f.sectionProfile?.samples?.some(s=>Number.isFinite(s.z))&&!force&&same&&f.sectionProfile.geometryKey===JSON.stringify(f.points)&&f.sectionProfile.sourceSize===raster.sourceBlob?.size{updateSectionProfileStatus(f,raster);redrawInkStore($('#sectionCanvas'));return;}
   if(status)status.textContent='Calculando perfil topográfico…';if(metaEl)metaEl.textContent=grp?grp.name:raster.name;
   try{
     const a=f.points[0],b=f.points[f.points.length-1],len=Math.hypot(b.x-a.x,b.y-a.y),res=Math.max(.001,demGroupResolution(grp)||sourceResolution(raster)||len/200),step=Math.max(res,len/700),n=Math.max(2,Math.min(800,Math.ceil(len/step)+1)),world=[];
@@ -3796,7 +3796,7 @@ async function ensureSectionProfile(f,{force=false,preserveManual=true}={}){
     const samples=vals.map((z,i)=>({d:len*(i/(n-1)),z:Number.isFinite(z)?z:null,x:world[i].x,y:world[i].y}));
     const valid=samples.filter(x=>Number.isFinite(x.z));if(valid.length<2)throw Error('La línea de sección no atraviesa datos de elevación válidos');
     const oldManual=preserveManual?f.sectionProfile?.manual:null,oldEdits=preserveManual?cloneAny(f.sectionProfile?.manualEdits||[]):[];
-    f.sectionProfile={sourceRasterId:sourceKey,sourceName:sampled.sourceName||raster.name,resolution:Number.isFinite(sampled.resolution)?sampled.resolution:res,length:len,samples,manual:oldManual||null,manualEdits:oldEdits,generatedAt:Date.now()};
+    f.sectionProfile={sourceRasterId:sourceKey,sourceName:sampled.sourceName||raster.name,resolution:Number.isFinite(sampled.resolution)?sampled.resolution:res,length:len,samples,manual:oldManual||null,manualEdits:oldEdits,geometryKey:JSON.stringify(f.points),sourceSize:raster.sourceBlob?.size,generatedAt:Date.now()};
     if(isEditableCampaign())persistState();updateSectionProfileStatus(f,raster);redrawInkStore($('#sectionCanvas'));
   }catch(e){console.warn(e);if(status)status.textContent='No se pudo generar el perfil';if(metaEl)metaEl.textContent=e.message||String(e);redrawInkStore($('#sectionCanvas'));}
 }
@@ -4271,10 +4271,11 @@ function demGroupLabel(){const g=activeDemGroup();return g?g.name||'MDT combinat
 function demGroupResolution(group=activeDemGroup()){const vals=demGroupRasters(group).map(sourceResolution).filter(Number.isFinite);return vals.length?Math.min(...vals):null;}
 function rasterContainsWorldPoint(r,p){const b=rasterBounds(r);return pointInBounds(p,b);}
 function chooseBestDemForPoint(p){return rankedDemGroupRasters().find(r=>rasterContainsWorldPoint(r,p))||null;}
-async function ensureDemRasterSampler(r){if(!r?.sourceBlob)return false;r._bufferPromise=r._bufferPromise||r.sourceBlob.arrayBuffer();const ab=await r._bufferPromise;r._tiffMeta=r._tiffMeta||GeoCauceGeoTIFF.parse(ab);return true;}
+async function ensureDemRasterSampler(r){if(!r?.sourceBlob)throw Error('Falta el GeoTIFF original de '+(r?.name||'MDE'));r._bufferPromise=r._bufferPromise||r.sourceBlob.arrayBuffer();const ab=await r._bufferPromise;r._tiffMeta=r._tiffMeta||GeoCauceGeoTIFF.parse(ab);return true;}
 async function sampleDemMosaic(worldPoints,{onProgress=null}={}){
-  const vals=new Array((worldPoints||[]).length).fill(null),groups=new Map(),rasters=demGroupRasters(),ranked=rankedDemGroupRasters().map(r=>({r,b:rasterBounds(r),res:sourceResolution(r)||Infinity}));
+  const vals=new Array((worldPoints||[]).length).fill(null),groups=new Map(),rasters=demGroupRasters(),ranked=rankedDemGroupRasters().filter(r=>r.sourceBlob&&r.meta?.validPercent!==0).map(r=>({r,b:rasterBounds(r),res:sourceResolution(r)||Infinity}));
   if(!rasters.length)return{values:vals,sourceName:'',resolution:null,rasterIds:[]};
+  if(!ranked.length)throw Error('Los MDE/LiDAR no conservan su GeoTIFF original. Recupera el archivo fuente para calcular elevaciones.');
   for(let i=0;i<worldPoints.length;i++){const p=worldPoints[i],r=ranked.find(x=>pointInBounds(p,x.b))?.r;if(!r)continue;if(!groups.has(r.id))groups.set(r.id,{r,idx:[],pix:[]});const g=groups.get(r.id),aff=r.meta?.sourceAffine||r.affine,q=invertAffinePoint(aff,p);if(!q)continue;g.idx.push(i);g.pix.push(q);}
   let done=0,total=[...groups.values()].reduce((n,g)=>n+g.idx.length,0)||1;
   for(const g of groups.values()){await ensureDemRasterSampler(g.r);const out=await GeoCauceGeoTIFF.samplePoints(g.r._tiffMeta,g.pix,{});for(let j=0;j<g.idx.length;j++)vals[g.idx[j]]=Number.isFinite(out[j])?out[j]:null;done+=g.idx.length;if(onProgress)onProgress(Math.min(1,done/total));}
@@ -5615,14 +5616,14 @@ function profileStatsKey(reach,dem){const a=reach?.points?.[0],b=reach?.points?.
 function evenlySamplePolyline(pts,count){const len=featureLength({points:pts||[]});if(!pts?.length)return[];if(count<=1||len<=0)return[{...pts[0]}];const out=[];for(let i=0;i<count;i++)out.push(pointAtAlong(pts,len*i/(count-1)));return out;}
 async function ensureReachMdeStats(reach,{force=false}={}){
   const lengthM=featureLength(reach||{points:[]}),dem=chooseDemRasterForSection(reach),grp=activeDemGroup(),sourceKey=grp?`group:${grp.id}`:(dem?.id||'none'),key=`${sourceKey}|${profileStatsKey(reach,dem)}`;
-  if(!force&&reach?.mdeStats?.key===key)return reach.mdeStats;
-  const base={key,lengthM,minElevation:null,maxElevation:null,mdeSlopePct:null,startElevation:null,endElevation:null,sourceName:grp?.name||dem?.name||null,sourceResolution:grp?demGroupResolution(grp):(dem?sourceResolution(dem):null)};
-  if(!reach||!dem||!reach.points?.length||lengthM<=0){reach.mdeStats=base;return base;}
+  if(!force&&reach?.mdeStats?.key===key&&Number.isFinite(reach.mdeStats.startElevation)&&Number.isFinite(reach.mdeStats.endElevation)&&reach.mdeStats.sourceSize===dem?.sourceBlob?.size)return reach.mdeStats;
+  const base={key,lengthM,minElevation:null,maxElevation:null,mdeSlopePct:null,startElevation:null,endElevation:null,sourceName:grp?.name||dem?.name||null,sourceResolution:grp?demGroupResolution(grp):(dem?sourceResolution(dem):null),sourceSize:dem?.sourceBlob?.size??null,error:null};
+  if(!reach||!dem||!reach.points?.length||lengthM<=0){base.error=!dem?'No hay GeoTIFF MDE/LiDAR original disponible':'Geometría del tramo insuficiente';reach.mdeStats=base;return base;}
   try{
     const res=Math.max(.05,base.sourceResolution||1),targetStep=Math.max(.5,res*2,lengthM/120),count=Math.max(3,Math.min(140,Math.ceil(lengthM/targetStep)+1));
     const world=evenlySamplePolyline(reach.points,count),sampled=await sampleDemMosaic(world),vals=sampled.values,valid=vals.filter(Number.isFinite);
     if(valid.length){const first=vals.find(Number.isFinite),last=[...vals].reverse().find(Number.isFinite);Object.assign(base,{sourceName:sampled.sourceName||base.sourceName,sourceResolution:sampled.resolution||base.sourceResolution,minElevation:Math.min(...valid),maxElevation:Math.max(...valid),startElevation:Number.isFinite(first)?first:null,endElevation:Number.isFinite(last)?last:null,mdeSlopePct:Number.isFinite(first)&&Number.isFinite(last)&&lengthM>0?Math.abs(first-last)/lengthM*100:null});}
-  }catch(e){console.warn('FITXA I · càlcul MDE del tram',reach.id,e);}
+  }catch(e){base.error=e?.message||String(e);console.warn('FITXA I · càlcul MDE del tram',reach.id,e);}
   reach.mdeStats=base;return base;
 }
 function setProfileAutoCell(cell,value,{digits=1,suffix=''}={}){if(!cell)return;cell.classList.remove('pending','unavailable');if(!Number.isFinite(value)){cell.textContent='—';cell.classList.add('unavailable');return;}cell.textContent=`${formatNum(value,digits)}${suffix}`;}
@@ -5693,11 +5694,11 @@ function courseProfileFragments(course){
 async function ensureCourseLongitudinalProfile(course,{force=false,preserveManual=true}={}){
   if(!course)return null;
   const frags=courseProfileFragments(course),first=frags[0]?.pts||[],dem=chooseDemRasterForSection({points:first}),grp=activeDemGroup(),sourceKey=grp?`group:${grp.id}`:(dem?.id||'none');
-  const signature=`${sourceKey}|${course?.direction||'entry'}|${JSON.stringify(frags.map(x=>[x.fragmentIndex,x.reversed,x.pts.length,polylineLength(x.pts).toFixed(2),x.gapBeforeM?.toFixed?.(2)||'0',x.pts[0],x.pts.at(-1)]))}`;
-  if(!force&&course.longitudinalProfile?.signature===signature)return course.longitudinalProfile;
+  const signature=`${sourceKey}|${dem?.sourceBlob?.size||0}|${course?.direction||'entry'}|${JSON.stringify(frags.map(x=>[x.fragmentIndex,x.reversed,x.pts.length,polylineLength(x.pts).toFixed(2),x.gapBeforeM?.toFixed?.(2)||'0',x.pts[0],x.pts.at(-1)]))}`;
+  if(!force&&course.longitudinalProfile?.signature===signature&&course.longitudinalProfile?.samples?.some(p=>Number.isFinite(p.z))&&course.longitudinalProfile.sourceSize===dem?.sourceBlob?.size)return course.longitudinalProfile;
   const oldManual=preserveManual?cloneAny(course.longitudinalProfile?.manual||null):null,oldEdits=preserveManual?cloneAny(course.longitudinalProfile?.manualEdits||[]):[],oldScale=String(course.longitudinalProfile?.verticalScale||'1'),res0=grp?demGroupResolution(grp):(dem?sourceResolution(dem):null);
-  const result={signature,sourceRasterId:sourceKey,sourceName:grp?.name||dem?.name||null,resolution:res0,samples:[],segments:[],gaps:[],length:0,componentCount:frags.length,topologyIssue:course.topologyIssue||'',generatedAt:Date.now(),manual:oldManual,manualEdits:oldEdits,verticalScale:['1','2','5'].includes(oldScale)?oldScale:'1'};
-  if(!dem||!frags.length){course.longitudinalProfile=result;return result;}
+  const result={signature,sourceRasterId:sourceKey,sourceName:grp?.name||dem?.name||null,resolution:res0,samples:[],segments:[],gaps:[],length:0,componentCount:frags.length,topologyIssue:course.topologyIssue||'',generatedAt:Date.now(),sourceSize:dem?.sourceBlob?.size??null,error:null,manual:oldManual,manualEdits:oldEdits,verticalScale:['1','2','5'].includes(oldScale)?oldScale:'1'};
+  if(!dem||!frags.length){result.error=!dem?'No hay GeoTIFF MDE/LiDAR original disponible':'No hay trazado para calcular el perfil';course.longitudinalProfile=result;return result;}
   try{
     let offset=0;
     for(const item of frags){
@@ -5707,8 +5708,8 @@ async function ensureCourseLongitudinalProfile(course,{force=false,preserveManua
       const seg={fragmentIndex:item.fragmentIndex,offset,length:len,reversed:item.reversed,gapBefore:!!item.gapBefore,gapBeforeM:gap};result.segments.push(seg);
       vals.forEach((z,i)=>result.samples.push({d:offset+len*i/(count-1),z:Number.isFinite(z)?z:null,x:world[i].x,y:world[i].y,fragmentIndex:item.fragmentIndex,gapStart:i===0&&gap>.02}));offset+=len;
     }
-    result.length=offset;course.longitudinalProfile=result;if(isEditableCampaign())persistState();return result;
-  }catch(e){console.warn('Perfil longitudinal del curs',e);course.longitudinalProfile=result;return result;}
+    result.length=offset;if(!result.samples.some(p=>Number.isFinite(p.z)))result.error='No hay datos de elevación válidos sobre el trazado';course.longitudinalProfile=result;if(isEditableCampaign())persistState();return result;
+  }catch(e){result.error=e?.message||String(e);console.warn('Perfil longitudinal del curs',e);course.longitudinalProfile=result;return result;}
 }
 function profileBoundaryDistance(profile,b){const seg=profile?.segments?.find(x=>x.fragmentIndex===b.fragmentIndex);if(!seg)return null;return seg.offset+(seg.reversed?seg.length-b.along:b.along);}
 function profileDistanceForAlong(profile,fragmentIndex,along){const seg=profile?.segments?.find(x=>x.fragmentIndex===fragmentIndex);if(!seg||!Number.isFinite(+along))return null;return seg.offset+(seg.reversed?seg.length-(+along):(+along));}
