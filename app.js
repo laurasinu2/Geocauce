@@ -2897,6 +2897,18 @@ function chooseHistoricalPhoto(mode){const id=state.currentHistoricalPointId,p=h
 async function historicalPhotoChosen(file,mode){const pointId=state.pendingHistoricalPhotoPointId,p=historicalPointById(pointId);state.pendingHistoricalPhotoPointId=null;state.pendingHistoricalPhotoMode=null;if(!file||!p)return;let histDate=null;if(mode==='import'){const v=(prompt('Fecha de la fotografía (AAAA-MM-DD, opcional)','')||'').trim();if(v&&/^\d{4}-\d{2}-\d{2}$/.test(v))histDate=v;}
   const id='p'+Date.now()+Math.random().toString(36).slice(2,5),g=state.gnss,rec={id,blob:file,name:file.name||`foto_${Date.now()}.jpg`,date:Date.now(),historicalDate:histDate,captureDate:histDate||null,captureDateSource:histDate?'manual':'unknown',campaignId:state.campaign,featureId:null,historicalPointId:p.id,stopId:p.linkedStopId||p.stopId||null,source:mode==='camera'?'camera':'device',heading:mode==='camera'&&appSettings.photoHeading?(Number.isFinite(state.deviceHeading)?state.deviceHeading:(Number.isFinite(g?.heading)?g.heading:null)):null,gnss:{x:(p.photoPointPosition||p).x,y:(p.photoPointPosition||p).y,crs:(p.photoPointPosition||p).crs||workingMapEpsg(),lat:null,lon:null,accuracy:null,altitude:null,timestamp:Date.now(),source:'manual-point'}};await dbPut('photos',rec);nativeSyncPhotoMeta(rec);p.photos=p.photos||[];p.photos.push(id);persistState();drawAll();await openHistoricalPhotoPoint(p.id,(p.photos||[]).length-1);toast(mode==='camera'?'Fotografía añadida al punto':'Fotografía importada');}
 function syncHistoricalPhotoToggle(){const b=$('#historicalPhotoToggle');if(!b)return;const on=state.showHistoricalPhotoPoints!==false;b.classList.toggle('active',on);b.setAttribute('aria-pressed',String(on));const span=b.querySelector('span');if(span)span.textContent=on?'Fotografías · visibles':'Fotografías · ocultas';}
+function isPriorityMapFeature(f){return !!f&&['watercourse','reach','section','channel'].includes(f.type);}
+function priorityMapFeatureRank(f){return f.type==='reach'?4:f.type==='section'?3:f.type==='watercourse'?2:f.type==='channel'?1:0;}
+function priorityMapFeatureAt(world){
+  if(!world)return null;
+  const tol=9/Math.max(.000001,state.view.scale);
+  const ranked=state.features.filter(isPriorityMapFeature).map((f,index)=>({f,index})).sort((a,b)=>priorityMapFeatureRank(b.f)-priorityMapFeatureRank(a.f)||b.index-a.index);
+  for(const {f} of ranked){
+    if(pointErased(f,world))continue;
+    if(featurePolylines(f).some(pts=>pts?.length>1&&distanceToPolyline(world,pts)<=tol))return f;
+  }
+  return null;
+}
 function drawAll(){
   if(!mapCanvas.width)return;
   clearCtx(mapCtx,mapCanvas);
@@ -2906,12 +2918,17 @@ function drawAll(){
   drawVectorExtraction();
   const prev=getPreviousCampaign();
   if(state.comparePrevious&&prev)for(const f of materializeCampaign(prev.id)){if(featureVisibleInBounds(f,viewBounds))drawFeature(f,{ghost:true,opacity:state.compareOpacity});}
-  for(const f of state.features){if(featureVisibleInBounds(f,viewBounds))drawFeature(f);}
+  for(const f of state.features){if(!isPriorityMapFeature(f)&&featureVisibleInBounds(f,viewBounds))drawFeature(f);}
   drawMapInk();
   if(!mapInMotion())drawReachBoundaryMarkers();
   drawMapPins();
   drawHistoricalPhotoPoints();
   drawNoteMarkers();
+  // Functional hydrography stays above decorative drawings, rasters and pins.
+  // Draw order mirrors hit-test priority: channels, courses, sections, reaches.
+  const foreground=state.features.filter(f=>isPriorityMapFeature(f)&&featureVisibleInBounds(f,viewBounds))
+   .sort((a,b)=>priorityMapFeatureRank(a)-priorityMapFeatureRank(b));
+  for(const f of foreground)drawFeature(f);
   drawGnss();
   if(state.relocatingPoint&&relocationCore()){
    const r=state.relocatingPoint,source=r.kind==='photoPoint'?historicalPointById(r.id):r.kind==='pin'?(state.mapPins||[]).find(p=>p.id===r.id):null;
@@ -3448,6 +3465,8 @@ function selectAt(sp){
   if(state.relocatingPoint){void finishPointRelocation(sp);return;}
   if(state.tool==='relocate'){selectRelocationSource(sp);return;}
   if(state.historicalLinkPointId){handleHistoricalLinkTap(sp);return;}
+  const priority=priorityMapFeatureAt(screenToWorld(sp));
+  if(priority){state.selectedId=priority.id;if(priority.type==='watercourse')state.activeCourseId=priority.id;else if(priority.type==='reach')state.activeCourseId=priority.courseId||state.activeCourseId;updateHydroFab();showFeatureCard(priority);drawAll();return;}
   const hp=nearestHistoricalPhotoPoint(sp);if(hp){openHistoricalPhotoPoint(hp.id);return;}
   const pin=nearestMapPin(sp);if(pin){if(pin.kind==='photo'&&pin.photoId){window.GeoCaucePhotoWorkspace?.showGallery(pin.photoId);return;}if(pin.kind==='stop'){openMapStop(pin.id);return;}openPinRelocationActions(pin);return;}
   const note=nearestNoteMarker(sp);if(note){openNotebook(note.pageId);return;}
