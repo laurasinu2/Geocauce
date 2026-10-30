@@ -1,3 +1,11 @@
+## R30 · corrección de perfiles MDE/LiDAR (30/10/2026)
+
+- Se recalculan perfiles de secciones, tramos y cauces cuando un cálculo anterior carece de elevaciones válidas; no se reutilizan resultados vacíos como si fueran correctos.
+- El muestreo descarta fuentes GeoTIFF originales ausentes y devuelve un error explícito si ninguna fuente está disponible.
+- La caché de secciones tiene en cuenta la geometría y el tamaño del raster original; la de perfiles longitudinales y estadísticas también comprueba la disponibilidad del original.
+- Se conserva la edición manual de perfiles y las correcciones existentes. No requiere migraciones SQL ni cambios en Supabase.
+- Pendiente de prueba funcional con archivos GeoTIFF reales en PWA móvil/tablet.
+
 # Convención de versiones y ramas de GeoCauce
 
 **Norma de desarrollo desde el 29/10/2026:** cada rama nueva representa una versión nueva y su nombre debe incluir **solamente el número de revisión y la fecha de creación**, con el formato `rNN-AAAAMMDD`, por ejemplo `r29-20261029`, `r30-20261030`. No utilizar prefijos `feature/`, `backup/` ni sufijos descriptivos en las ramas nuevas. Incrementar `NN` en cada rama creada, aunque el trabajo sea una continuación de la versión anterior. Consultar las ramas existentes antes de asignar el siguiente número.
