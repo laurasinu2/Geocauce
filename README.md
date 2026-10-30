@@ -1,3 +1,7 @@
+## R33 · cauces y tramos en primer plano (30/10/2026)
+
+Los cauces, tramos, secciones y canales se dibujan encima de anotaciones, fotografías y otras geometrías del usuario, sin cambiar el orden guardado de datos. Para seleccionar se prioriza el toque próximo (9 píxeles) al trazado hidrográfico, con prioridad de tramos sobre secciones, cauces y canales; el interior de un polígono sigue sin bloquear un cauce. Fuera de esa distancia, fotografías, paradas y notas se pueden tocar como antes. No requiere SQL ni cambios en Supabase. Se ha validado la sintaxis JavaScript; pendiente de prueba visual/táctil en PWA.
+
 ## R32 · reparación de fotografías repetidas sin punto (30/10/2026)
 
 Las fotografías anteriores que carecen de huella SHA-256 almacenada ahora pueden localizarse mediante el hash del archivo binario. Al verificar de nuevo una foto repetida, si tiene coordenadas y el punto fotográfico falta o carece de coordenadas, el marcador se reconstruye sin duplicar el archivo ni desplazar los puntos válidos. Las fotografías sin coordenadas requieren asignarlas con el botón del lápiz y repetir la verificación. La capa de puntos fotográficos debe estar visible. No hay cambios SQL ni migraciones destructivas. Validación de sintaxis completada; pruebas en PWA real pendientes.
