@@ -3060,7 +3060,7 @@ function setTool(tool,{quiet=false}={}){
   if(['mapInk','boundary','editContour','fill','paint','basin','watercourse','reach','channel','section','photo','historicalPhoto','stop','erase','relocate'].includes(tool)&&!requireEditable('usar esta herramienta'))return;
   if(state.relocatingPoint&&tool!==state.tool)cancelPointRelocation(true);
   state.tool=tool;
-  const labels={relocate:'Mover elemento',mapInk:'Anotar mapa',pan:'Mover',boundary:'Límite',editContour:'Editar contorno',fill:'Rellenar',paint:'Pintar',basin:'Conca',watercourse:'Curs / canal',reach:'Trams',channel:'Canal',section:'Sección',photo:'Foto',historicalPhoto:'Fotografía',stop:'Crear parada',gps:'GPS',select:'Seleccionar',erase:'Borrador'};
+  const labels={relocate:'Mover elemento',mapInk:'Anotar mapa',pan:'Mover',boundary:'Límite',editContour:'Editar contorno',fill:'Rellenar',paint:'Pintar',basin:'Conca',watercourse:'Curs / canal',reach:'Trams',channel:'Canal',section:'Sección',photo:'Foto',historicalPhoto:'Fotografía',stop:'Crear parada',gps:'GPS',copyCoords:'Copiar coordenadas',select:'Seleccionar',erase:'Borrador'};
   $('#activeToolBtn span').textContent=labels[tool]||tool;
   const ai=$('#activeToolIcon');if(ai)ai.src=ICONS[tool]||ICONS.pan;
   $$('#toolMenu button[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool===tool));
@@ -3076,6 +3076,7 @@ function setTool(tool,{quiet=false}={}){
   persistState();
   if(!quiet && tool==='pan') toast('Mover mapa');
   if(!quiet && tool==='relocate')toast('Toca el elemento que quieres mover y después su nueva ubicación.',5500);
+  if(!quiet && tool==='copyCoords')toast('Toca un punto del mapa para copiar X, Y en ETRS89 / UTM 31N.',5000);
 }
 function updateMaterialButton(){
   const m=materialById(state.material);
@@ -3464,6 +3465,7 @@ async function finishPointRelocation(sp){
 function selectAt(sp){
   if(state.relocatingPoint){void finishPointRelocation(sp);return;}
   if(state.tool==='relocate'){selectRelocationSource(sp);return;}
+  if(state.tool==='copyCoords'){copyMapCoordinates(sp);return;}
   if(state.historicalLinkPointId){handleHistoricalLinkTap(sp);return;}
   const priority=priorityMapFeatureAt(screenToWorld(sp));
   if(priority){state.selectedId=priority.id;if(priority.type==='watercourse')state.activeCourseId=priority.id;else if(priority.type==='reach')state.activeCourseId=priority.courseId||state.activeCourseId;updateHydroFab();showFeatureCard(priority);drawAll();return;}
@@ -3473,10 +3475,42 @@ function selectAt(sp){
   const rb=nearestReachBoundary(sp);if(rb){const id=rb.starts?.[0]||rb.ends?.[0],f=state.features.find(x=>x.id===id);if(f){state.selectedId=f.id;state.activeCourseId=f.courseId;updateHydroFab();showFeatureCard(f);drawAll();return;}}
   const f=nearestFeature(screenToWorld(sp),false);if(f){state.selectedId=f.id;if(f.type==='watercourse')state.activeCourseId=f.id;else if(f.type==='reach')state.activeCourseId=f.courseId||state.activeCourseId;updateHydroFab();showFeatureCard(f);}else{state.selectedId=null;hideFeatureCard();}drawAll();
 }
+function coordsUtm31FromScreen(sp){
+  const point=screenToWorld(sp),crs=workingMapEpsg();
+  if(!Number.isFinite(point.x)||!Number.isFinite(point.y))return null;
+  if(crs===25831)return{x:point.x,y:point.y};
+  const ll=(crs===4326||crs===4258)?{lon:point.x,lat:point.y}:
+   utmZoneForEpsg(crs)?fieldUtmToLonLat(point.x,point.y,crs):null;
+  if(!ll||!Number.isFinite(ll.lon)||!Number.isFinite(ll.lat))return null;
+  const transformed=lonLatToMapCoords(ll.lon,ll.lat,25831);
+  return Number.isFinite(transformed.x)&&Number.isFinite(transformed.y)?transformed:null;
+}
+function copyMapCoordinates(sp){
+  const coords=coordsUtm31FromScreen(sp);
+  if(!coords){toast('No se pueden convertir las coordenadas del mapa a EPSG:25831.',5000);return;}
+  const value=coords.x.toFixed(2)+', '+coords.y.toFixed(2);
+  // Browser clipboard requires a user gesture; run this directly inside pointerup.
+  const fallback=()=>{
+   const input=document.createElement('textarea');
+   input.value=value;input.readOnly=true;input.style.position='fixed';input.style.opacity='0';
+   document.body.appendChild(input);input.focus();input.select();
+   let copied=false;try{copied=!!document.execCommand?.('copy');}catch{}
+   input.remove();
+   if(copied)toast('Coordenadas copiadas · EPSG:25831 · '+value,5500);
+   else{toast('No se ha podido copiar automáticamente. Copia las coordenadas mostradas.',5500);prompt('ETRS89 / UTM 31N (X, Y)',value);}
+  };
+  if(navigator.clipboard?.writeText){
+   navigator.clipboard.writeText(value).then(()=>toast('Coordenadas copiadas · EPSG:25831 · '+value,5500),fallback);
+  }else fallback();
+}
 function startMapAction(e,p){
   if(state.relocatingPoint){void finishPointRelocation(p);return;}
   if(state.tool==='relocate'){selectRelocationSource(p);return;}
   if(state.historicalLinkPointId){handleHistoricalLinkTap(p);return;}
+  if(state.tool==='copyCoords'){
+    state.currentStroke={tool:'copyCoords',points:[p],pointerId:e.pointerId};
+    inkCanvas.setPointerCapture?.(e.pointerId);return;
+  }
   if(state.vectorExtract){if(beginVectorEndpointDrag(p,e.pointerId))return;handleVectorExtractTap(p);return;}
   if(state.tool==='pan' || e.button===1 || e.button===2){beginPan(p,e.pointerId);return;}
   if(['mapInk','boundary','editContour','fill','paint','basin','watercourse','reach','channel','section','photo','historicalPhoto','stop','erase'].includes(state.tool)&&!isEditableCampaign()){beginPan(p,e.pointerId);toast('Día anterior bloqueado · usa Nuevo día para editar');return;}
@@ -3495,7 +3529,7 @@ function startMapAction(e,p){
   inkCanvas.setPointerCapture?.(e.pointerId);
 }
 function beginTouchNavigation(e,p){
-  hideMapContextMenu();state.touches.set(e.pointerId,p);state.touchTapCandidates=state.touchTapCandidates||new Map();const candidate={start:{...p},last:{...p},time:Date.now(),multi:false,held:false,holdTimer:null};state.touchTapCandidates.set(e.pointerId,candidate);inkCanvas.setPointerCapture?.(e.pointerId);candidate.holdTimer=setTimeout(()=>{if(state.relocatingPoint||state.tool==='relocate'||candidate.multi||Math.hypot(candidate.last.x-candidate.start.x,candidate.last.y-candidate.start.y)>9||state.touches.size!==1)return;candidate.held=true;state.panStart=null;showMapContextMenu(candidate.start);},620);
+  hideMapContextMenu();state.touches.set(e.pointerId,p);state.touchTapCandidates=state.touchTapCandidates||new Map();const candidate={start:{...p},last:{...p},time:Date.now(),multi:false,held:false,holdTimer:null};state.touchTapCandidates.set(e.pointerId,candidate);inkCanvas.setPointerCapture?.(e.pointerId);candidate.holdTimer=setTimeout(()=>{if(state.relocatingPoint||state.tool==='relocate'||state.tool==='copyCoords'||candidate.multi||Math.hypot(candidate.last.x-candidate.start.x,candidate.last.y-candidate.start.y)>9||state.touches.size!==1)return;candidate.held=true;state.panStart=null;showMapContextMenu(candidate.start);},620);
   if(state.touches.size===2){
     for(const c of state.touchTapCandidates.values()){c.multi=true;if(c.holdTimer){clearTimeout(c.holdTimer);c.holdTimer=null;}}
     const vals=[...state.touches.values()],mid={x:(vals[0].x+vals[1].x)/2,y:(vals[0].y+vals[1].y)/2};
@@ -3514,7 +3548,7 @@ function moveTouchNavigation(e,p){
 function endTouchNavigation(e){
   const c=state.touchTapCandidates?.get(e.pointerId),wasPenMode=appSettings.inputMode==='pen';
   if(c?.holdTimer)clearTimeout(c.holdTimer);state.touches.delete(e.pointerId);state.touchTapCandidates?.delete(e.pointerId);if(state.touches.size<2)state.pinch=null;if(state.touches.size===1){const [rp]=state.touches.values();state.panStart={p:{...rp},center:{...state.view}};}if(state.touches.size===0){state.panStart=null;persistState();}
-  if(e.type!=='pointercancel'&&(wasPenMode||!!state.relocatingPoint||state.tool==='relocate')&&c&&!c.multi&&!c.held&&Date.now()-c.time<600&&Math.hypot(c.last.x-c.start.x,c.last.y-c.start.y)<8)selectAt(c.last);
+  if(e.type!=='pointercancel'&&(wasPenMode||!!state.relocatingPoint||state.tool==='relocate'||state.tool==='copyCoords')&&c&&!c.multi&&!c.held&&Date.now()-c.time<600&&Math.hypot(c.last.x-c.start.x,c.last.y-c.start.y)<8)selectAt(c.last);
 }
 function onMapPointerDown(e){
   if($('#mapScreen').classList.contains('hidden'))return;if(!$('#mapContextMenu')?.classList.contains('hidden'))hideMapContextMenu();
@@ -3529,6 +3563,7 @@ function onMapPointerMove(e){
   if(state.pointerPan && state.pointerPan.pointerId===e.pointerId){movePan(p);return;}
   if(moveVectorEndpointDrag(p,e.pointerId))return;
   if(state.currentStroke&&state.currentStroke.pointerId===e.pointerId){
+    if(state.currentStroke.tool==='copyCoords')return;
     if(state.currentStroke.tool==='section'){state.currentStroke.points.length=1;state.currentStroke.points.push(p);}else state.currentStroke.points.push(p);
     if(state.currentStroke.tool==='editContour'){const f=state.features.find(x=>x.id===state.editContourFeatureId);const q=nearestPointOnClosedRing(p,f);state.currentStroke.snapEnd=q&&q.d<=28?q:null;}
     drawCurrentStroke();
@@ -3542,6 +3577,10 @@ function onMapPointerUp(e){
   const st=state.currentStroke;state.currentStroke=null;clearCtx(inkCtx,inkCanvas);
   if(e.type==='pointercancel'){drawAll();return;}
   const finalPoint=eventPoint(e,inkCanvas);
+  if(st.tool==='copyCoords'){
+    if(Math.hypot(finalPoint.x-st.points[0].x,finalPoint.y-st.points[0].y)<=12)copyMapCoordinates(finalPoint);
+    return;
+  }
   if(st.tool==='section'){st.points=[st.points[0],finalPoint];}
   else if(!st.points.length||Math.hypot(finalPoint.x-st.points[st.points.length-1].x,finalPoint.y-st.points[st.points.length-1].y)>0.25)st.points.push(finalPoint);
   if(st.points.length<2){if(st.tool==='section')toast('Arrossega la secció sobre el mapa per definir-ne longitud i angle.');return;}
