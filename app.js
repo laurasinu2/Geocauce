@@ -4112,10 +4112,39 @@ function installSectionFicNoteCanvas(c,f,key){if(c._sectionFicInstalled)return;c
 function renderSectionFic(f){const root=$('#sectionFicTable');if(!root||!f)return;const data=ensureSectionSheetData(f);let html='<div class="reach-sheet-fic-head"><div></div><div>Rang</div><div>Puntuació</div><div>notes</div></div>';for(const row of REACH_FIC_ROWS){if(row.group){html+=`<div class="reach-sheet-fic-row"><div class="criterion"><b>${escapeHtml(row.group)}</b></div><div></div><div></div><div></div></div>`;continue;}const rec=data.fic[row.key]||{},opts=['<option value="">—</option>',...row.options.map(o=>`<option value="${o.score}" ${optionalScore(rec.score)===o.score?'selected':''}>${o.score} · ${escapeHtml(o.text)}</option>`)].join('');html+=`<div class="reach-sheet-fic-row"><div class="criterion">${row.prefix?`<div><b>${escapeHtml(row.prefix)}</b></div>`:''}<b>${escapeHtml(row.label)}</b>${row.note?`<div class="reach-sheet-fic-small" style="margin-top:8px;font-style:italic">${escapeHtml(row.note)}</div>`:''}</div><div class="range-cell">${escapeHtml(row.options.find(o=>o.score===optionalScore(rec.score))?.text||'—')}</div><div class="score-cell"><select data-section-fic-select="${row.key}">${opts}</select></div><div class="fic-note-cell"><canvas class="fic-note-canvas" data-section-fic-note="${row.key}"></canvas></div></div>`;}const total=calcSectionFicTotal(f);html+=`<div class="reach-sheet-fic-total"><div><i>Total, puntuació del component pendent avall **</i><div class="reach-sheet-fic-small">Notes: ** Es proporciona la puntuació total del component de pendent ascendent. per: Sd=Ad+ Bd+Cd+ WdDd1 +(1 − Wd)Dd2</div></div><div class="value">${total==null?'—':total}</div><div></div></div><div class="reach-sheet-fic-final"><div class="fic-final-text">L’índex de connectivitat del camp ve donat per FIC=(Su+Sd)/2</div></div>`;root.innerHTML=html;ficModelBar(f,root);root.querySelectorAll('[data-section-fic-select]').forEach(sel=>{sel.addEventListener('pointerdown',e=>{if(e.pointerType==='touch')e.stopPropagation();});sel.onclick=e=>e.stopPropagation();sel.disabled=!isEditableCampaign();sel.onchange=e=>{if(!isEditableCampaign())return;const k=e.target.dataset.sectionFicSelect,dd=ensureSectionSheetData(f);dd.fic[k].score=e.target.value===''?null:+e.target.value;ficChanged(f);persistState();renderSectionFic(f);};});root.querySelectorAll('[data-section-fic-note]').forEach(c=>installSectionFicNoteCanvas(c,f,c.dataset.sectionFicNote));}
 function saveSectionFitxaHeader(){const f=state.features.find(x=>x.id===state.currentSection);if(!f||!isEditableCampaign())return;const d=ensureSectionSheetData(f);d.sectionName=$('#sectionNameInput')?.value.trim()||f.sectionName||f.id;d.visitDate=$('#sectionVisitDate')?.value||'';d.observations=$('#sectionObservations')?.value||'';f.sectionName=d.sectionName;persistState();drawAll();renderSectionList();}
 function openCodesReference(){$('#codesReferenceModal')?.classList.remove('hidden');}
+function installSectionReachPicker(section){
+ const host=$('#sectionReachName');if(!host||!section)return;
+ const course=sectionCourse(section),current=sectionReach(section),reaches=course?courseReaches(course.id):[];
+ host.replaceChildren();
+ const name=document.createElement('span');name.textContent=current?.reachCode||current?.id||'—';host.appendChild(name);
+ if(!isEditableCampaign()||!reaches.length)return;
+ const select=document.createElement('select');
+ select.setAttribute('aria-label','Canviar el tram associat a la secció');
+ select.title='Corregeix el tram sense moure la secció';
+ select.style.cssText='max-width:180px;margin-left:10px;padding:5px 6px;font-size:13px;border:1px solid #b8c9bb;border-radius:7px;background:#fff;color:#203b2c';
+ const hint=document.createElement('option');hint.value='';hint.textContent='Canviar tram…';select.appendChild(hint);
+ for(const reach of orderedCourseReaches(course.id)){
+  const option=document.createElement('option');option.value=reach.id;option.textContent=reach.reachCode||reach.id;select.appendChild(option);
+ }
+ select.value='';
+ select.addEventListener('change',()=>{
+  const reach=reaches.find(r=>r.id===select.value);if(!reach)return;
+  section.reachId=reach.id;section.courseId=course.id;section.watercourseId=course.id;
+  section.watercourseName=course.name||course.abbr||null;
+  const anchor=section.anchorPoint||{x:(section.points[0].x+section.points.at(-1).x)/2,y:(section.points[0].y+section.points.at(-1).y)/2};
+  section.reachAlong=projectPointToPolyline(anchor,reach.points)?.along??null;
+  section.manualReachId=reach.id;
+  section.manualReachGeometry=sectionReachGeometrySignature(reach);
+  persistState();name.textContent=reach.reachCode||reach.id;select.value='';
+  renderSectionList();drawAll();
+  toast('Secció vinculada a '+(reach.reachCode||reach.id)+' sense moure la geometria.',4200);
+ });
+ host.appendChild(select);
+}
 function openSection(f){
   if(!f)return;
   if(refreshSectionReachLink(f)&&isEditableCampaign())persistState();
-  associateSectionIfNeeded(f);const readOnly=!isEditableCampaign();state.currentSection=f.id;sectionView(f);ensureSectionMeasurements(f);const d=ensureSectionSheetData(f),reach=sectionReach(f),course=sectionCourse(f);$('#sectionId').textContent=d.sectionName||f.sectionName||f.id;const sc=$('#sectionCampaign');sc.innerHTML=`<option>${escapeHtml(campaignLabel(state.campaign))}</option>`;$('#sectionTorrentName').textContent=course?`${course.abbr||''}, ${course.name||''}`:'—';$('#sectionReachName').textContent=reach?.reachCode||reach?.id||'—';$('#sectionNameInput').value=d.sectionName||f.sectionName||f.id;$('#sectionVisitDate').value=d.visitDate||currentCampaign()?.date||'';$('#sectionObservations').value=d.observations||'';updateSectionWorkStatusUi(f,readOnly);$('#sectionModal').classList.remove('hidden');$('#sectionModal').classList.toggle('read-only',readOnly);const banner=$('#sectionReadOnlyBanner');if(banner)banner.classList.toggle('hidden',!readOnly);
+  associateSectionIfNeeded(f);const readOnly=!isEditableCampaign();state.currentSection=f.id;sectionView(f);ensureSectionMeasurements(f);const d=ensureSectionSheetData(f),reach=sectionReach(f),course=sectionCourse(f);$('#sectionId').textContent=d.sectionName||f.sectionName||f.id;const sc=$('#sectionCampaign');sc.innerHTML=`<option>${escapeHtml(campaignLabel(state.campaign))}</option>`;$('#sectionTorrentName').textContent=course?`${course.abbr||''}, ${course.name||''}`:'—';installSectionReachPicker(f);$('#sectionNameInput').value=d.sectionName||f.sectionName||f.id;$('#sectionVisitDate').value=d.visitDate||currentCampaign()?.date||'';$('#sectionObservations').value=d.observations||'';updateSectionWorkStatusUi(f,readOnly);$('#sectionModal').classList.remove('hidden');$('#sectionModal').classList.toggle('read-only',readOnly);const banner=$('#sectionReadOnlyBanner');if(banner)banner.classList.toggle('hidden',!readOnly);
   $$('#sectionModal [data-section-tool]').forEach(b=>b.disabled=readOnly);for(const el of [$('#sectionNameInput'),$('#sectionVisitDate'),$('#sectionObservations')])if(el)el.disabled=readOnly;$('#sectionRebuildProfile').disabled=readOnly;$('#sectionResetProfile').disabled=readOnly;syncSectionControls(f);renderSectionFieldTable(f);renderSectionFic(f);setSectionFitxaPage(1);const c=$('#sectionCanvas');if(c){c._sectionBuilder=null;c._sectionHover=null;c._sectionObjectActive=null;c._hoverSnap=null;c._sectionSelection=null;syncSectionBuilderButtons();syncSectionSelectionUi();}
   setTimeout(()=>{const c=$('#sectionCanvas');c._readOnly=readOnly;c._inkStore=cloneAny(f.sectionInk||[]);c._profileActive=null;updateSectionProfileStatus(f);updateSectionCanvasMetricSize(f);redrawInkStore(c);ensureSectionProfile(f).then(async()=>{await ensureSectionReferenceLayersLoaded();updateSectionCanvasMetricSize(f);syncSectionControls(f);redrawInkStore(c);});},30);
 }
@@ -5479,6 +5508,17 @@ function bestSectionReachIntersection(section,reaches){
  });
  return candidates[0];
 }
+function sectionReachGeometrySignature(reach){
+ if(!reach)return '';
+ let hash=2166136261;
+ for(const p of reach.points||[]){
+  for(const n of [p.x,p.y]){
+   const value=Math.round(Number(n)*100);
+   for(let shift=0;shift<32;shift+=8){hash^=(value>>>shift)&255;hash=Math.imul(hash,16777619);}
+  }
+ }
+ return String(hash>>>0)+':'+(reach.points||[]).length;
+}
 function reassignSectionsForCourse(courseId){
  const course=state.features.find(f=>f.id===courseId&&f.type==='watercourse');
  if(!course)return 0;
@@ -5488,6 +5528,15 @@ function reassignSectionsForCourse(courseId){
   (f.courseId===courseId||f.watercourseId===courseId||ids.has(f.reachId)));
  let changed=0;
  for(const section of sections){
+  const manual=reaches.find(r=>r.id===section.manualReachId);
+  if(manual&&section.manualReachGeometry===sectionReachGeometrySignature(manual)){
+   // A user has explicitly corrected this association and the reach has not moved.
+   // Respect the correction even if the geospatial source is ambiguous.
+   continue;
+  }
+  if(section.manualReachId){
+   delete section.manualReachId;delete section.manualReachGeometry;changed++;
+  }
   const hit=bestSectionReachIntersection(section,reaches);
   if(!hit){
    // Do not move the section or guess a reach from proximity alone.
@@ -5500,6 +5549,7 @@ function reassignSectionsForCourse(courseId){
   if(section.reachId!==hit.reach.id){section.reachId=hit.reach.id;changed++;}
   section.courseId=courseId;section.watercourseId=courseId;
   section.watercourseName=course.name||course.abbr||null;
+  if(!Number.isFinite(section.reachAlong)||Math.abs(section.reachAlong-hit.projection.along)>.02)changed++;
   section.reachAlong=hit.projection.along;
   // No changes to section.points, anchorPoint, profile, sheetIII or ink.
  }
