@@ -3728,6 +3728,8 @@ async function showFeatureCard(f){
   const ro=!isEditableCampaign();
   $('#featurePhotoBtn').disabled=false;
   $('#gcHydroNameBtn').classList.toggle('hidden',!['watercourse','reach'].includes(f.type));
+  $('#gcCoursePrefixBtn').classList.toggle('hidden',f.type!=='watercourse');
+  $('#gcCoursePrefixBtn').disabled=ro;
   $('#gcHydroNameBtn').disabled=ro;
   $('#deleteFeatureBtn').disabled=ro;
   $('#gcMoveFeatureMoreBtn').disabled=ro;$('#gcMoveMaterialBtn').disabled=ro;
@@ -5709,6 +5711,71 @@ function redefineCourseReach(course,fragmentIndex,d0,d1){
   updateReachGeometryFromInterval(f,course,fragmentIndex,d0,d1);state.features.push(fieldLinkFeatureAtCreation(f));
   course.longitudinalProfile=null;renumberCourseReaches(course.id);reassignSectionsForCourse(course.id);return f;
 }
+function coursePrefixPlan(course,prefix){
+ if(!course||course.type!=='watercourse')return{error:'No s’ha trobat el curs.'};
+ const clean=String(prefix||'').trim().toUpperCase();
+ if(!/^[A-Z0-9_À-ÿ]{1,12}$/.test(clean))return{error:'El prefix ha de tenir entre 1 i 12 caràcters, sense guions ni espais.'};
+ const reaches=orderedCourseReaches(course.id),codes=new Set(),changes=[];
+ for(const reach of reaches){
+  const parts=reachCodeParts(reach);
+  if(!parts)return{error:'El tram '+(reach.reachCode||reach.id)+' no té un número final. No s’ha fet cap canvi.'};
+  const next=clean+'-'+parts.number,key=next.toLocaleLowerCase();
+  if(codes.has(key))return{error:'Dos trams tindrien el mateix codi '+next+'. Revisa els números abans de continuar.'};
+  codes.add(key);changes.push({id:reach.id,old:reach.reachCode,next});
+ }
+ return{prefix:clean,changes};
+}
+function openCoursePrefixEditor(courseId){
+ const course=state.features.find(f=>f.id===courseId&&f.type==='watercourse');
+ if(!course)return;
+ if(!isEditableCampaign()){toast('Aquesta campanya és de només lectura');return;}
+ const modal=$('#gcCoursePrefixModal');
+ modal.dataset.courseId=course.id;
+ $('#gcCoursePrefixName').textContent=(course.abbr||'')+' · '+(course.name||'');
+ $('#gcCoursePrefixInput').value=course.abbr||'';
+ updateCoursePrefixPreview();
+ modal.classList.remove('hidden');
+ $('#gcCoursePrefixInput').focus();
+}
+function closeCoursePrefixEditor(){$('#gcCoursePrefixModal')?.classList.add('hidden');}
+function updateCoursePrefixPreview(){
+ const modal=$('#gcCoursePrefixModal'),course=state.features.find(f=>f.id===modal?.dataset.courseId);
+ const plan=coursePrefixPlan(course,$('#gcCoursePrefixInput')?.value);
+ const preview=$('#gcCoursePrefixPreview'),error=$('#gcCoursePrefixStatus'),save=$('#gcCoursePrefixSave');
+ preview.replaceChildren();
+ error.textContent=plan.error||'';
+ save.disabled=!!plan.error;
+ if(plan.error)return;
+ for(const row of plan.changes){
+  const el=document.createElement('div');el.className='gc-prefix-preview-row';
+  const before=document.createElement('span');before.textContent=row.old||row.id;
+  const arrow=document.createElement('span');arrow.textContent='→';
+  const after=document.createElement('strong');after.textContent=row.next;
+  el.append(before,arrow,after);preview.appendChild(el);
+ }
+ if(!plan.changes.length)error.textContent='Aquest curs encara no té trams.';
+}
+function saveCoursePrefixEditor(){
+ const course=state.features.find(f=>f.id===$('#gcCoursePrefixModal')?.dataset.courseId);
+ const plan=coursePrefixPlan(course,$('#gcCoursePrefixInput')?.value);
+ if(plan.error){$('#gcCoursePrefixStatus').textContent=plan.error;return;}
+ if(!isEditableCampaign())return;
+ pushHistory();
+ course.abbr=plan.prefix;
+ for(const change of plan.changes){
+  const reach=state.features.find(f=>f.id===change.id&&f.type==='reach');
+  if(!reach)continue;
+  reach.reachCode=change.next;
+  // Preserve each existing numeric suffix in later renumber operations.
+  reach.reachCodeMode='manual';
+ }
+ persistState();
+ refreshHydroNamesAfterEdit(course);
+ if(state.currentProfileCourseId===course.id&&
+    !$('#profileSheetModal').classList.contains('hidden'))renderProfileSheetRows(course);
+ closeCoursePrefixEditor();
+ toast('Prefix general canviat a '+plan.prefix+' en '+plan.changes.length+' trams.',5000);
+}
 function reachCodeParts(reach){
  const match=String(reach?.reachCode||'').trim().match(/^(.+)-(\d+)$/);
  return match?{prefix:match[1],number:match[2]}:null;
@@ -6925,6 +6992,12 @@ function initUi(){
   $('#vectorTraceConnect').onclick=()=>chooseVectorTraceAction('connect');$('#vectorTraceSame').onclick=()=>chooseVectorTraceAction('same');$('#vectorTraceNew').onclick=()=>chooseVectorTraceAction('new');$('#vectorTracePick').onclick=()=>chooseVectorTraceAction('pick');$('#vectorTraceCancel').onclick=()=>{$('#vectorTraceChoiceModal').classList.add('hidden');if(state.vectorExtract)state.vectorExtract.pendingMapTrace=null;};
   $('#mapInkWidth').oninput=e=>{state.mapInkWidth=Math.max(1,+e.target.value||4);persistState();};$('#mapInkColor').oninput=e=>{state.mapInkColor=e.target.value;state.mapInkMode='pen';syncMapInkPanel();persistState();};$$('[data-map-ink-color]').forEach(b=>b.onclick=()=>{state.mapInkColor=b.dataset.mapInkColor;state.mapInkMode='pen';syncMapInkPanel();persistState();});$$('[data-map-ink-mode]').forEach(b=>b.onclick=()=>{state.mapInkMode=b.dataset.mapInkMode;syncMapInkPanel();persistState();});$('#mapInkUndo').onclick=()=>{if(!(state.mapInk||[]).length)return;state.mapInk.pop();persistState();drawAll();};$('#mapInkClear').onclick=()=>{if(!(state.mapInk||[]).length||!confirm('Esborrar totes les anotacions dibuixades sobre el mapa?'))return;state.mapInk=[];persistState();drawAll();};
   $('#gcHydroNameBtn').onclick=()=>{const feature=state.features.find(f=>f.id===state.selectedId);if(feature)openHydroNameEditor(feature);};
+  $('#gcCoursePrefixBtn').onclick=()=>{const f=state.features.find(x=>x.id===state.selectedId);if(f?.type==='watercourse')openCoursePrefixEditor(f.id);};
+  $('#gcCoursePrefixOpen').onclick=()=>openCoursePrefixEditor(state.currentProfileCourseId);
+  $('#gcCoursePrefixInput').oninput=updateCoursePrefixPreview;
+  $('#gcCoursePrefixCancel').onclick=closeCoursePrefixEditor;
+  $('#gcCoursePrefixClose').onclick=closeCoursePrefixEditor;
+  $('#gcCoursePrefixForm').onsubmit=e=>{e.preventDefault();saveCoursePrefixEditor();};
   $('#gcHydroNameCancel').onclick=closeHydroNameEditor;
   $('#gcHydroNameClose').onclick=closeHydroNameEditor;
   $('#gcHydroNameForm').onsubmit=e=>{e.preventDefault();saveHydroNameEditor();};
