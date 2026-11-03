@@ -165,6 +165,8 @@ body.mobile-map-lite #mapScreen #profileSheetFab.reach-selected:not(.hidden){
 }
 
 /* R37: reliable mobile touch targets, map navigation and responsive panels */
+/* Restore native scrolling in panels; the map canvas alone owns custom gestures. */
+@media(max-width:820px){html,body,#app{touch-action:auto!important}}
 @media(max-width:820px){
  .mobile-shell button,.mobile-map-bar button,.m-observation-sheet button{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
  .m-open-detail{border:1px solid #cadbd0;background:#e8f1ea;color:#24543d;border-radius:12px;padding:10px 12px;min-width:60px;min-height:44px;font-weight:700;cursor:pointer}
