@@ -1,3 +1,7 @@
+## R38 · alternança de taronges als trams (04/11/2026)
+
+Branca derivada de `r37-20261103`. Els trams consecutius d'un mateix curs alternen automàticament taronja intens (`#d58425`) i taronja clar (`#f4ac61`) segons l'ordre de `orderedCourseReaches`. S'aplica al mapa i a les exportacions cartogràfiques que representen els trams. Els colors personalitzats explícits es respecten. Canvi exclusivament visual, sense alterar geometries, IDs, codis, fitxes, dades persistides ni Supabase. Prova funcional en dispositiu pendent.
+
 ## R37 · interfície mòbil i gestos naturals (03/11/2026)
 
 Branca derivada de `r36-20261103`, sense modificar `main` ni Supabase. En la interfície mòbil simplificada (fins a 820 px), un toc amb **un dit** selecciona elements del mapa sense haver d'activar «Seleccionar»; amb **dos dits** es mou, amplia, redueix i gira el mapa. Arrossegar un únic dit no desplaça ni modifica les geometries. El llapis i el comportament d'escriptori/tauleta queden preservats. En el mode de col·locació explícita, un toc situa una parada o un punt fotogràfic i es torna a «Seleccionar». La creació GPS continua utilitzant la posició del dispositiu.
