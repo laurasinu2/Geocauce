@@ -1,3 +1,7 @@
+### Ajust de l'editor de trams: prefix independent (03/11/2026)
+
+A «Més opcions → Editar nom i codi», els trams mostren ara el camp editable «Prefix del tram» (p. ex. TSJA) i el sufix numèric actual (p. ex. -3) separat i de només lectura. En guardar el prefix, es manté el mateix número, es comprova que el codi complet sigui únic dins del curs i es protegeix com a personalitzat davant de renumeracions posteriors. El nom descriptiu no és necessari ni es modifica en aquesta operació. L'editor del curs manté els seus camps de nom i abreviatura. Les fitxes de les seccions vinculades continuen consultant el codi visible del tram per ID; no s'alteren ni les geometries ni les dades. Sense canvis a Supabase.
+
 ### Edició manual de noms i codis (03/11/2026)
 
 A la targeta de cada curs o tram, dins de «Més opcions», hi ha «Editar nom i codi». Permet canviar el nom del curs, la seva abreviatura, el codi visible del tram i el nom descriptiu del tram. Els trams poden tenir codi automàtic o personalitzat; els personalitzats no es renumeren quan canvien els límits, l'ordre o l'abreviatura del curs. Els codis automàtics eviten col·lisions amb els manuals. L'usuari pot tornar al mode automàtic. Els noms s'actualitzen a mapes, fitxes, llistes i informes mitjançant els IDs interns estables. Les fitxes i la geometria no es modifiquen, i les dades es guarden amb el sistema de sincronització existent. No cal SQL de Supabase. Proves sintàctiques i de numeració superades; proves de PWA al dispositiu pendents.
