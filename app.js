@@ -5744,11 +5744,14 @@ function saveHydroNameEditor(){
  }else{
   const course=reachCourse(feature);
   if(!course){msg.textContent='No es troba el curs associat.';return;}
-  const ordered=orderedCourseReaches(course.id),rank=ordered.findIndex(r=>r.id===feature.id);
-  const nextCode=mode==='manual'?code:reachCodeFor(course,rank+1);
-  if(!nextCode){msg.textContent='Introdueix un codi de tram.';return;}
-  if(reachCodeConflicts(course.id,nextCode,feature.id)){msg.textContent='Ja existeix un tram amb aquest codi dins del curs.';return;}
-  pushHistory();feature.name=name;feature.reachCodeMode=mode==='manual'?'manual':'auto';feature.reachCode=nextCode;
+  if(mode==='manual'&&!code){msg.textContent='Introdueix un codi de tram.';return;}
+  if(mode==='manual'&&reachCodeConflicts(course.id,code,feature.id)){
+   msg.textContent='Ja existeix un tram amb aquest codi dins del curs.';return;
+  }
+  pushHistory();feature.name=name;
+  feature.reachCodeMode=mode==='manual'?'manual':'auto';
+  if(mode==='manual')feature.reachCode=code;
+  renumberCourseReaches(course.id);
  }
  persistState();closeHydroNameEditor();refreshHydroNamesAfterEdit(feature);
  toast('Denominació actualitzada en mapa i fitxes.',4500);
