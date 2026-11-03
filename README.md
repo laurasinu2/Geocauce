@@ -1,3 +1,7 @@
+## R35 · puntos manuales sin importar archivos (03/11/2026)
+
+El importador permite crear directamente puntos GPS o puntos fotográficos vacíos sin cargar CSV, GPX, KML ni imágenes. En la pestaña Fotografías, «Crear punto fotográfico sin foto» guarda un punto con `photos: []`, para añadir imágenes después desde su marcador. En Puntos, «Crear punto manualmente» añade un marcador GPS normal. El usuario introduce nombre y posición ETRS89 / UTM 31N (EPSG:25831) en X, Y, o deja vacío el campo y toca la vista previa del mapa. Se guardan en el proyecto/campaña mediante la persistencia local existente y se programan para la sincronización habitual. No hay cambios en SQL ni en Supabase. Sintaxis validada; pruebas reales PWA pendientes.
+
 ## R34 · copiar coordenadas UTM31N desde el mapa (03/11/2026)
 
 En el menú **Eines / Herramientas** se añade «Copiar coordenadas (UTM 31N)». Al tocar el mapa, la aplicación copia la ubicación como `X, Y` con dos decimales, en metros y en **ETRS89 / UTM zona 31N (EPSG:25831)**. Utiliza las coordenadas reales del mapa y transforma automáticamente desde otro CRS compatible (UTM o coordenadas geográficas) al EPSG:25831. La herramienta permanece activa para copiar varios puntos, funciona en modo táctil y lápiz, y no modifica geometrías ni datos. Para navegadores sin permiso de portapapeles incluye un método alternativo y, si este también falla, muestra los valores para copiarlos manualmente. No requiere Supabase ni migraciones. Pendiente de prueba funcional sobre dispositivos reales.
