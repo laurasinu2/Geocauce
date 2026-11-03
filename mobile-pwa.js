@@ -99,7 +99,7 @@ function ensureObservationSheet(){
  sheet=document.createElement('div');sheet.id='mObservationSheet';sheet.className='m-observation-sheet hidden';sheet.innerHTML=`<button class="m-sheet-backdrop" data-close-observation aria-label="Cerrar"></button><section class="m-sheet-card"><div class="m-sheet-handle"></div><div class="m-sheet-head"><div><small>NUEVA OBSERVACIÓN</small><h2>¿Qué quieres registrar?</h2></div><button class="m-sheet-close" data-close-observation aria-label="Cerrar">×</button></div><div class="m-observation-grid"><button data-observation-tool="gps"><img src="icons/gps.png" alt=""><span>Punto GPS</span></button><button data-observation-tool="photo"><img src="icons/camara.png" alt=""><span>Foto</span></button><button data-observation-tool="historicalPhoto"><img src="icons/fotos.png" alt=""><span>Fotografía</span></button><button data-observation-tool="stop"><img src="icons/visita.png" alt=""><span>Crear parada</span></button><button data-observation-tool="pan"><img src="icons/mover.png" alt=""><span>Mover</span></button><button data-observation-tool="select"><img src="icons/seleccionar.png" alt=""><span>Seleccionar</span></button></div></section>`;
  document.body.appendChild(sheet);
  $$('[data-close-observation]').forEach(b=>b.onclick=()=>sheet.classList.add('hidden'));
- $('[data-observation-tool]').forEach(b=>b.onclick=async()=>{
+ $$('[data-observation-tool]').forEach(b=>b.onclick=async()=>{
    const tool=b.dataset.observationTool;
    sheet.classList.add('hidden');
    // A file picker must be opened synchronously inside the user's tap;
