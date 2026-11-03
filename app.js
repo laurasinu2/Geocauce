@@ -5709,6 +5709,10 @@ function redefineCourseReach(course,fragmentIndex,d0,d1){
   updateReachGeometryFromInterval(f,course,fragmentIndex,d0,d1);state.features.push(fieldLinkFeatureAtCreation(f));
   course.longitudinalProfile=null;renumberCourseReaches(course.id);reassignSectionsForCourse(course.id);return f;
 }
+function reachCodeParts(reach){
+ const match=String(reach?.reachCode||'').trim().match(/^(.+)-(\d+)$/);
+ return match?{prefix:match[1],number:match[2]}:null;
+}
 function openHydroNameEditor(feature){
  if(!feature||!['watercourse','reach'].includes(feature.type))return;
  if(!isEditableCampaign()){toast('Dia anterior en mode lectura');return;}
@@ -5716,16 +5720,21 @@ function openHydroNameEditor(feature){
  modal.dataset.featureId=feature.id;
  const isCourse=feature.type==='watercourse',course=isCourse?feature:reachCourse(feature);
  $('#gcHydroNameTitle').textContent=isCourse?'Editar nom del curs':'Editar nom i codi del tram';
- $('#gcHydroName').value=isCourse?feature.name||'':feature.name||'';
- $('#gcHydroNameLabel').textContent=isCourse?'Nom del curs':'Nom descriptiu del tram (opcional)';
- $('#gcHydroCode').value=isCourse?feature.abbr||'':feature.reachCode||'';
- $('#gcHydroCodeLabel').textContent=isCourse?'Abreviatura del curs':'Codi visible del tram';
+ const parts=isCourse?null:reachCodeParts(feature);
+ $('#gcHydroNameRow').classList.toggle('hidden',!isCourse);
+ $('#gcHydroName').value=isCourse?feature.name||'':'';
+ $('#gcHydroNameLabel').textContent='Nom del curs';
+ $('#gcHydroCode').value=isCourse?feature.abbr||'':parts?.prefix||'';
+ $('#gcHydroCodeLabel').textContent=isCourse?'Abreviatura del curs':'Prefix del tram';
+ $('#gcHydroCodeSuffixWrap').classList.toggle('hidden',isCourse);
+ $('#gcHydroCodeSuffix').textContent=parts?'-'+parts.number:'(codi sense número)';
  $('#gcHydroCodeModeWrap').classList.toggle('hidden',isCourse);
  $('#gcHydroCodeMode').value=feature.reachCodeMode==='manual'?'manual':'auto';
  $('#gcHydroCode').disabled=!isCourse&&$('#gcHydroCodeMode').value==='auto';
  $('#gcHydroNameStatus').textContent=isCourse?
   'Els trams automàtics actualitzaran el prefix; els codis manuals es conservaran.':
-  'Els codis manuals no canviaran quan es renumerin els trams.';
+  parts?'Només canviaràs el prefix. El número '+parts.number+' es conservarà.':
+  'Aquest tram no té un codi amb sufix numèric. Revisa la numeració abans de canviar el prefix.';
  modal.classList.remove('hidden');
 }
 function closeHydroNameEditor(){$('#gcHydroNameModal')?.classList.add('hidden');}
@@ -5744,13 +5753,19 @@ function saveHydroNameEditor(){
  }else{
   const course=reachCourse(feature);
   if(!course){msg.textContent='No es troba el curs associat.';return;}
-  if(mode==='manual'&&!code){msg.textContent='Introdueix un codi de tram.';return;}
-  if(mode==='manual'&&reachCodeConflicts(course.id,code,feature.id)){
-   msg.textContent='Ja existeix un tram amb aquest codi dins del curs.';return;
+  const parts=reachCodeParts(feature);
+  if(!parts){msg.textContent='El tram no té un sufix numèric que es pugui conservar.';return;}
+  const prefix=code.toUpperCase();
+  if(mode==='manual'&&!/^[A-ZÀ-ÿ0-9_]+$/i.test(prefix)){
+   msg.textContent='Escriu només el prefix, sense guions ni números de tram.';return;
   }
-  pushHistory();feature.name=name;
+  const nextCode=prefix+'-'+parts.number;
+  if(mode==='manual'&&reachCodeConflicts(course.id,nextCode,feature.id)){
+   msg.textContent='Ja existeix un tram amb aquest prefix i número dins del curs.';return;
+  }
+  pushHistory();
   feature.reachCodeMode=mode==='manual'?'manual':'auto';
-  if(mode==='manual')feature.reachCode=code;
+  if(mode==='manual')feature.reachCode=nextCode;
   renumberCourseReaches(course.id);
  }
  persistState();closeHydroNameEditor();refreshHydroNamesAfterEdit(feature);
@@ -6913,7 +6928,11 @@ function initUi(){
   $('#gcHydroNameCancel').onclick=closeHydroNameEditor;
   $('#gcHydroNameClose').onclick=closeHydroNameEditor;
   $('#gcHydroNameForm').onsubmit=e=>{e.preventDefault();saveHydroNameEditor();};
-  $('#gcHydroCodeMode').onchange=()=>{const manual=$('#gcHydroCodeMode').value==='manual';$('#gcHydroCode').disabled=!manual;const f=state.features.find(x=>x.id===$('#gcHydroNameModal').dataset.featureId);if(!manual&&f){const c=reachCourse(f);if(c)$('#gcHydroCode').value=reachCodeFor(c,orderedCourseReaches(c.id).findIndex(r=>r.id===f.id)+1);}};
+  $('#gcHydroCodeMode').onchange=()=>{
+   const manual=$('#gcHydroCodeMode').value==='manual';$('#gcHydroCode').disabled=!manual;
+   const f=state.features.find(x=>x.id===$('#gcHydroNameModal').dataset.featureId);
+   if(!manual&&f){const c=reachCourse(f);if(c)$('#gcHydroCode').value=c.abbr||'TR';}
+  };
   $('#notesBtn').onclick=openNotesForSelected;$('#featureMoreBtn').onclick=()=>{const menu=$('#featureMoreMenu'),open=menu.classList.contains('hidden');menu.classList.toggle('hidden',!open);$('#featureMoreBtn').setAttribute('aria-expanded',String(open));};$('#editContourBtn').onclick=()=>{const f=state.features.find(x=>x.id===state.selectedId);if(f?.type==='reach'){openReachEditModal(f);$('#featureMoreMenu').classList.add('hidden');return;}if(!f?.closed){toast('La edición de contorno necesita un polígono cerrado');return;}$('#featureMoreMenu').classList.add('hidden');setTool('editContour');};
   $('#changesBtn').onclick=()=>{$('#campaignPanel').classList.remove('hidden');updateCampaignUi();};
   $('#deleteFeatureBtn').onclick=()=>state.selectedId&&deleteFeature(state.selectedId,true);
