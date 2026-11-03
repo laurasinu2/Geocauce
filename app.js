@@ -7320,6 +7320,7 @@ function initPhotoWorkspaceR29(){
   },
   project:(lon,lat)=>{const w=lonLatToMapCoords(lon,lat,workingMapEpsg());return{x:w.x,y:w.y};},
   unproject:(x,y,crs)=>+crs===4326?{lon:x,lat:y}:fieldUtmToLonLat(x,y,+crs),
+  projectToUtm31:(lon,lat)=>{const p=lonLatToMapCoords(lon,lat,25831);return{x:p.x,y:p.y};},
   epsg:()=>workingMapEpsg(),persist:()=>persistState(),persistVerified:()=>{const result=persistStateLocalOnly();if(!result||!localStorage.getItem(projectStateKey(state.projectId)))throw new Error('No se ha guardado el estado local del proyecto');return true;},scheduleSync:()=>scheduleCloudSync(1000),redraw:()=>{drawAll();renderLayers();},
   relocatePhoto:id=>beginPointRelocation('photo',id),
   openImage:(src,title)=>gcOpenPhotoLightbox(src,title),
