@@ -24,7 +24,7 @@ function buttons(){
  '<div class="gc-work-tabs"><button data-tab="photos" class="active">📷 Fotografías</button><button data-tab="points">📍 Puntos</button></div>'+
  '<div class="gc-work-grid"><section class="gc-work-left">'+
  '<label class="gc-drop" id="gcDrop"><span>📁</span><b id="gcDropTitle">Selecciona fotografías</b><small id="gcDropHelp">JPG / JPEG con GPS EXIF o ubicación manual · puedes elegir muchos archivos</small><span class="gc-pick">Explorar archivos</span><input id="gcFiles" type="file" accept=".jpg,.jpeg,image/jpeg" multiple hidden></label>'+
- '<div style="display:flex;gap:8px;align-items:center;margin:12px 0;flex-wrap:wrap"><button id="gcAddManual" type="button" class="gc-pick" style="border:0;cursor:pointer">＋ Crear punto manualmente</button><small id="gcManualHelp">Sin archivos, añade los detalles después</small></div>'+ 
+ '<div class="gc-manual-entry"><div class="gc-manual-head"><button id="gcAddManual" type="button" class="gc-pick">＋ Crear punto manualmente</button><small id="gcManualHelp">Sin archivos, añade los detalles después</small></div><div id="gcManualForm" class="gc-manual-form hidden"><strong id="gcManualTitle">Nuevo punto</strong><label>Nombre del punto<input id="gcManualName" type="text" maxlength="120" placeholder="Nombre del punto"></label><div class="gc-manual-fields"><label>X · ETRS89 / UTM 31N<input id="gcManualX" inputmode="decimal" type="text" placeholder="400000.00"></label><label>Y · ETRS89 / UTM 31N<input id="gcManualY" inputmode="decimal" type="text" placeholder="4600000.00"></label></div><div class="gc-manual-buttons"><button id="gcManualMap" type="button">📍 Elegir en el mapa</button><button id="gcManualSave" type="button" class="gc-primary">Guardar punto</button><button id="gcManualCancel" type="button">Cancelar</button></div><p id="gcManualStatus" role="status" aria-live="polite"></p></div></div>'+ 
   '<div class="gc-settings"><h3>⚙ Opciones de importación</h3><label>Nombre de la capa<input id="gcLayerName" type="text" value="Fotografías de campo" maxlength="90"></label><label id="gcPointCrsRow" class="hidden">CRS de los puntos<select id="gcPointCrs"><option value="4326">WGS84 · EPSG:4326</option><option value="25831">ETRS89 / UTM 31N</option><option value="25830">ETRS89 / UTM 30N</option></select></label><label class="gc-check"><input id="gcDuplicates" type="checkbox" checked> Detectar y excluir duplicados</label><label class="gc-check"><input id="gcKeepUnlocated" type="checkbox" checked> Conservar fotografías sin coordenadas</label><label class="gc-check"><input id="gcThumbnails" type="checkbox" checked> Miniaturas de vista previa</label></div>'+
  '<div class="gc-work-actions"><button id="gcApplyFieldPoints" class="gc-field-positions hidden" type="button">📍 Asignar puntos 1a · 2 · 3a (revisar)</button><button id="gcImportCommit" class="gc-primary" type="button" disabled>Importar fotografías</button><button id="gcRetryFailed" class="gc-retry-failed hidden" type="button">↻ Reintentar archivos fallidos</button><div class="gc-import-progress hidden" id="gcImportProgress"><div><span id="gcProgressText"></span><span id="gcProgressCount"></span></div><progress id="gcProgressBar" max="1" value="0"></progress></div><p id="gcImportFeedback" aria-live="polite"></p></div></section>'+
  '<section class="gc-work-right"><div class="gc-preview-head"><div><b>◉ Vista previa</b><small>Revisa las posiciones antes de importar</small></div><span id="gcCountLabel">0 elementos</span></div>'+
@@ -51,39 +51,62 @@ function applyFieldSamplePositions(){
  fitAll();render();
 }
 
-function saveManualPoint(name,location,kind){
- if(!validXY(location))return api.notify('El punto necesita una posición válida');
- if(!api.canEdit())return api.notify('Campaña de solo lectura');
- const state=api.getState(),campaignId=state.campaign,group=$('#gcLayerName').value.trim()||'Puntos manuales';
- const id=kind==='photos'?'hp-manual-'+uid():'mp-manual-'+uid();
- const list=kind==='photos'?(state.historicalPhotoPoints||(state.historicalPhotoPoints=[])):(state.mapPins||(state.mapPins=[]));
- const rec=kind==='photos'?
-  {id,name,x:location.x,y:location.y,crs:api.epsg(),photoPointPosition:{x:location.x,y:location.y,crs:api.epsg()},photos:[],campaignId,importGroup:group,createdAt:Date.now(),pendingPhoto:true}:
-  {id,kind:'gps',label:name,x:location.x,y:location.y,crs:api.epsg(),campaignId,importGroup:group,createdAt:Date.now(),attributes:{manual:true}};
- list.push(rec);
- try{api.persistVerified();api.redraw();api.scheduleSync?.();$('#gcImportFeedback').textContent='Punto «'+name+'» creado. '+(kind==='photos'?'Podrás añadir fotos desde el marcador del mapa.':'Se ha guardado sin archivo adjunto.');}
- catch(error){list.splice(list.indexOf(rec),1);api.notify('No se ha podido guardar: '+(error.message||error));}
+function manualMessage(message,error=false){
+ const el=$('#gcManualStatus');if(!el)return;el.textContent=message;el.classList.toggle('gc-manual-error',error);
+}
+function resetManualForm(){
+ pendingManual=null;$('#gcManualForm')?.classList.add('hidden');if(map)map.style.cursor='';
 }
 function startManualPoint(){
- if(busy||!api.canEdit())return;
- const kind=tab,def=kind==='photos'?'Nuevo punto fotográfico':'Nuevo punto';
- const name=prompt('Nombre del punto',def);
- if(name===null)return;
- const label=name.trim()||def;
- const answer=prompt('ETRS89 / UTM 31N (EPSG:25831). Coordenadas X, Y en metros. Deja vacío para tocar la vista previa.','');
- if(answer===null)return;
- if(!answer.trim()){
-  pendingManual={name:label,kind};
-  $('#gcImportFeedback').textContent='Toca la vista previa del mapa para ubicar «'+label+'».';
-  $('#gcMapHint').textContent='Toca el mapa para guardar el nuevo punto';
-  return;
+ if(busy||!api.canEdit())return api.notify('Campaña de solo lectura');
+ const form=$('#gcManualForm');if(!form.classList.contains('hidden')){resetManualForm();return;}
+ form.classList.remove('hidden');pendingManual=null;
+ $('#gcManualTitle').textContent=tab==='photos'?'Nuevo punto fotográfico sin foto':'Nuevo punto georreferenciado';
+ $('#gcManualName').value=(tab==='photos'?'Punto fotográfico ':'Punto ')+String(tab==='photos'?(api.getState().historicalPhotoPoints||[]).length+1:(api.getState().mapPins||[]).length+1).padStart(2,'0');
+ $('#gcManualX').value='';$('#gcManualY').value='';
+ manualMessage('Introduce X e Y o sitúa el punto sobre el mapa.');
+ $('#gcManualName').focus();
+}
+function manualLocation(){
+ const parse=v=>{const t=String(v||'').trim().replace(',','.');return t?Number(t):NaN;};
+ const x=parse($('#gcManualX').value),y=parse($('#gcManualY').value);
+ if(!Number.isFinite(x)||!Number.isFinite(y))return null;
+ const ll=api.unproject(x,y,25831);
+ return ll&&Number.isFinite(ll.lon)&&Number.isFinite(ll.lat)?api.project(ll.lon,ll.lat):null;
+}
+function manualFieldsFromWorld(p){
+ const crs=Number(api.epsg()),ll=crs===4326||crs===4258?{lon:p.x,lat:p.y}:api.unproject(p.x,p.y,crs);
+ if(!ll||!Number.isFinite(ll.lon)||!Number.isFinite(ll.lat))return false;
+ const xy=api.projectToUtm31(ll.lon,ll.lat);
+ if(!validXY(xy))return false;
+ $('#gcManualX').value=xy.x.toFixed(2);$('#gcManualY').value=xy.y.toFixed(2);
+ return true;
+}
+function chooseManualLocation(){
+ pendingManual={kind:tab};map.style.cursor='crosshair';
+ manualMessage('Toca la vista previa para elegir la posición y después pulsa Guardar punto.');
+}
+function saveManualPoint(){
+ if(!api.canEdit())return manualMessage('Campaña de solo lectura.',true);
+ const name=$('#gcManualName').value.trim(),location=manualLocation();
+ if(!name)return manualMessage('Introduce el nombre.',true);
+ if(!validXY(location))return manualMessage('Introduce coordenadas X, Y válidas o elige en el mapa.',true);
+ const st=api.getState(),kind=tab,id=(kind==='photos'?'hp-manual-':'mp-manual-')+uid();
+ const group=$('#gcLayerName').value.trim()||'Puntos manuales',campaignId=st.campaign;
+ const list=kind==='photos'?(st.historicalPhotoPoints||(st.historicalPhotoPoints=[])):(st.mapPins||(st.mapPins=[]));
+ const rec=kind==='photos'?
+ {id,name,x:location.x,y:location.y,crs:api.epsg(),photoPointPosition:{x:location.x,y:location.y,crs:api.epsg()},photos:[],campaignId,importGroup:group,createdAt:Date.now(),pendingPhoto:true}:
+ {id,kind:'gps',label:name,x:location.x,y:location.y,crs:api.epsg(),campaignId,importGroup:group,createdAt:Date.now(),attributes:{manual:true}};
+ list.push(rec);
+ try{
+  api.persistVerified();api.redraw();api.scheduleSync?.();
+  resetManualForm();
+  rows.push({key:id,name,manualWorld:location,world:location,excluded:false,error:null,manualPreview:true,index:rows.length});
+  selected=rows.length-1;listPage=Math.floor(selected/100);fitAll();render();
+  $('#gcImportFeedback').textContent='✓ Punto «'+name+'» guardado en el mapa. '+(kind==='photos'?'Puedes añadir la foto más tarde.':'');
+ }catch(error){
+  list.splice(list.indexOf(rec),1);manualMessage('Error al guardar: '+(error?.message||error),true);
  }
- const nums=answer.trim().split(/[;,\s]+/).map(Number);
- if(nums.length!==2||!nums.every(Number.isFinite))return api.notify('Introduce dos valores X, Y válidos');
- const ll=api.unproject(nums[0],nums[1],25831);
- const location=ll&&Number.isFinite(ll.lon)&&Number.isFinite(ll.lat)?api.project(ll.lon,ll.lat):null;
- if(!validXY(location))return api.notify('No se pueden convertir las coordenadas UTM 31N');
- pendingManual=null;saveManualPoint(label,location,kind);
 }
 function show(){
  if(!api)return;
@@ -103,6 +126,9 @@ function show(){
   $('#gcThumbnails').onchange=render;
   $('#gcApplyFieldPoints').onclick=applyFieldSamplePositions;
    $('#gcAddManual').onclick=startManualPoint;
+  $('#gcManualMap').onclick=chooseManualLocation;
+  $('#gcManualSave').onclick=saveManualPoint;
+  $('#gcManualCancel').onclick=resetManualForm;
   $('#gcPointCrs').onchange=()=>{if(tab==='points'&&lastPointFiles.length)stagePoints(lastPointFiles,++seq);};
   $('#gcMapPlus').onclick=()=>{view.scale*=1.6;paint();};
   $('#gcMapMinus').onclick=()=>{view.scale/=1.6;paint();};
@@ -120,10 +146,10 @@ function show(){
  $('#gcImportFeedback').textContent='';
  requestAnimationFrame(()=>{resizeMap();fitAll();render();});
 }
-function close(){pendingManual=null;if(busy){api.notify('La importación está guardando archivos; no cierres la ventana');return;}seq++;release(previewUrls);rows=[];selected=-1;lastPointFiles=[];dialog?.classList.add('hidden');api.scheduleSync?.();}
+function close(){resetManualForm();if(busy){api.notify('La importación está guardando archivos; no cierres la ventana');return;}seq++;release(previewUrls);rows=[];selected=-1;lastPointFiles=[];dialog?.classList.add('hidden');api.scheduleSync?.();}
 function setTab(next){
  if(busy)return;
- const same=next===tab;pendingManual=null;tab=next;if(!same){rows=[];selected=-1;listPage=0;seq++;release(previewUrls);lastPointFiles=[];$('#gcApplyFieldPoints').classList.add('hidden');}
+ const same=next===tab;resetManualForm();tab=next;if(!same){rows=[];selected=-1;listPage=0;seq++;release(previewUrls);lastPointFiles=[];$('#gcApplyFieldPoints').classList.add('hidden');}
  dialog.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
  $('#gcDropTitle').textContent=tab==='photos'?'Selecciona fotografías':'Selecciona archivos de puntos';
  $('#gcDropHelp').textContent=tab==='photos'?'JPG / JPEG con GPS EXIF o ubicación manual · selección múltiple':'CSV, GeoJSON, GPX o KML · varios puntos por archivo';
@@ -306,7 +332,7 @@ function paint(){
 function installMapControls(){
  let contacts=new Map(),moved=false,manual=-1;
  const pos=e=>{const r=map.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};};
- map.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'&&e.button!==0)return;contacts.set(e.pointerId,pos(e));moved=false;map.setPointerCapture?.(e.pointerId);e.preventDefault();});
+ map.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'&&e.button!==0)return;contacts.set(e.pointerId,pos(e));map._downPoint=pos(e);moved=false;map.setPointerCapture?.(e.pointerId);e.preventDefault();});
  map.addEventListener('pointermove',e=>{
   if(!contacts.has(e.pointerId))return;
   const before=[...contacts.values()],p=pos(e);contacts.set(e.pointerId,p);
@@ -316,8 +342,9 @@ function installMapControls(){
  });
  map.addEventListener('pointerup',e=>{
   if(!contacts.has(e.pointerId))return;contacts.delete(e.pointerId);
-  if(!moved&&contacts.size===0){const p=pos(e);
-   if(pendingManual){const target=pendingManual;pendingManual=null;saveManualPoint(target.name,world(p.x,p.y),target.kind);return;}
+  if(contacts.size===0){const p=pos(e);
+   if(moved&&Math.hypot(p.x-(map._downPoint?.x??p.x),p.y-(map._downPoint?.y??p.y))>=8)return;
+   if(pendingManual){pendingManual=null;map.style.cursor='';if(manualFieldsFromWorld(world(p.x,p.y)))manualMessage('Posición asignada. Pulsa Guardar punto.');else manualMessage('No se puede transformar esta posición.',true);return;}
    const manualIndex=map.dataset.manualIndex!==undefined&&map.dataset.manualIndex!==''?Number(map.dataset.manualIndex):-1;
    if(Number.isInteger(manualIndex)&&manualIndex>=0&&rows[manualIndex]){
     rows[manualIndex].manualWorld=world(p.x,p.y);rows[manualIndex].gps=null;rows[manualIndex].manualGps=null;rows[manualIndex].locationSource='manual-map';map.dataset.manualIndex='';selected=manualIndex;render();return;
