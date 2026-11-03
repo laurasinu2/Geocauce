@@ -3533,38 +3533,51 @@ function startMapAction(e,p){
   const activeTool=state.tool==='mapInk'?(state.mapInkMode==='eraser'?'mapInkErase':'mapInk'):state.tool;state.currentStroke={tool:activeTool,points:[p],pressure:[e.pressure||.5],pointerId:e.pointerId};
   inkCanvas.setPointerCapture?.(e.pointerId);
 }
+// Phone interactions: one finger selects; two fingers navigate.
+// Tablet stylus and desktop tools continue to use their original handlers.
+function mobileMapNaturalTouch(){return document.body.classList.contains('mobile-map-lite')&&window.matchMedia('(max-width:820px)').matches;}
 function beginTouchNavigation(e,p){
   hideMapContextMenu();state.touches.set(e.pointerId,p);state.touchTapCandidates=state.touchTapCandidates||new Map();const candidate={start:{...p},last:{...p},time:Date.now(),multi:false,held:false,holdTimer:null};state.touchTapCandidates.set(e.pointerId,candidate);inkCanvas.setPointerCapture?.(e.pointerId);candidate.holdTimer=setTimeout(()=>{if(state.relocatingPoint||state.tool==='relocate'||state.tool==='copyCoords'||candidate.multi||Math.hypot(candidate.last.x-candidate.start.x,candidate.last.y-candidate.start.y)>9||state.touches.size!==1)return;candidate.held=true;state.panStart=null;showMapContextMenu(candidate.start);},620);
   if(state.touches.size===2){
     for(const c of state.touchTapCandidates.values()){c.multi=true;if(c.holdTimer){clearTimeout(c.holdTimer);c.holdTimer=null;}}
     const vals=[...state.touches.values()],mid={x:(vals[0].x+vals[1].x)/2,y:(vals[0].y+vals[1].y)/2};
     state.pinch={dist:Math.hypot(vals[1].x-vals[0].x,vals[1].y-vals[0].y),angle:Math.atan2(vals[1].y-vals[0].y,vals[1].x-vals[0].x),scale:state.view.scale,rotation:state.view.rotation||0,center:{...state.view},mid,world:screenToWorld(mid)};
-  } else state.panStart={p,center:{...state.view}};
+  } else state.panStart=mobileMapNaturalTouch()?null:{p,center:{...state.view}};
 }
 function moveTouchNavigation(e,p){
   if(!state.touches.has(e.pointerId))return;state.touches.set(e.pointerId,p);const c=state.touchTapCandidates?.get(e.pointerId);if(c){c.last={...p};if(Math.hypot(c.last.x-c.start.x,c.last.y-c.start.y)>9&&c.holdTimer){clearTimeout(c.holdTimer);c.holdTimer=null;}if(c.held)return;}
   if(state.touches.size===2&&state.pinch){
     const vals=[...state.touches.values()],dist=Math.hypot(vals[1].x-vals[0].x,vals[1].y-vals[0].y),mid={x:(vals[0].x+vals[1].x)/2,y:(vals[0].y+vals[1].y)/2},ang=Math.atan2(vals[1].y-vals[0].y,vals[1].x-vals[0].x);
     markMapMotion();state.view.scale=Math.max(.002,Math.min(1000,state.pinch.scale*dist/state.pinch.dist));state.view.rotation=normAngle(state.pinch.rotation+(ang-state.pinch.angle));keepWorldAtScreen(state.pinch.world,mid);drawAll();
-  } else if(state.panStart){
+  } else if(state.panStart&&!mobileMapNaturalTouch()){
     markMapMotion();const d=screenOffsetToWorld(p.x-state.panStart.p.x,p.y-state.panStart.p.y,state.panStart.center.scale,state.panStart.center.rotation||0);state.view.cx=state.panStart.center.cx-d.x;state.view.cy=state.panStart.center.cy-d.y;drawAll();
   }
 }
 function endTouchNavigation(e){
   const c=state.touchTapCandidates?.get(e.pointerId),wasPenMode=appSettings.inputMode==='pen';
-  if(c?.holdTimer)clearTimeout(c.holdTimer);state.touches.delete(e.pointerId);state.touchTapCandidates?.delete(e.pointerId);if(state.touches.size<2)state.pinch=null;if(state.touches.size===1){const [rp]=state.touches.values();state.panStart={p:{...rp},center:{...state.view}};}if(state.touches.size===0){state.panStart=null;persistState();}
-  if(e.type!=='pointercancel'&&(wasPenMode||!!state.relocatingPoint||state.tool==='relocate'||state.tool==='copyCoords')&&c&&!c.multi&&!c.held&&Date.now()-c.time<600&&Math.hypot(c.last.x-c.start.x,c.last.y-c.start.y)<8)selectAt(c.last);
+  if(c?.holdTimer)clearTimeout(c.holdTimer);state.touches.delete(e.pointerId);state.touchTapCandidates?.delete(e.pointerId);if(state.touches.size<2)state.pinch=null;if(state.touches.size===1){const [rp]=state.touches.values();state.panStart=mobileMapNaturalTouch()?null:{p:{...rp},center:{...state.view}};}if(state.touches.size===0){state.panStart=null;persistState();}
+  if(e.type!=='pointercancel'&&(mobileMapNaturalTouch()||wasPenMode||!!state.relocatingPoint||state.tool==='relocate'||state.tool==='copyCoords')&&c&&!c.multi&&!c.held&&Date.now()-c.time<650&&Math.hypot(c.last.x-c.start.x,c.last.y-c.start.y)<11){
+   if(mobileMapNaturalTouch()){
+    if(state.relocatingPoint){void finishPointRelocation(c.last);}
+    else if(state.tool==='relocate')selectRelocationSource(c.last);
+    else if(state.tool==='copyCoords')copyMapCoordinates(c.last);
+    else if(state.tool==='stop'){addMapStopAt(screenToWorld(c.last));setTool('select',{quiet:true});}
+    else if(state.tool==='historicalPhoto'||state.tool==='photo'){addHistoricalPhotoPointAt(screenToWorld(c.last));setTool('select',{quiet:true});}
+    else if(state.historicalLinkPointId)handleHistoricalLinkTap(c.last);
+    else selectAt(c.last);
+   }else selectAt(c.last);
+  }
 }
 function onMapPointerDown(e){
   if($('#mapScreen').classList.contains('hidden'))return;if(!$('#mapContextMenu')?.classList.contains('hidden'))hideMapContextMenu();
   const p=eventPoint(e,inkCanvas);
-  if(e.pointerType==='touch' && ((appSettings.inputMode==='pen' && state.tool!=='stop')||state.tool==='relocate'||!!state.relocatingPoint)){beginTouchNavigation(e,p);return;}
+  if(e.pointerType==='touch' && (mobileMapNaturalTouch()||(appSettings.inputMode==='pen' && state.tool!=='stop')||state.tool==='relocate'||!!state.relocatingPoint)){beginTouchNavigation(e,p);return;}
   if(e.pointerType==='touch' && appSettings.inputMode==='finger' && state.tool==='pan'){beginTouchNavigation(e,p);return;}
   startMapAction(e,p);
 }
 function onMapPointerMove(e){
   const p=eventPoint(e,inkCanvas);
-  if(e.pointerType==='touch' && (appSettings.inputMode==='pen'||state.tool==='relocate'||!!state.relocatingPoint||(appSettings.inputMode==='finger'&&state.tool==='pan'))){moveTouchNavigation(e,p);return;}
+  if(e.pointerType==='touch' && (mobileMapNaturalTouch()||appSettings.inputMode==='pen'||state.tool==='relocate'||!!state.relocatingPoint||(appSettings.inputMode==='finger'&&state.tool==='pan'))){moveTouchNavigation(e,p);return;}
   if(state.pointerPan && state.pointerPan.pointerId===e.pointerId){movePan(p);return;}
   if(moveVectorEndpointDrag(p,e.pointerId))return;
   if(state.currentStroke&&state.currentStroke.pointerId===e.pointerId){
@@ -3575,7 +3588,7 @@ function onMapPointerMove(e){
   }
 }
 function onMapPointerUp(e){
-  if(e.pointerType==='touch' && (appSettings.inputMode==='pen'||state.tool==='relocate'||!!state.relocatingPoint||(appSettings.inputMode==='finger'&&state.tool==='pan'))){endTouchNavigation(e);return;}
+  if(e.pointerType==='touch' && (mobileMapNaturalTouch()||appSettings.inputMode==='pen'||state.tool==='relocate'||!!state.relocatingPoint||(appSettings.inputMode==='finger'&&state.tool==='pan'))){endTouchNavigation(e);return;}
   if(state.pointerPan && state.pointerPan.pointerId===e.pointerId){endPan();return;}
   if(endVectorEndpointDrag(e.pointerId))return;
   if(!state.currentStroke||state.currentStroke.pointerId!==e.pointerId)return;
