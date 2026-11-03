@@ -3728,7 +3728,7 @@ async function showFeatureCard(f){
   const ro=!isEditableCampaign();
   $('#featurePhotoBtn').disabled=false;
   $('#gcHydroNameBtn').classList.toggle('hidden',!['watercourse','reach'].includes(f.type));
-  $('#gcCoursePrefixBtn').classList.toggle('hidden',f.type!=='watercourse');
+  $('#gcCoursePrefixBtn').classList.toggle('hidden',!['watercourse','reach'].includes(f.type));
   $('#gcCoursePrefixBtn').disabled=ro;
   $('#gcHydroNameBtn').disabled=ro;
   $('#deleteFeatureBtn').disabled=ro;
@@ -6992,7 +6992,7 @@ function initUi(){
   $('#vectorTraceConnect').onclick=()=>chooseVectorTraceAction('connect');$('#vectorTraceSame').onclick=()=>chooseVectorTraceAction('same');$('#vectorTraceNew').onclick=()=>chooseVectorTraceAction('new');$('#vectorTracePick').onclick=()=>chooseVectorTraceAction('pick');$('#vectorTraceCancel').onclick=()=>{$('#vectorTraceChoiceModal').classList.add('hidden');if(state.vectorExtract)state.vectorExtract.pendingMapTrace=null;};
   $('#mapInkWidth').oninput=e=>{state.mapInkWidth=Math.max(1,+e.target.value||4);persistState();};$('#mapInkColor').oninput=e=>{state.mapInkColor=e.target.value;state.mapInkMode='pen';syncMapInkPanel();persistState();};$$('[data-map-ink-color]').forEach(b=>b.onclick=()=>{state.mapInkColor=b.dataset.mapInkColor;state.mapInkMode='pen';syncMapInkPanel();persistState();});$$('[data-map-ink-mode]').forEach(b=>b.onclick=()=>{state.mapInkMode=b.dataset.mapInkMode;syncMapInkPanel();persistState();});$('#mapInkUndo').onclick=()=>{if(!(state.mapInk||[]).length)return;state.mapInk.pop();persistState();drawAll();};$('#mapInkClear').onclick=()=>{if(!(state.mapInk||[]).length||!confirm('Esborrar totes les anotacions dibuixades sobre el mapa?'))return;state.mapInk=[];persistState();drawAll();};
   $('#gcHydroNameBtn').onclick=()=>{const feature=state.features.find(f=>f.id===state.selectedId);if(feature)openHydroNameEditor(feature);};
-  $('#gcCoursePrefixBtn').onclick=()=>{const f=state.features.find(x=>x.id===state.selectedId);if(f?.type==='watercourse')openCoursePrefixEditor(f.id);};
+  $('#gcCoursePrefixBtn').onclick=()=>{const f=state.features.find(x=>x.id===state.selectedId);const course=f?.type==='watercourse'?f:f?.type==='reach'?reachCourse(f):null;if(course)openCoursePrefixEditor(course.id);};
   $('#gcCoursePrefixOpen').onclick=()=>openCoursePrefixEditor(state.currentProfileCourseId);
   $('#gcCoursePrefixInput').oninput=updateCoursePrefixPreview;
   $('#gcCoursePrefixCancel').onclick=closeCoursePrefixEditor;
