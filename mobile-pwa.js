@@ -122,6 +122,8 @@ function showMobileHint(message){
  let box=$('#mMapTouchHint');
  if(!box){box=document.createElement('div');box.id='mMapTouchHint';box.className='m-map-touch-hint';box.setAttribute('role','status');$('#mapScreen')?.appendChild(box);}
  box.textContent=message;box.classList.remove('hidden');
+ if(box._hideTimer)clearTimeout(box._hideTimer);
+ box._hideTimer=setTimeout(()=>box.classList.add('hidden'),6500);
 }
 async function openObservationSheet(){
  if(!activeProject()){showShell('projects');return;}
