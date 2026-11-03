@@ -1,3 +1,7 @@
+### Correcció r36: vinculacions antigues i selecció explícita (03/11/2026)
+
+La comprovació de seccions també s'executa en obrir projectes editables i en consultar la fitxa o targeta d'una secció. Es prioritza el punt d'intersecció original (anchorPoint) en lloc del centre geomètric de la secció quan hi ha múltiples interseccions. A la fitxa III, al costat de «Nom tram», es pot seleccionar explícitament el tram correcte, per exemple TSJ2-5. Aquesta correcció manual es conserva mentre la geometria del tram no canviï. Si canvia, es torna a calcular la relació. No es mou cap secció ni es modifica el seu perfil, contingut o geometria. Si no hi ha intersecció real, no s'inventa una vinculació per proximitat. Codi validat sintàcticament; prova funcional amb dades reals pendent.
+
 ## R36 (03/11/2026): reassociacio de seccions
 
 Quan es modifiquen els trams, les seccions mantenen totes les seves coordenades i geometries originals. Es recalcula exclusivament la relacio amb el tram intersectat, sense alterar perfils, fitxes o anotacions. Sense canvis a Supabase. Pendent de prova funcional en PWA.
