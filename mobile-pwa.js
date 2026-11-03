@@ -105,33 +105,39 @@ function ensureObservationSheet(){
    // A file picker must be opened synchronously inside the user's tap;
    // awaiting the map would lose transient browser user activation on tablets.
    if(tool==='photo'){
-     // Keep the file input click in this trusted tap, before any await.
-     if(api.getState()?.projectId===selectedProjectId()){
-       api.mobileCapturePhoto();
-     }else{
-       await showMap();
-       alert('Proyecto cargado. Pulsa Foto otra vez para abrir la cámara o galería.');
-     }
+     // The native picker needs the original tap. The project is preloaded when
+     // opening this sheet, so there is no intermediary tap or alert.
+     api.mobileCapturePhoto();
+     void showMap();
      return;
    }
    await showMap();
    if(api.getState()?.screen!=='map')return;
    if(tool==='gps'){await api.mobileRegisterGpsPoint();return;}
-   try{api.setTool(tool);if(tool==='stop')alert('Toca el mapa en la ubicación donde quieras crear la parada.');}catch(error){console.error(error);}
+   try{api.setTool(tool);if(tool==='stop')showMobileHint('Toca el mapa para crear la parada.');}catch(error){console.error(error);showMobileHint('No se pudo activar la herramienta.');}
   });
  return sheet;
 }
-function openObservationSheet(){if(!activeProject()){showShell('projects');return;}ensureObservationSheet().classList.remove('hidden');}
+function showMobileHint(message){
+ let box=$('#mMapTouchHint');
+ if(!box){box=document.createElement('div');box.id='mMapTouchHint';box.className='m-map-touch-hint';box.setAttribute('role','status');$('#mapScreen')?.appendChild(box);}
+ box.textContent=message;box.classList.remove('hidden');
+}
+async function openObservationSheet(){
+ if(!activeProject()){showShell('projects');return;}
+ if(!await ensureProjectLoaded()){showShell('projects');return;}
+ ensureObservationSheet().classList.remove('hidden');
+}
 function wire(){
   $$('[data-go]').forEach(el=>el.onclick=e=>{e.preventDefault();go(el.dataset.go)});
   $$('[data-project-id]').forEach(el=>el.onclick=()=>selectProjectMobile(el.dataset.projectId));
-  $$('[data-history-id]').forEach(el=>el.onclick=()=>{try{api.openHistoricalPhotoPoint(el.dataset.historyId)}catch{}});
-  $$('[data-open-selected]').forEach(el=>el.onclick=async()=>{await ensureProjectLoaded();showShell('campaigns')});
+  $('[data-history-id]').forEach(el=>el.onclick=async()=>{if(!await ensureProjectLoaded())return;await showMap();try{api.openHistoricalPhotoPoint(el.dataset.historyId)}catch(error){console.error(error);}});
+  $('[data-open-selected]').forEach(el=>el.onclick=async()=>{if(await ensureProjectLoaded())showShell('campaigns')});
   const np=$('#mNewProject');if(np)np.onclick=()=>{shell.classList.add('hidden');api.showProjectCreate(null,'projects')};
   const ip=$('#mImportProject');if(ip)ip.onclick=()=>$('#projectImportInput')?.click();
-  const gallery=$('#mOpenGallery');if(gallery)gallery.onclick=async()=>{await ensureProjectLoaded();api.openPhotos?.();};
-  const importer=$('#mImportPhotos');if(importer)importer.onclick=async()=>{await ensureProjectLoaded();api.openPhotoImport?.();};
-  const ah=$('#mAddHistory');if(ah)ah.onclick=async()=>{await showMap();setTimeout(()=>api.setTool('historicalPhoto'),100)};
+  const gallery=$('#mOpenGallery');if(gallery)gallery.onclick=async()=>{if(await ensureProjectLoaded())api.openPhotos?.();};
+  const importer=$('#mImportPhotos');if(importer)importer.onclick=async()=>{if(await ensureProjectLoaded())api.openPhotoImport?.();};
+  const ah=$('#mAddHistory');if(ah)ah.onclick=async()=>{await showMap();if(api.getState()?.screen==='map'){api.setTool('historicalPhoto');showMobileHint('Toca el mapa para situar el punto fotográfico.');}};
 }
 async function go(name){
   if(name==='map'){await showMap();return}
