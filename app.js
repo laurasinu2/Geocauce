@@ -3635,7 +3635,7 @@ function deleteFeature(id,ask=true){
   if(ask && !confirm(`¿Eliminar ${label} completo?`))return;
   pushHistory();
   if(f.type==='watercourse'){state.features=state.features.filter(x=>x.id!==id&&x.courseId!==id);if(state.activeCourseId===id)state.activeCourseId=null;}
-  else{state.features=state.features.filter(x=>x.id!==id);if(f.type==='reach'&&f.courseId)renumberCourseReaches(f.courseId);if(f.type==='basin')state.features.filter(x=>x.type==='watercourse'&&x.basinId===id).forEach(x=>x.basinId=null);}
+  else{state.features=state.features.filter(x=>x.id!==id);if(f.type==='reach'&&f.courseId){renumberCourseReaches(f.courseId);reassignSectionsForCourse(f.courseId);}if(f.type==='basin')state.features.filter(x=>x.type==='watercourse'&&x.basinId===id).forEach(x=>x.basinId=null);}
   if(state.selectedId===id)state.selectedId=null;hideFeatureCard();persistState();updateHydroFab();drawAll();renderSectionList();toast(`${label} eliminado`);
 }
 function eventPoint(e,el){
@@ -5323,7 +5323,7 @@ function normalizeCourseFragments(course,{remapReaches=true}={}){
   }
   const before=JSON.stringify(source.map(x=>x.pts)),after=JSON.stringify(merged),changed=before!==after;
   if(changed)setCourseFragments(course,merged);course.topologyIssue=ambiguous?'S’han detectat connexions amb bifurcació o ordre ambigu. Revisa el curs.':'';course.topologyComponents=merged.length;
-  if(changed&&remapReaches)remapCourseReaches(course,anchors);
+  if(changed&&remapReaches){remapCourseReaches(course,anchors);reassignSectionsForCourse(course.id);}
   return{changed,components:merged.length,ambiguous};
 }
 function fragmentOriented(item,reversed=false){return{...item,pts:reversed?[...item.pts].reverse():cloneAny(item.pts),reversed:!!reversed};}
@@ -5423,6 +5423,55 @@ function sectionAssociationFromLine(a,b){
     }
   }
   return best||nearestReachAssociation(mid,Math.max(2.5,24/Math.max(.001,state.view.scale)));
+}
+// Sections are fixed observations: changing reaches may update relationships,
+ // never the section's points, anchor, profile, drawings or observations.
+function reassignSectionsForCourse(courseId){
+ const course=state.features.find(f=>f.id===courseId&&f.type==='watercourse');
+ if(!course)return 0;
+ const reaches=courseReaches(courseId).filter(r=>r.points?.length>1);
+ const sections=state.features.filter(f=>f.type==='section'&&f.points?.length>1&&
+  (f.courseId===courseId||f.watercourseId===courseId||
+   reaches.some(r=>r.id===f.reachId)));
+ let changed=0;
+ for(const section of sections){
+  const a=section.points[0],b=section.points.at(-1),mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+  const hits=[];
+  for(const reach of reaches){
+   for(let i=1;i<reach.points.length;i++){
+    const t=segmentIntersectionT(a,b,reach.points[i-1],reach.points[i]);
+    if(t==null)continue;
+    const p=linePoint(a,b,t),projection=projectPointToPolyline(p,reach.points);
+    if(projection)hits.push({reach,projection,score:Math.hypot(p.x-mid.x,p.y-mid.y)});
+   }
+  }
+  // At an exact shared boundary retain the existing association, if still valid.
+  hits.sort((x,y)=>x.score-y.score||
+   Number(y.reach.id===section.reachId)-Number(x.reach.id===section.reachId)||
+   String(x.reach.id).localeCompare(String(y.reach.id)));
+  const hit=hits[0]||null;
+  if(!hit){
+   // Do not guess a reach from proximity or silently move an observation.
+   if(section.reachId&&(!reaches.some(r=>r.id===section.reachId) ||
+      !reaches.some(r=>r.id===section.reachId&&
+       r.points?.some(Boolean)&&sectionAssociationCrossesReach(section,r)))){
+    section.reachId=null;section.reachAlong=null;changed++;
+   }
+   continue;
+  }
+  if(section.reachId!==hit.reach.id){section.reachId=hit.reach.id;changed++;}
+  section.courseId=courseId;section.watercourseId=courseId;
+  section.watercourseName=course.name||course.abbr||null;
+  section.reachAlong=hit.projection.along;
+ }
+ return changed;
+}
+function sectionAssociationCrossesReach(section,reach){
+ const a=section.points?.[0],b=section.points?.at(-1);
+ if(!a||!b)return false;
+ for(let i=1;i<(reach.points||[]).length;i++)
+  if(segmentIntersectionT(a,b,reach.points[i-1],reach.points[i])!=null)return true;
+ return false;
 }
 function nextSectionNameForReach(reach,ratio=.5){
   if(!reach)return'';const used=new Set(state.features.filter(x=>x.type==='section'&&x.reachId===reach.id).map(x=>String(x.sectionName||x.sheetIII?.sectionName||'').toUpperCase()));
@@ -5524,7 +5573,7 @@ function redefineCourseReach(course,fragmentIndex,d0,d1){
   state.features.push(...add);
   const now=Date.now(),f={id:allocReachId(),type:'reach',...fieldCreationLinks(course.id),courseId:course.id,fragmentIndex,startAlong:d0,endAlong:d1,points:[],closed:false,campaign:state.campaign,date:today(),createdAt:now,createdOrder:now+state.features.length/1000,ink:[],photos:[],erasures:[],fieldSlopeInk:[],changeCodeInk:[],observationsInk:[]};
   updateReachGeometryFromInterval(f,course,fragmentIndex,d0,d1);state.features.push(fieldLinkFeatureAtCreation(f));
-  course.longitudinalProfile=null;renumberCourseReaches(course.id);return f;
+  course.longitudinalProfile=null;renumberCourseReaches(course.id);reassignSectionsForCourse(course.id);return f;
 }
 function openReachEditModal(reach){
   if(!reach||reach.type!=='reach')return;state.editReachId=reach.id;
@@ -5561,7 +5610,7 @@ function applyReachBoundaryMove(course,pr){
     const a=Math.abs(+r.startAlong-old)<tol?target:+r.startAlong,b=Math.abs(+r.endAlong-old)<tol?target:+r.endAlong;
     updateReachGeometryFromInterval(r,course,m.fragmentIndex,a,b);
   }
-  course.longitudinalProfile=null;state.pendingReachBoundaryMove=null;renumberCourseReaches(course.id);persistState();drawAll();
+  course.longitudinalProfile=null;state.pendingReachBoundaryMove=null;renumberCourseReaches(course.id);reassignSectionsForCourse(course.id);persistState();drawAll();
   const focus=state.features.find(f=>f.id===m.reachId);if(focus){state.selectedId=focus.id;showFeatureCard(focus);}
   toast(`Límit mogut · ${affected.length>1?'els trams adjacents comparteixen exactament el nou punt':'tram actualitzat'}`);
   return true;
