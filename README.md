@@ -1,3 +1,7 @@
+### Correcció de creació manual (03/11/2026)
+
+La creació de punts manuals es fa amb un formulari integrat a «Importar elements», sense diàlegs `prompt()` del navegador. Inclou nom, camps X/Y ETRS89 UTM31N, selecció sobre la vista prèvia, validació i un botó explícit «Guardar punto». Després de guardar, el marcador queda a les dades del projecte i es mostra a la vista prèvia; les seves files de vista prèvia no s'importen de nou. Els punts fotogràfics poden tenir zero fotografies, i s'hi poden afegir posteriorment. Tota la correcció s'ha aplicat a la mateixa branca r35; no s'han creat branques noves ni cal SQL a Supabase. Sintaxi comprovada; prova tàctil real pendent.
+
 ## R35 · puntos manuales sin importar archivos (03/11/2026)
 
 El importador permite crear directamente puntos GPS o puntos fotográficos vacíos sin cargar CSV, GPX, KML ni imágenes. En la pestaña Fotografías, «Crear punto fotográfico sin foto» guarda un punto con `photos: []`, para añadir imágenes después desde su marcador. En Puntos, «Crear punto manualmente» añade un marcador GPS normal. El usuario introduce nombre y posición ETRS89 / UTM 31N (EPSG:25831) en X, Y, o deja vacío el campo y toca la vista previa del mapa. Se guardan en el proyecto/campaña mediante la persistencia local existente y se programan para la sincronización habitual. No hay cambios en SQL ni en Supabase. Sintaxis validada; pruebas reales PWA pendientes.
