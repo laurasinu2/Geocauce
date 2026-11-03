@@ -1467,3 +1467,10 @@ html{ -webkit-text-size-adjust:100%;text-size-adjust:100%; }
 #featureCard.feature-card-material-only #gcMoveMaterialBtn{position:absolute;right:37px;top:50%;transform:translateY(-50%);width:29px;height:29px;min-width:29px;min-height:29px;padding:4px;background:#e7eee6;border:1px solid #bed2c0;border-radius:7px;cursor:pointer}
 #featureCard.feature-card-material-only #gcMoveMaterialBtn img{width:17px;height:17px}
 #featureCard.feature-card-material-only #gcMoveMaterialBtn:disabled{opacity:.3;cursor:not-allowed}
+
+/* R36: course-wide prefix preview inside FITXA I */
+.gc-prefix-preview{display:grid;gap:6px;max-height:min(35vh,270px);overflow:auto;padding:4px 0;margin:10px 0}
+.gc-prefix-preview-row{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:12px;padding:9px 13px;border-radius:9px;background:#f2f4ef;color:#33443a;font-size:14px}
+.gc-prefix-preview-row strong{color:#245b40;overflow-wrap:anywhere}
+.gc-prefix-preview-row span:first-child{overflow-wrap:anywhere}
+#gcCoursePrefixStatus:not(:empty){color:#a13232}
