@@ -177,3 +177,7 @@ body.mobile-map-lite #mapScreen #profileSheetFab.reach-selected:not(.hidden){
  body.mobile-map-lite .feature-card-universal{max-width:calc(100vw - 20px);max-height:calc(100dvh - 112px);overflow:auto;overscroll-behavior:contain;touch-action:pan-y}
  body.mobile-map-lite .feature-secondary-actions button{min-height:58px}
 }
+
+/* R37 campaign and layer action buttons replace 38px inert switches. */
+@media(max-width:820px){.m-layer-row{grid-template-columns:68px minmax(0,1fr) minmax(64px,auto)!important;gap:8px}.m-layer-row .m-open-detail{min-width:0;width:100%;font-size:12px;padding:10px 6px}}
+@media(max-width:360px){.m-layer-row{grid-template-columns:52px minmax(0,1fr) 64px!important}.m-layer-copy h3{font-size:14px}}
