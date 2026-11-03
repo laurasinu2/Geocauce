@@ -393,7 +393,7 @@ function render(){
   prev.onclick=()=>{listPage--;render();};next.onclick=()=>{listPage++;render();};
   pager.append(prev,label,next);root.appendChild(pager);
  }
- const candidates=rows.filter(r=>!r.excluded&&!r.error&&(tab==='points'||locationOf(r)||$('#gcKeepUnlocated').checked));
+ const candidates=rows.filter(r=>!r.manualPreview&&!r.excluded&&!r.error&&(tab==='points'||locationOf(r)||$('#gcKeepUnlocated').checked));
  $('#gcImportCommit').disabled=busy||!candidates.length;
  const failures=rows.filter(r=>String(r.error||'').startsWith('Error al guardar:')).length;
  $('#gcRetryFailed').classList.toggle('hidden',!failures);
@@ -438,7 +438,7 @@ function ensureSavedPhotoPoint(record,world,group,campaignId){
 }
 async function commit(){
  if(busy||!api.canEdit()){api.notify('Campaña de solo lectura');return;}
- const candidates=rows.filter(r=>!r.excluded&&!r.error&&(tab==='points'||locationOf(r)||$('#gcKeepUnlocated').checked));
+ const candidates=rows.filter(r=>!r.manualPreview&&!r.excluded&&!r.error&&(tab==='points'||locationOf(r)||$('#gcKeepUnlocated').checked));
  if(!candidates.length)return;
  busy=true;render();
  const startedProject=api.getState().projectId,startedCampaign=api.getState().campaign;
