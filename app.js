@@ -5729,7 +5729,7 @@ function openHydroNameEditor(feature){
  $('#gcHydroCodeSuffixWrap').classList.toggle('hidden',isCourse);
  $('#gcHydroCodeSuffix').textContent=parts?'-'+parts.number:'(codi sense número)';
  $('#gcHydroCodeModeWrap').classList.toggle('hidden',isCourse);
- $('#gcHydroCodeMode').value=feature.reachCodeMode==='manual'?'manual':'auto';
+ $('#gcHydroCodeMode').value=isCourse?'auto':'manual';
  $('#gcHydroCode').disabled=!isCourse&&$('#gcHydroCodeMode').value==='auto';
  $('#gcHydroNameStatus').textContent=isCourse?
   'Els trams automàtics actualitzaran el prefix; els codis manuals es conservaran.':
