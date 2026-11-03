@@ -1,3 +1,7 @@
+## R36 (03/11/2026): reassociacio de seccions
+
+Quan es modifiquen els trams, les seccions mantenen totes les seves coordenades i geometries originals. Es recalcula exclusivament la relacio amb el tram intersectat, sense alterar perfils, fitxes o anotacions. Sense canvis a Supabase. Pendent de prova funcional en PWA.
+
 ### Correcció de creació manual (03/11/2026)
 
 La creació de punts manuals es fa amb un formulari integrat a «Importar elements», sense diàlegs `prompt()` del navegador. Inclou nom, camps X/Y ETRS89 UTM31N, selecció sobre la vista prèvia, validació i un botó explícit «Guardar punto». Després de guardar, el marcador queda a les dades del projecte i es mostra a la vista prèvia; les seves files de vista prèvia no s'importen de nou. Els punts fotogràfics poden tenir zero fotografies, i s'hi poden afegir posteriorment. Tota la correcció s'ha aplicat a la mateixa branca r35; no s'han creat branques noves ni cal SQL a Supabase. Sintaxi comprovada; prova tàctil real pendent.
