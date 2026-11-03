@@ -5424,13 +5424,28 @@ function orderedCourseReaches(courseId){
   const seq=courseProfileFragments(c),rank=new Map(seq.map((x,i)=>[x.fragmentIndex,{i,reversed:x.reversed,length:polylineLength(courseFragments(c)[x.fragmentIndex]||[])}]));
   rs.sort((a,b)=>{const ra=rank.get(a.fragmentIndex||0)||{i:999,reversed:false,length:0},rb=rank.get(b.fragmentIndex||0)||{i:999,reversed:false,length:0},ma=(a.startAlong+a.endAlong)/2,mb=(b.startAlong+b.endAlong)/2,pa=ra.reversed?ra.length-ma:ma,pb=rb.reversed?rb.length-mb:mb;return ra.i-rb.i||pa-pb;});return rs;
 }
+function autoReachCodes(course,reaches){
+ const reserved=new Set(reaches.filter(r=>r.reachCodeMode==='manual'&&String(r.reachCode||'').trim())
+  .map(r=>String(r.reachCode).trim().toLocaleLowerCase()));
+ const codes=new Map();
+ for(let i=0;i<reaches.length;i++){
+  const reach=reaches[i];
+  if(reach.reachCodeMode==='manual'&&String(reach.reachCode||'').trim())continue;
+  let number=i+1,code=reachCodeFor(course,number);
+  while(reserved.has(code.toLocaleLowerCase())){
+   number++;code=reachCodeFor(course,number);
+  }
+  reserved.add(code.toLocaleLowerCase());codes.set(reach.id,code);
+ }
+ return codes;
+}
 function renumberCourseReaches(courseId){
- const c=state.features.find(f=>f.id===courseId&&f.type==='watercourse');if(!c)return;
- orderedCourseReaches(courseId).forEach((r,i)=>{
-  // A manually assigned code is stable even if reaches are split, renamed or reordered.
-  if(r.reachCodeMode==='manual'&&String(r.reachCode||'').trim())return;
-  r.reachCode=reachCodeFor(c,i+1);r.reachCodeMode='auto';
- });
+ const course=state.features.find(f=>f.id===courseId&&f.type==='watercourse');if(!course)return;
+ const reaches=orderedCourseReaches(courseId),codes=autoReachCodes(course,reaches);
+ for(const reach of reaches){
+  if(!codes.has(reach.id))continue;
+  reach.reachCode=codes.get(reach.id);reach.reachCodeMode='auto';
+ }
 }
 function reachCodeConflicts(courseId,code,exceptId=null){
  const wanted=String(code||'').trim().toLocaleLowerCase();
@@ -5438,8 +5453,11 @@ function reachCodeConflicts(courseId,code,exceptId=null){
 }
 function validateCourseAutoCodes(courseId,newAbbr){
  const course=state.features.find(f=>f.id===courseId&&f.type==='watercourse');if(!course)return false;
- const reaches=orderedCourseReaches(courseId),codes=reaches.map((r,i)=>r.reachCodeMode==='manual'?String(r.reachCode||'').trim():reachPattern().replaceAll('{CURS}',newAbbr||'TR').replaceAll('{N}',String(i+1)));
- return codes.every((code,i)=>!!code&&!codes.some((other,j)=>j!==i&&code.toLocaleLowerCase()===other.toLocaleLowerCase()));
+ const reaches=orderedCourseReaches(courseId),custom=reaches.filter(r=>r.reachCodeMode==='manual');
+ const manualCodes=custom.map(r=>String(r.reachCode||'').trim().toLocaleLowerCase());
+ if(manualCodes.some((code,i)=>!code||manualCodes.indexOf(code)!==i))return false;
+ const simulated={...course,abbr:newAbbr};
+ return autoReachCodes(simulated,reaches).size===reaches.length-custom.length;
 }
 function refreshHydroNamesAfterEdit(feature){
  if(feature.type==='watercourse'){
