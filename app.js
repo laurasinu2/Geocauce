@@ -1837,6 +1837,11 @@ async function openProject(id,opt={}){
     return;
   }
   restoreState(id);state.rasters=[];
+  // Repair stale reach IDs from older projects before rendering section labels.
+  if(isEditableCampaign()){
+   let repaired=0;for(const c of state.features.filter(f=>f.type==='watercourse'))repaired+=reassignSectionsForCourse(c.id);
+   if(repaired)persistState();
+  }
   hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';
   updateProjectUi();scheduleCloudSync(1200);renderMaterials();updateMaterialButton();updateCampaignUi();$('#eraserSize').value=state.eraseSize;$$('[data-erase-mode]').forEach(b=>b.classList.toggle('active',b.dataset.eraseMode===state.eraseMode));setTool(state.tool,{quiet:true});renderSectionList();updateCompass();updateGnssUi();setTimeout(resize,20);await loadRasters();await hydrateReferenceLayersAfterOpen();touchProject();
   if(window.GeoCauceProjectAccess){
@@ -3703,6 +3708,7 @@ async function showFeatureCard(f){
     positionFeatureCard(f);
     return;
   }
+  if(f.type==='section'&&refreshSectionReachLink(f)&&isEditableCampaign())persistState();
   const card=$('#featureCard'),view=featureCardPresentation(f),wasHidden=card.classList.contains('hidden'),changed=card.dataset.featureId!==f.id;
   if(wasHidden||changed)card.dataset.manualPosition='0';
   card.dataset.featureId=f.id;
@@ -4107,7 +4113,9 @@ function renderSectionFic(f){const root=$('#sectionFicTable');if(!root||!f)retur
 function saveSectionFitxaHeader(){const f=state.features.find(x=>x.id===state.currentSection);if(!f||!isEditableCampaign())return;const d=ensureSectionSheetData(f);d.sectionName=$('#sectionNameInput')?.value.trim()||f.sectionName||f.id;d.visitDate=$('#sectionVisitDate')?.value||'';d.observations=$('#sectionObservations')?.value||'';f.sectionName=d.sectionName;persistState();drawAll();renderSectionList();}
 function openCodesReference(){$('#codesReferenceModal')?.classList.remove('hidden');}
 function openSection(f){
-  if(!f)return;associateSectionIfNeeded(f);const readOnly=!isEditableCampaign();state.currentSection=f.id;sectionView(f);ensureSectionMeasurements(f);const d=ensureSectionSheetData(f),reach=sectionReach(f),course=sectionCourse(f);$('#sectionId').textContent=d.sectionName||f.sectionName||f.id;const sc=$('#sectionCampaign');sc.innerHTML=`<option>${escapeHtml(campaignLabel(state.campaign))}</option>`;$('#sectionTorrentName').textContent=course?`${course.abbr||''}, ${course.name||''}`:'—';$('#sectionReachName').textContent=reach?.reachCode||reach?.id||'—';$('#sectionNameInput').value=d.sectionName||f.sectionName||f.id;$('#sectionVisitDate').value=d.visitDate||currentCampaign()?.date||'';$('#sectionObservations').value=d.observations||'';updateSectionWorkStatusUi(f,readOnly);$('#sectionModal').classList.remove('hidden');$('#sectionModal').classList.toggle('read-only',readOnly);const banner=$('#sectionReadOnlyBanner');if(banner)banner.classList.toggle('hidden',!readOnly);
+  if(!f)return;
+  if(refreshSectionReachLink(f)&&isEditableCampaign())persistState();
+  associateSectionIfNeeded(f);const readOnly=!isEditableCampaign();state.currentSection=f.id;sectionView(f);ensureSectionMeasurements(f);const d=ensureSectionSheetData(f),reach=sectionReach(f),course=sectionCourse(f);$('#sectionId').textContent=d.sectionName||f.sectionName||f.id;const sc=$('#sectionCampaign');sc.innerHTML=`<option>${escapeHtml(campaignLabel(state.campaign))}</option>`;$('#sectionTorrentName').textContent=course?`${course.abbr||''}, ${course.name||''}`:'—';$('#sectionReachName').textContent=reach?.reachCode||reach?.id||'—';$('#sectionNameInput').value=d.sectionName||f.sectionName||f.id;$('#sectionVisitDate').value=d.visitDate||currentCampaign()?.date||'';$('#sectionObservations').value=d.observations||'';updateSectionWorkStatusUi(f,readOnly);$('#sectionModal').classList.remove('hidden');$('#sectionModal').classList.toggle('read-only',readOnly);const banner=$('#sectionReadOnlyBanner');if(banner)banner.classList.toggle('hidden',!readOnly);
   $$('#sectionModal [data-section-tool]').forEach(b=>b.disabled=readOnly);for(const el of [$('#sectionNameInput'),$('#sectionVisitDate'),$('#sectionObservations')])if(el)el.disabled=readOnly;$('#sectionRebuildProfile').disabled=readOnly;$('#sectionResetProfile').disabled=readOnly;syncSectionControls(f);renderSectionFieldTable(f);renderSectionFic(f);setSectionFitxaPage(1);const c=$('#sectionCanvas');if(c){c._sectionBuilder=null;c._sectionHover=null;c._sectionObjectActive=null;c._hoverSnap=null;c._sectionSelection=null;syncSectionBuilderButtons();syncSectionSelectionUi();}
   setTimeout(()=>{const c=$('#sectionCanvas');c._readOnly=readOnly;c._inkStore=cloneAny(f.sectionInk||[]);c._profileActive=null;updateSectionProfileStatus(f);updateSectionCanvasMetricSize(f);redrawInkStore(c);ensureSectionProfile(f).then(async()=>{await ensureSectionReferenceLayersLoaded();updateSectionCanvasMetricSize(f);syncSectionControls(f);redrawInkStore(c);});},30);
 }
@@ -5426,35 +5434,65 @@ function sectionAssociationFromLine(a,b){
 }
 // Sections are fixed observations: changing reaches may update relationships,
  // never the section's points, anchor, profile, drawings or observations.
+function sectionAssociationCrossesReach(section,reach){
+ const a=section.points?.[0],b=section.points?.at(-1);
+ if(!a||!b)return false;
+ for(let i=1;i<(reach.points||[]).length;i++)
+  if(segmentIntersectionT(a,b,reach.points[i-1],reach.points[i])!=null)return true;
+ return false;
+}
+function bestSectionReachIntersection(section,reaches){
+ const a=section?.points?.[0],b=section?.points?.at(-1);
+ if(!a||!b)return null;
+ const mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+ const fixedAnchor=section.anchorPoint&&Number.isFinite(section.anchorPoint.x)&&Number.isFinite(section.anchorPoint.y)
+  ?section.anchorPoint:null;
+ const candidates=[];
+ for(const reach of reaches||[]){
+  if(!reach?.points?.length||reach.points.length<2)continue;
+  for(let i=1;i<reach.points.length;i++){
+   const t=segmentIntersectionT(a,b,reach.points[i-1],reach.points[i]);
+   if(t==null)continue;
+   const at=linePoint(a,b,t),projection=projectPointToPolyline(at,reach.points);
+   if(!projection)continue;
+   const anchorDistance=fixedAnchor?pointDistance(at,fixedAnchor):pointDistance(at,mid);
+   const centerDistance=pointDistance(at,mid);
+   // A stored anchor represents the original intersection of this exact section
+   // with the stream. It is more reliable than the midpoint of a long cross-section.
+   candidates.push({reach,projection,at,anchorDistance,centerDistance});
+  }
+ }
+ if(!candidates.length)return null;
+ const epsilon=.05;
+ candidates.sort((x,y)=>{
+  if(Math.abs(x.anchorDistance-y.anchorDistance)>epsilon)return x.anchorDistance-y.anchorDistance;
+  // At a shared boundary prefer the reach whose interior contains the cut,
+  // instead of retaining an obsolete historical association by default.
+  const interior=z=>{const length=z.projection.total||0,d=z.projection.along;
+   return Math.min(d,length-d);};
+  const di=interior(y)-interior(x);
+  if(Math.abs(di)>epsilon)return di;
+  if(Math.abs(x.centerDistance-y.centerDistance)>epsilon)return x.centerDistance-y.centerDistance;
+  if(x.reach.id===section.reachId)return -1;
+  if(y.reach.id===section.reachId)return 1;
+  return String(x.reach.id).localeCompare(String(y.reach.id));
+ });
+ return candidates[0];
+}
 function reassignSectionsForCourse(courseId){
  const course=state.features.find(f=>f.id===courseId&&f.type==='watercourse');
  if(!course)return 0;
  const reaches=courseReaches(courseId).filter(r=>r.points?.length>1);
+ const ids=new Set(reaches.map(r=>r.id));
  const sections=state.features.filter(f=>f.type==='section'&&f.points?.length>1&&
-  (f.courseId===courseId||f.watercourseId===courseId||
-   reaches.some(r=>r.id===f.reachId)));
+  (f.courseId===courseId||f.watercourseId===courseId||ids.has(f.reachId)));
  let changed=0;
  for(const section of sections){
-  const a=section.points[0],b=section.points.at(-1),mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
-  const hits=[];
-  for(const reach of reaches){
-   for(let i=1;i<reach.points.length;i++){
-    const t=segmentIntersectionT(a,b,reach.points[i-1],reach.points[i]);
-    if(t==null)continue;
-    const p=linePoint(a,b,t),projection=projectPointToPolyline(p,reach.points);
-    if(projection)hits.push({reach,projection,score:Math.hypot(p.x-mid.x,p.y-mid.y)});
-   }
-  }
-  // At an exact shared boundary retain the existing association, if still valid.
-  hits.sort((x,y)=>x.score-y.score||
-   Number(y.reach.id===section.reachId)-Number(x.reach.id===section.reachId)||
-   String(x.reach.id).localeCompare(String(y.reach.id)));
-  const hit=hits[0]||null;
+  const hit=bestSectionReachIntersection(section,reaches);
   if(!hit){
-   // Do not guess a reach from proximity or silently move an observation.
-   if(section.reachId&&(!reaches.some(r=>r.id===section.reachId) ||
-      !reaches.some(r=>r.id===section.reachId&&
-       r.points?.some(Boolean)&&sectionAssociationCrossesReach(section,r)))){
+   // Do not move the section or guess a reach from proximity alone.
+   if(section.reachId&&(!ids.has(section.reachId) ||
+       !reaches.some(r=>r.id===section.reachId&&sectionAssociationCrossesReach(section,r)))){
     section.reachId=null;section.reachAlong=null;changed++;
    }
    continue;
@@ -5463,15 +5501,16 @@ function reassignSectionsForCourse(courseId){
   section.courseId=courseId;section.watercourseId=courseId;
   section.watercourseName=course.name||course.abbr||null;
   section.reachAlong=hit.projection.along;
+  // No changes to section.points, anchorPoint, profile, sheetIII or ink.
  }
  return changed;
 }
-function sectionAssociationCrossesReach(section,reach){
- const a=section.points?.[0],b=section.points?.at(-1);
- if(!a||!b)return false;
- for(let i=1;i<(reach.points||[]).length;i++)
-  if(segmentIntersectionT(a,b,reach.points[i-1],reach.points[i])!=null)return true;
- return false;
+function refreshSectionReachLink(section){
+ if(!section||section.type!=='section')return false;
+ const linked=state.features.find(f=>f.type==='reach'&&f.id===section.reachId);
+ const courseId=section.courseId||section.watercourseId||linked?.courseId;
+ if(!courseId)return false;
+ return reassignSectionsForCourse(courseId)>0;
 }
 function nextSectionNameForReach(reach,ratio=.5){
   if(!reach)return'';const used=new Set(state.features.filter(x=>x.type==='section'&&x.reachId===reach.id).map(x=>String(x.sectionName||x.sheetIII?.sectionName||'').toUpperCase()));
