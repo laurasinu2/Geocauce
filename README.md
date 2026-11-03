@@ -1,3 +1,7 @@
+## R34 · copiar coordenadas UTM31N desde el mapa (03/11/2026)
+
+En el menú **Eines / Herramientas** se añade «Copiar coordenadas (UTM 31N)». Al tocar el mapa, la aplicación copia la ubicación como `X, Y` con dos decimales, en metros y en **ETRS89 / UTM zona 31N (EPSG:25831)**. Utiliza las coordenadas reales del mapa y transforma automáticamente desde otro CRS compatible (UTM o coordenadas geográficas) al EPSG:25831. La herramienta permanece activa para copiar varios puntos, funciona en modo táctil y lápiz, y no modifica geometrías ni datos. Para navegadores sin permiso de portapapeles incluye un método alternativo y, si este también falla, muestra los valores para copiarlos manualmente. No requiere Supabase ni migraciones. Pendiente de prueba funcional sobre dispositivos reales.
+
 ## R33 · cauces y tramos en primer plano (30/10/2026)
 
 Los cauces, tramos, secciones y canales se dibujan encima de anotaciones, fotografías y otras geometrías del usuario, sin cambiar el orden guardado de datos. Para seleccionar se prioriza el toque próximo (9 píxeles) al trazado hidrográfico, con prioridad de tramos sobre secciones, cauces y canales; el interior de un polígono sigue sin bloquear un cauce. Fuera de esa distancia, fotografías, paradas y notas se pueden tocar como antes. No requiere SQL ni cambios en Supabase. Se ha validado la sintaxis JavaScript; pendiente de prueba visual/táctil en PWA.
