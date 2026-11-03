@@ -4,7 +4,7 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const shell=$('#mobileShell'), content=$('#mobileContent'), mapBar=$('#mobileMapBar');
 const api=window.GeoCauceMobileApi;
 if(!shell||!content||!api)return;
-let route='home', mapOpening=false, lastFramedMapProjectId=null;
+let route='home', mapOpening=false, lastFramedMapProjectId=null,lastTouchHintProjectId=null;
 const ACTIVE_KEY='geocauce-active-project-v010';
 const previewMobile=new URLSearchParams(location.search).get('previewMobile')==='1';
 const isNarrow=()=>matchMedia('(max-width: 820px)').matches;
@@ -48,6 +48,10 @@ async function showMap(){
   shell.classList.add('hidden');document.body.classList.add('mobile-map-lite');
   $('#mapScreen')?.classList.remove('hidden');mapBar.classList.remove('hidden');
   try{api.getState().screen='map';}catch{}
+  if(lastTouchHintProjectId!==api.getState()?.projectId){
+   lastTouchHintProjectId=api.getState()?.projectId;
+   showMobileHint('Un dit: seleccionar · Dos dits: moure i ampliar el mapa');
+  }
   // Resize canvases after the mobile shell is hidden and before fitting the map.
   // Previously the desktop map viewport was reused on a narrow phone,
   // which left the raster and its annotations cropped or off-screen.
@@ -96,7 +100,7 @@ function profile(){const p=activeProject();return `<div class="m-eyebrow">PERFIL
 function render(){if(route==='projects')content.innerHTML=projects();else if(route==='history')content.innerHTML=history();else if(route==='campaigns')content.innerHTML=campaigns();else if(route==='profile')content.innerHTML=profile();else content.innerHTML=home();wire();}
 function ensureObservationSheet(){
  let sheet=$('#mObservationSheet');if(sheet)return sheet;
- sheet=document.createElement('div');sheet.id='mObservationSheet';sheet.className='m-observation-sheet hidden';sheet.innerHTML=`<button class="m-sheet-backdrop" data-close-observation aria-label="Cerrar"></button><section class="m-sheet-card"><div class="m-sheet-handle"></div><div class="m-sheet-head"><div><small>NUEVA OBSERVACIÓN</small><h2>¿Qué quieres registrar?</h2></div><button class="m-sheet-close" data-close-observation aria-label="Cerrar">×</button></div><div class="m-observation-grid"><button data-observation-tool="gps"><img src="icons/gps.png" alt=""><span>Punto GPS</span></button><button data-observation-tool="photo"><img src="icons/camara.png" alt=""><span>Foto</span></button><button data-observation-tool="historicalPhoto"><img src="icons/fotos.png" alt=""><span>Fotografía</span></button><button data-observation-tool="stop"><img src="icons/visita.png" alt=""><span>Crear parada</span></button><button data-observation-tool="pan"><img src="icons/mover.png" alt=""><span>Mover</span></button><button data-observation-tool="select"><img src="icons/seleccionar.png" alt=""><span>Seleccionar</span></button></div></section>`;
+ sheet=document.createElement('div');sheet.id='mObservationSheet';sheet.className='m-observation-sheet hidden';sheet.innerHTML=`<button class="m-sheet-backdrop" data-close-observation aria-label="Cerrar"></button><section class="m-sheet-card"><div class="m-sheet-handle"></div><div class="m-sheet-head"><div><small>NUEVA OBSERVACIÓN</small><h2>¿Qué quieres registrar?</h2></div><button class="m-sheet-close" data-close-observation aria-label="Cerrar">×</button></div><div class="m-observation-grid"><button data-observation-tool="gps"><img src="icons/gps.png" alt=""><span>Punto GPS</span></button><button data-observation-tool="photo"><img src="icons/camara.png" alt=""><span>Foto</span></button><button data-observation-tool="historicalPhoto"><img src="icons/fotos.png" alt=""><span>Fotografía</span></button><button data-observation-tool="stop"><img src="icons/visita.png" alt=""><span>Crear parada</span></button><button data-observation-tool="layers"><img src="icons/capas.png" alt=""><span>Capas</span></button><button data-observation-tool="import"><img src="icons/importar.png" alt=""><span>Importar</span></button></div></section>`;
  document.body.appendChild(sheet);
  $$('[data-close-observation]').forEach(b=>b.onclick=()=>sheet.classList.add('hidden'));
  $$('[data-observation-tool]').forEach(b=>b.onclick=async()=>{
@@ -114,6 +118,8 @@ function ensureObservationSheet(){
    await showMap();
    if(api.getState()?.screen!=='map')return;
    if(tool==='gps'){await api.mobileRegisterGpsPoint();return;}
+   if(tool==='layers'){$('#layersBtn')?.click();return;}
+   if(tool==='import'){api.openPhotoImport?.();return;}
    try{api.setTool(tool);if(tool==='stop')showMobileHint('Toca el mapa para crear la parada.');}catch(error){console.error(error);showMobileHint('No se pudo activar la herramienta.');}
   });
  return sheet;
