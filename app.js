@@ -855,6 +855,8 @@ function refreshAccountUi(){
 
 const CLOUD_CHANGE_QUEUE_PREFIX='geocauce-pending-sync-v1:';
 let cloudApplyingRemote=false,cloudDeltaRunning=false,cloudLastAssetManifest=null;
+// A declined remote update is deferred until the project is opened again.
+const cloudDeferredRemoteRevisions=new Map();
 function cloudQueueKey(projectId){return CLOUD_CHANGE_QUEUE_PREFIX+projectId;}
 function cloudPendingChanges(projectId=state.projectId){
  try{const a=JSON.parse(localStorage.getItem(cloudQueueKey(projectId))||'[]');return Array.isArray(a)?a:[];}catch{return [];}
@@ -1100,6 +1102,7 @@ async function cloudBidirectionalSync({manual=false}={}){
   const heads=await cloudFetch(endpoint+'&select=updated_at&limit=1');
   const remoteHead=heads?.[0]||null;
   const previousRemoteAt=Date.parse(remoteHead?.updated_at||'')||0;
+  if(!manual&&remoteHead&&cloudDeferredRemoteRevisions.get(projectId)===previousRemoteAt)return false;
   const cachedBase=await dbGet('cloudSyncBase','baseline');
   const cachedLocal=currentStatePayloadForCloud();
   const verifiedUnchanged=cachedBase?.projectId===projectId&&cachedLocal&&!window.GeoCauceDeltaSync.diff(cachedBase.state,cachedLocal).length;
@@ -1128,6 +1131,16 @@ async function cloudBidirectionalSync({manual=false}={}){
   const localChange=base?window.GeoCauceDeltaSync.diff(base,local):window.GeoCauceDeltaSync.diff({},local);
   const remoteChange=remote&&base?window.GeoCauceDeltaSync.diff(base,remote.state):[];
   const localAssetsChanged=ack.some(x=>['photos','rasters','vectorLayers'].includes(x.kind));
+  // Only announce a genuinely newer cloud revision when this device has no
+  // pending edits. Never replace offline work based on a snapshot timestamp.
+  const knownRemoteAt=Number(project._cloudUpdatedAt)||0;
+  if(remote&&previousRemoteAt>knownRemoteAt&&knownRemoteAt>0&&
+     !localChange.length&&!localAssetsChanged&&!ack.length){
+   if(!manual){
+    const accepted=window.confirm('Hay una versión más reciente de este proyecto en la nube. Se actualizarán los datos locales sin borrar tus archivos.\\n\\n¿Actualizar el proyecto ahora?');
+    if(!accepted){cloudDeferredRemoteRevisions.set(projectId,previousRemoteAt);return false;}
+   }
+  }
   if(!remote&&!localChange.length&&!localAssetsChanged)return true;
   if(remote&&!localChange.length&&!remoteChange.length&&!localAssetsChanged){
    cloudApplyingRemote=true;try{await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);}finally{cloudApplyingRemote=false;}
@@ -1828,7 +1841,7 @@ async function openProject(id,opt={}){
   if(state.projectId&&!opt.skipSave)persistState();
   p._accessMode=openingAccessMode;
   if(dbp){try{const old=await dbp;old.close();}catch{}dbp=null;dbpName=null;}
-  state.projectId=id;state.project=p;localStorage.setItem(ACTIVE_PROJECT_KEY,id);
+  state.projectId=id;state.project=p;cloudDeferredRemoteRevisions.delete(id);localStorage.setItem(ACTIVE_PROJECT_KEY,id);
   if(needsCloudRestore&&!await restoreProjectFromCloud(id,{manual:true})){
     // Restore the prior context if cloud download failed. Never let a blank project sync.
     state.projectId=previousId;state.project=previousProject;
