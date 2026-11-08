@@ -1,3 +1,9 @@
+## R39 · sincronització per revisió i perfils regenerats (08/11/2026)
+
+Branca derivada de `r38-20261104` sense modificar `main` ni l'esquema de Supabase. Conserva la cua offline i els timestamps per camp ja existents. Quan tots dos dispositius han regenerat un perfil longitudinal amb dates de generació vàlides, es pren conjuntament la versió més recent de les dades derivades (signatura, generació, mostres, trams, etc.) i es fusionen independentment les anotacions manuals i opcions del perfil. Això evita que una regeneració del perfil bloquegi la sincronització amb múltiples conflictes de metadades. Els canvis reals simultanis sense una data fiable continuen requerint revisió, sense descartaments silenciosos.
+
+Quan existeix una revisió remota posterior a la coneguda localment i aquest dispositiu no té modificacions pendents, s'ofereix un diàleg d'actualització en la sincronització automàtica. Si s'ajorna, la mateixa revisió no es tornarà a oferir fins que es torni a obrir el projecte. Amb modificacions offline pendents continua funcionant la fusió bidireccional: mai es dona prioritat global a la nube per la seva data de pujada. Les dades es protegeixen amb el mecanisme preexistent de recuperació abans d'aplicar una fusió, i es manté l'actualització incremental. Actualitzades les versions d'assets i la caché PWA. Cal validar la sincronització multidispositiu real i els permisos.
+
 ## R38 · alternança de taronges als trams (04/11/2026)
 
 Branca derivada de `r37-20261103`. Els trams consecutius d'un mateix curs alternen automàticament taronja intens (`#d58425`) i taronja clar (`#f4ac61`) segons l'ordre de `orderedCourseReaches`. S'aplica al mapa i a les exportacions cartogràfiques que representen els trams. Els colors personalitzats explícits es respecten. Canvi exclusivament visual, sense alterar geometries, IDs, codis, fitxes, dades persistides ni Supabase. Prova funcional en dispositiu pendent.
