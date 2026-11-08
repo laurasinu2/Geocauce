@@ -100,7 +100,21 @@
    }
    if(plain(l)&&plain(r)&&(plain(b)||b===MISSING)){
     const out={},keys=new Set([...Object.keys(b===MISSING?{}:b),...Object.keys(l),...Object.keys(r)]);
-    for(const k of keys){const value=resolve(Object.prototype.hasOwnProperty.call(b===MISSING?{}:b,k)?b[k]:MISSING,Object.prototype.hasOwnProperty.call(l,k)?l[k]:MISSING,Object.prototype.hasOwnProperty.call(r,k)?r[k]:MISSING,[...p,k]);if(value!==MISSING)out[k]=value;}
+    // Profiles derived from a raster can be regenerated independently on two
+    // devices without representing two competing field observations. Keep the
+    // most recently generated cache coherent, but still recursively merge
+    // manual strokes, edits and profile settings below.
+    const derivedProfile=p[p.length-1]==='longitudinalProfile'||p[p.length-1]==='sectionProfile';
+    const cacheKeys=new Set(['signature','generatedAt','sourceRasterId','sourceName','resolution','samples','segments','gaps','length','componentCount','topologyIssue','sourceSize','error','geometryKey']);
+    const lg=derivedProfile?validTime(l.generatedAt):0,rg=derivedProfile?validTime(r.generatedAt):0;
+    const cacheWinner=lg&&rg?(lg>=rg?'local':'remote'):null;
+    for(const k of keys){
+     if(cacheWinner&&cacheKeys.has(k)){
+      const preferred=cacheWinner==='local'?l:r;
+      if(Object.prototype.hasOwnProperty.call(preferred,k))out[k]=clone(preferred[k]);
+      continue;
+     }
+     const value=resolve(Object.prototype.hasOwnProperty.call(b===MISSING?{}:b,k)?b[k]:MISSING,Object.prototype.hasOwnProperty.call(l,k)?l[k]:MISSING,Object.prototype.hasOwnProperty.call(r,k)?r[k]:MISSING,[...p,k]);if(value!==MISSING)out[k]=value;}
     return out;
    }
    if(Array.isArray(l)&&Array.isArray(r)&&((b===MISSING)||Array.isArray(b))){
