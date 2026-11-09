@@ -978,6 +978,74 @@ async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[]){
  }
  return changed;
 }
+// Hydrate missing or newer cartographic binaries during incremental sync.
+// Never interpret an absent local file as a deliberate cloud deletion.
+async function cloudDeltaReceiveMaps(assets,baseAssets=null,queue=[]){
+ const kinds=['rasters','vectorLayers'],prepared=[];
+ const mutation=(kind,id)=>queue.some(q=>q.kind===kind&&q.path.split(':').slice(1).join(':')===id);
+ const changed=(a,b)=>cloudStableJson(a)!==cloudStableJson(b);
+ for(const kind of kinds){
+  const base=new Map((baseAssets?.[kind]||[]).map(x=>[x.id,x]));
+  for(const remote of assets?.[kind]||[]){
+   if(!remote?.id)continue;
+   const previous=base.get(remote.id),local=await dbGet(kind,remote.id);
+   const remoteChanged=!previous||changed(previous,remote);
+   if(mutation(kind,remote.id)){
+    if(remoteChanged&&local)throw new Error('La capa '+(remote.name||remote.id)+' cambió en dos dispositivos; revisa las versiones antes de reemplazarla.');
+    continue;
+   }
+   const keys=kind==='rasters'
+    ?['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize','cloudPreviewParts','cloudSourceParts','cloudPreviewHash','cloudSourceHash']
+    :['cloudFeaturesPath','cloudRenderPath','cloudFeaturesSize','cloudRenderType','cloudRenderSize','cloudFeaturesParts','cloudRenderParts','cloudFeaturesHash','cloudRenderHash'];
+   const sameMeta=local&&previous&&!remoteChanged;
+   const hasFiles=kind==='rasters'
+    ?local?.blob instanceof Blob&&(!remote.cloudSourcePath||local.sourceBlob instanceof Blob)
+    :Array.isArray(local?.features)&&(!remote.cloudRenderPath||local.renderBlob instanceof Blob);
+   if(sameMeta&&hasFiles)continue;
+   const rec={...remote};
+   for(const k of keys)delete rec[k];
+   if(kind==='rasters'){
+    if(!remote.cloudPreviewPath)throw new Error('Falta el archivo cloud del mapa '+(remote.name||remote.id));
+    const reuse=async(blob,size,hash)=>cloudReuseBlob(blob,size,hash);
+    rec.blob=await reuse(local?.blob,remote.cloudPreviewSize,remote.cloudPreviewHash)
+     ||await cloudDownloadBlob(remote.cloudPreviewPath,remote.cloudPreviewParts,remote.cloudPreviewType);
+    if(remote.cloudSourcePath)rec.sourceBlob=await reuse(local?.sourceBlob,remote.cloudSourceSize,remote.cloudSourceHash)
+     ||await cloudDownloadBlob(remote.cloudSourcePath,remote.cloudSourceParts,remote.cloudSourceType);
+    else delete rec.sourceBlob;
+    for(const [blob,size,label] of [[rec.blob,remote.cloudPreviewSize,'vista'],[rec.sourceBlob,remote.cloudSourceSize,'original']]){
+     if(label==='original'&&!remote.cloudSourcePath)continue;
+     if(!(blob instanceof Blob)||(Number(size)>0&&blob.size!==Number(size)))
+      throw new Error('Descarga incompleta del mapa '+(remote.name||remote.id)+' ('+label+')');
+    }
+    if(rec.styleCache)rec.styleCache={...rec.styleCache,ready:false,missing:true};
+   }else{
+    if(remote.cloudFeaturesPath){
+     const existing=await cloudReuseFeatures(local?.features,remote.cloudFeaturesSize,remote.cloudFeaturesHash);
+     const blob=existing?null:await cloudDownloadBlob(remote.cloudFeaturesPath,remote.cloudFeaturesParts,'application/json');
+     if(blob&&Number(remote.cloudFeaturesSize)>0&&blob.size!==Number(remote.cloudFeaturesSize))
+      throw new Error('Geometría incompleta de '+(remote.name||remote.id));
+     rec.features=existing||JSON.parse(await blob.text());
+    }else rec.features=[];
+    if(!Array.isArray(rec.features))throw new Error('Geometría inválida de '+(remote.name||remote.id));
+    if(remote.cloudRenderPath){
+     rec.renderBlob=await cloudReuseBlob(local?.renderBlob,remote.cloudRenderSize,remote.cloudRenderHash)
+      ||await cloudDownloadBlob(remote.cloudRenderPath,remote.cloudRenderParts,remote.cloudRenderType);
+     if(!(rec.renderBlob instanceof Blob)||(Number(remote.cloudRenderSize)>0&&rec.renderBlob.size!==Number(remote.cloudRenderSize)))
+      throw new Error('Mapa vectorial incompleto: '+(remote.name||remote.id));
+    }
+   }
+   prepared.push({kind,record:rec});
+  }
+ }
+ // Downloads complete before writing any records. Existing local maps are
+ // preserved, and remote deletions are not applied by this repair path.
+ for(const {kind,record} of prepared)await dbPut(kind,record);
+ if(prepared.length){
+  await loadRasters();
+  await hydrateReferenceLayersAfterOpen();
+ }
+ return prepared.length;
+}
 async function cloudSaveConflictVersions(projectId,local,remote,updatedAt){
  // A resolution is never offered unless both structured snapshots are saved.
  // Binary photos/rasters remain in their existing local/cloud asset stores.
@@ -1143,7 +1211,10 @@ async function cloudBidirectionalSync({manual=false}={}){
   }
   if(!remote&&!localChange.length&&!localAssetsChanged)return true;
   if(remote&&!localChange.length&&!remoteChange.length&&!localAssetsChanged){
-   cloudApplyingRemote=true;try{await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);}finally{cloudApplyingRemote=false;}
+   cloudApplyingRemote=true;try{
+    await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
+    await cloudDeltaReceiveMaps(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
+   }finally{cloudApplyingRemote=false;}
    if(ack.length)cloudClearAcknowledgedChanges(projectId,ack);
    cloudLastSyncAt=Date.now();if(manual)cloudProgressFinish(true,'Sin cambios nuevos');refreshAccountUi();return true;
   }
@@ -1207,7 +1278,10 @@ async function cloudBidirectionalSync({manual=false}={}){
   if(needApply)await dbPut('cloudSyncBase',{key:'preMergeRecovery',projectId,state:local,createdAt:Date.now()});
   cloudApplyingRemote=true;
   try{
-   if(remote)await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
+   if(remote){
+    await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
+    await cloudDeltaReceiveMaps(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
+   }
    if(needApply){
     localStorage.setItem(projectStateKey(projectId),JSON.stringify(merged));
     cloudApplyCollaborativeState(merged);
