@@ -1040,10 +1040,6 @@ async function cloudDeltaReceiveMaps(assets,baseAssets=null,queue=[]){
  // Downloads complete before writing any records. Existing local maps are
  // preserved, and remote deletions are not applied by this repair path.
  for(const {kind,record} of prepared)await dbPut(kind,record);
- if(prepared.length){
-  await loadRasters();
-  await hydrateReferenceLayersAfterOpen();
- }
  return prepared.length;
 }
 async function cloudSaveConflictVersions(projectId,local,remote,updatedAt){
@@ -1215,6 +1211,7 @@ async function cloudBidirectionalSync({manual=false}={}){
     await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
     await cloudDeltaReceiveMaps(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
    }finally{cloudApplyingRemote=false;}
+   await loadRasters();await hydrateReferenceLayersAfterOpen();
    if(ack.length)cloudClearAcknowledgedChanges(projectId,ack);
    cloudLastSyncAt=Date.now();if(manual)cloudProgressFinish(true,'Sin cambios nuevos');refreshAccountUi();return true;
   }
@@ -1288,6 +1285,9 @@ async function cloudBidirectionalSync({manual=false}={}){
     renderSectionList();updateCampaignUi();drawAll();
    }
   }finally{cloudApplyingRemote=false;}
+  // Refresh loaded map images and vector layer buffers after the merged
+  // collaborative state has been applied, not before it.
+  if(remote){await loadRasters();await hydrateReferenceLayersAfterOpen();}
   const hasLocal=localChange.length>0||localAssetsChanged;
   if(remote&&!hasLocal){
    project._cloudUpdatedAt=Date.parse(remote.updated_at)||Date.now();
@@ -1447,6 +1447,17 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
     const previousRows=await cloudFetch(`/rest/v1/project_snapshots?${key}=eq.${encodeURIComponent(cloudId)}&select=updated_at,state&limit=1`);
     const previous=previousRows?.[0]||null;
     if((previous?.updated_at||null)!==expectedUpdatedAt)throw new Error('Otro dispositivo cambió la nube. Descarga sus cambios antes de subir.');
+    // A fresh computer may have field sheets but not the map files yet.
+    // Never commit an empty asset manifest as a deletion instruction.
+    for(const kind of ['rasters','vectorLayers','photos']){
+     const remoteRecords=previous?.state?.assetMetadata?.[kind]||[];
+     if(!remoteRecords.length)continue;
+     const localRecords=await dbAll(kind),localIds=new Set(localRecords.map(x=>x.id));
+     const queuedDeletes=new Set(cloudPendingChanges(uploadingProjectId)
+      .filter(q=>q.kind===kind&&q.path.startsWith('delete:')).map(q=>q.path.slice(7)));
+     const missing=remoteRecords.filter(x=>!localIds.has(x.id)&&!queuedDeletes.has(x.id));
+     if(missing.length)throw new Error('Faltan '+missing.length+' archivos de '+kind+' en este dispositivo. Descarga los mapas de la nube antes de subir; no se borrará ningún archivo remoto.');
+    }
     const assets=await cloudUploadProjectAssets(p.ownerUserId||uid,cloudId,{manual,remoteAssets:previous?.state?.assetMetadata});
     cloudLastAssetManifest=assets.metadata;
     if(state.projectId!==uploadingProjectId)throw new Error('El proyecto cambió durante la subida');
