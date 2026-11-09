@@ -980,6 +980,19 @@ async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[]){
 }
 // Hydrate missing or newer cartographic binaries during incremental sync.
 // Never interpret an absent local file as a deliberate cloud deletion.
+async function cloudHasLocalAssetCopies(assets){
+ for(const kind of ['rasters','vectorLayers','photos']){
+  const items=assets?.[kind]||[];
+  for(const item of items){
+   const rec=await dbGet(kind,item.id);
+   if(!rec)return false;
+   if(kind==='rasters'&&(!(rec.blob instanceof Blob)||(item.cloudSourcePath&&!(rec.sourceBlob instanceof Blob))))return false;
+   if(kind==='vectorLayers'&&(!Array.isArray(rec.features)||(item.cloudRenderPath&&!(rec.renderBlob instanceof Blob))))return false;
+   if(kind==='photos'&&!(rec.blob instanceof Blob))return false;
+  }
+ }
+ return true;
+}
 async function cloudDeltaReceiveMaps(assets,baseAssets=null,queue=[]){
  const kinds=['rasters','vectorLayers'],prepared=[];
  const mutation=(kind,id)=>queue.some(q=>q.kind===kind&&q.path.split(':').slice(1).join(':')===id);
@@ -1170,7 +1183,8 @@ async function cloudBidirectionalSync({manual=false}={}){
   const cachedBase=await dbGet('cloudSyncBase','baseline');
   const cachedLocal=currentStatePayloadForCloud();
   const verifiedUnchanged=cachedBase?.projectId===projectId&&cachedLocal&&!window.GeoCauceDeltaSync.diff(cachedBase.state,cachedLocal).length;
-  if(remoteHead&&previousRemoteAt&&(project._cloudUpdatedAt||0)===previousRemoteAt&&!ack.length&&verifiedUnchanged){
+  const localAssetsComplete=await cloudHasLocalAssetCopies(cachedBase?.projectId===projectId?cachedBase.state?.assetMetadata:null);
+  if(remoteHead&&previousRemoteAt&&(project._cloudUpdatedAt||0)===previousRemoteAt&&!ack.length&&verifiedUnchanged&&localAssetsComplete){
    cloudLastError='';cloudLastSyncAt=Date.now();if(manual)cloudProgressFinish(true,'Sin cambios nuevos');refreshAccountUi();return true;
   }
   const rows=remoteHead?await cloudFetch(endpoint+'&select=updated_at,state&limit=1'):[];
