@@ -1184,7 +1184,7 @@ async function cloudBidirectionalSync({manual=false}={}){
   const cachedLocal=currentStatePayloadForCloud();
   const verifiedUnchanged=cachedBase?.projectId===projectId&&cachedLocal&&!window.GeoCauceDeltaSync.diff(cachedBase.state,cachedLocal).length;
   const localAssetsComplete=await cloudHasLocalAssetCopies(cachedBase?.projectId===projectId?cachedBase.state?.assetMetadata:null);
-  if(remoteHead&&previousRemoteAt&&(project._cloudUpdatedAt||0)===previousRemoteAt&&!ack.length&&verifiedUnchanged&&localAssetsComplete){
+  if(remoteHead&&previousRemoteAt&&(project._cloudUpdatedAt||0)===previousRemoteAt&&!ack.length&&verifiedUnchanged&&cachedBase?.state?.assetMetadata&&localAssetsComplete){
    cloudLastError='';cloudLastSyncAt=Date.now();if(manual)cloudProgressFinish(true,'Sin cambios nuevos');refreshAccountUi();return true;
   }
   const rows=remoteHead?await cloudFetch(endpoint+'&select=updated_at,state&limit=1'):[];
@@ -1226,6 +1226,7 @@ async function cloudBidirectionalSync({manual=false}={}){
     await cloudDeltaReceiveMaps(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
    }finally{cloudApplyingRemote=false;}
    await loadRasters();await hydrateReferenceLayersAfterOpen();
+   await cloudDeltaSaveBase(projectId,{...local,assetMetadata:remote.state?.assetMetadata||null},remote.updated_at);
    if(ack.length)cloudClearAcknowledgedChanges(projectId,ack);
    cloudLastSyncAt=Date.now();if(manual)cloudProgressFinish(true,'Sin cambios nuevos');refreshAccountUi();return true;
   }
@@ -1307,7 +1308,7 @@ async function cloudBidirectionalSync({manual=false}={}){
    project._cloudUpdatedAt=Date.parse(remote.updated_at)||Date.now();
    project._cloudPulledAt=Date.now();cloudLastSyncAt=Date.now();
    saveProjectCatalog();
-   await cloudDeltaSaveBase(projectId,merged,remote.updated_at);
+   await cloudDeltaSaveBase(projectId,{...merged,assetMetadata:remote.state?.assetMetadata||null},remote.updated_at);
    cloudClearAcknowledgedChanges(projectId,ack);
    if(manual)cloudProgressFinish(true,'Cambios recibidos');
    if(manual||autoResolvedCount)toast(autoResolvedCount?autoResolvedCount+' conflicto(s) resueltos por fecha. Ambas versiones recuperables en Cuenta.'+(autoEstimatedCount?' Fecha de nube estimada para '+autoEstimatedCount+'.':''):'Sincronizado: se han recibido los cambios de otros dispositivos',6500);
