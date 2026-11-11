@@ -3694,6 +3694,11 @@ function onMapPointerDown(e){
   const p=eventPoint(e,inkCanvas);
   if(e.pointerType==='touch' && (mobileMapNaturalTouch()||(appSettings.inputMode==='pen' && state.tool!=='stop')||state.tool==='relocate'||!!state.relocatingPoint)){beginTouchNavigation(e,p);return;}
   if(e.pointerType==='touch' && appSettings.inputMode==='finger' && state.tool==='pan'){beginTouchNavigation(e,p);return;}
+  // On desktop, Select also allows dragging the map. A stationary click
+  // still selects the feature, so the user never has to switch tools.
+  if(e.pointerType!=='touch'&&state.tool==='select'&&e.button===0){
+    beginPan(p,e.pointerId);return;
+  }
   startMapAction(e,p);
 }
 function onMapPointerMove(e){
@@ -3710,7 +3715,13 @@ function onMapPointerMove(e){
 }
 function onMapPointerUp(e){
   if(e.pointerType==='touch' && (mobileMapNaturalTouch()||appSettings.inputMode==='pen'||state.tool==='relocate'||!!state.relocatingPoint||(appSettings.inputMode==='finger'&&state.tool==='pan'))){endTouchNavigation(e);return;}
-  if(state.pointerPan && state.pointerPan.pointerId===e.pointerId){endPan();return;}
+  if(state.pointerPan && state.pointerPan.pointerId===e.pointerId){
+    const pan=state.pointerPan,p=eventPoint(e,inkCanvas);
+    const wasClick=e.type!=='pointercancel'&&Math.hypot(p.x-pan.p.x,p.y-pan.p.y)<6;
+    endPan();
+    if(wasClick&&state.tool==='select')selectAt(p);
+    return;
+  }
   if(endVectorEndpointDrag(e.pointerId))return;
   if(!state.currentStroke||state.currentStroke.pointerId!==e.pointerId)return;
   const st=state.currentStroke;state.currentStroke=null;clearCtx(inkCtx,inkCanvas);
