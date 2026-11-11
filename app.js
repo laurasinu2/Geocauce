@@ -631,7 +631,13 @@ async function cloudCommitStaging(projectId,sv){
     tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||new Error('Error al guardar la descarga'));
     tx.onabort=()=>reject(tx.error||new Error('La descarga no pudo guardarse; se conserva el proyecto anterior'));
     const recovery=tx.objectStore('cloudRecovery');
-    recovery.clear();
+    // Keep binary conflict archives when preparing the next full-pull
+    // recovery snapshot. Only the temporary state/asset rollback keys rotate.
+    const cleanup=recovery.openCursor();
+    cleanup.onsuccess=()=>{const row=cleanup.result;if(!row)return;
+      if(!String(row.key).startsWith('assetConflict:'))row.delete();
+      row.continue();
+    };
     recovery.put({key:'state',state:originalState,project:originalProject,createdAt:Date.now()});
     for(const storeName of stores){
       const target=tx.objectStore(storeName),old=target.openCursor();
