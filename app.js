@@ -1278,21 +1278,22 @@ async function cloudBidirectionalSync({manual=false}={}){
    const automatic=result.autoResolved||[];
    autoResolvedCount=automatic.length;
    autoEstimatedCount=automatic.filter(x=>x.source==='snapshot-estimate').length;
-   let decisions=null;
-   // Save both complete structured snapshots before accepting ANY automatic
-   // or human conflict choice. The cloud version is not overwritten first.
-   if(automatic.length||(manual&&result.conflicts.length))await cloudSaveConflictVersions(projectId,local,remote.state,remote.updated_at);
+   // Preserve both snapshots before any automatic legacy decision.
+   // Unknown field clocks use the cloud copy as the active value, but the
+   // local copy remains recoverable; queued offline edits newer than the
+   // remote snapshot keep local priority.
+   if(automatic.length||result.conflicts.length){
+    await cloudSaveConflictVersions(projectId,local,remote.state,remote.updated_at);
+   }
    if(result.conflicts.length){
-    if(manual){
-     clearTimeout(cloudProgressTimer);
-     const panel=$('#cloudProgressPanel');if(panel)panel.hidden=true;
-     decisions=await cloudResolveFieldConflicts(result.conflicts,projectId);
-     if(decisions)cloudProgressStart('Aplicando las decisiones y fusionando datos',2);
-     if(decisions)result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state,{...mergeOptions,resolutions:decisions});
-    }
+    result=window.GeoCauceDeltaSync.merge(base||{},local,remote.state,{
+     ...mergeOptions,backedUpFallback:'remote'
+    });
+    autoResolvedCount=result.autoResolved?.length||0;
+    autoEstimatedCount=(result.autoResolved||[]).filter(x=>x.source==='recovered-legacy').length;
     if(result.conflicts.length){
      const paths=result.conflicts.slice(0,2).map(c=>cloudConflictLabel(c.path)).join('; ');
-     cloudDeltaRootError(result.conflicts.length+' diferencias por revisar ('+paths+'). Ambas versiones siguen conservadas. Pulsa «Sincronizar ahora» para decidir.',manual);
+     cloudDeltaRootError(result.conflicts.length+' cambios incompatibles que deben protegerse ('+paths+'). Copias conservadas.',manual);
      return false;
     }
    }
