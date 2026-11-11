@@ -1974,14 +1974,29 @@ const projectStateStorage={
  setItem(key,raw){
   const id=projectStateId(key);if(id===null)return localStorage.setItem(key,raw);
   raw=String(raw);projectStateCache.set(id,raw);
-  const previous=projectStateJobs.get(id)||Promise.resolve();
-  const job=previous.catch(()=>{}).then(async()=>{
-   await projectStateReady();await projectStatePut(id,raw);
-   if((await projectStateReadRecord('states',id))?.raw!==raw)throw Error('Verificación de escritura fallida');
+  // One writer per project: collapse repeated map/stylus saves into the latest
+  // complete snapshot. Flush only returns after the last revision is durable.
+  if(projectStateJobs.has(id))return;
+  let written=null;
+  const job=Promise.resolve().then(async()=>{
+   await projectStateReady();
+   do{
+    const current=projectStateCache.get(id);
+    await projectStatePut(id,current);
+    if((await projectStateReadRecord('states',id))?.raw!==current)throw Error('Verificación de escritura fallida');
+    written=current;
+   }while(projectStateCache.get(id)!==written);
    projectStateFailures.delete(id);
   });
   projectStateJobs.set(id,job);
-  job.catch(e=>{projectStateFailures.set(id,e);console.error('Proyecto no guardado',e);toast('⚠ Error de guardado local. No cierres ni sincronices; exporta una copia.',9000);});
+  job.then(()=>{
+   if(projectStateJobs.get(id)===job)projectStateJobs.delete(id);
+   if(projectStateCache.has(id)&&projectStateCache.get(id)!==written)projectStateStorage.setItem(key,projectStateCache.get(id));
+  },e=>{
+   if(projectStateJobs.get(id)===job)projectStateJobs.delete(id);
+   projectStateFailures.set(id,e);console.error('Proyecto no guardado',e);
+   toast('⚠ Error de guardado local. No cierres ni sincronices; exporta una copia.',9000);
+  });
  },
  removeItem(key){
   const id=projectStateId(key);if(id===null)return localStorage.removeItem(key);
@@ -1995,9 +2010,13 @@ const projectStateStorage={
 };
 async function projectStateFlush(id){
  await projectStateReady();
- if(id&&projectStateJobs.has(id))await projectStateJobs.get(id);
- else if(!id)await Promise.all([...projectStateJobs.values()]);
- if(id&&projectStateFailures.has(id))throw projectStateFailures.get(id);
+ if(id){
+  while(projectStateJobs.has(id))await projectStateJobs.get(id);
+  if(projectStateFailures.has(id))throw projectStateFailures.get(id);
+ }else{
+  while(projectStateJobs.size)await Promise.all([...projectStateJobs.values()]);
+  if(projectStateFailures.size)throw [...projectStateFailures.values()][0];
+ }
 }
 
 function projectById(id){return projectCatalog.find(p=>p.id===id)||null;}
