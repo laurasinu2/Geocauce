@@ -964,14 +964,15 @@ async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[],remoteSna
  for(const photo of assets?.photos||[]){
   if(!photo.cloudBlobPath)continue;
   const previous=baseline.get(photo.id),existing=await dbGet('photos',photo.id);
-  const remoteModified=previous&&cloudStableJson(previous)!==cloudStableJson(photo);
+  const remoteModified=(!previous&&!!existing)||!!(previous&&cloudStableJson(previous)!==cloudStableJson(photo));
   if(locallyDeleted.has(photo.id))continue;
   if(localMutations.has(photo.id)){
    if(!existing||!remoteModified)continue;
    const queuedAt=Math.max(0,...queue.filter(q=>q.kind==='photos'&&q.path.split(':').slice(1).join(':')===photo.id).map(q=>Number(q.createdAt)||0));
    if(queuedAt&&remoteSnapshotAt&&queuedAt>remoteSnapshotAt+2000)continue;
    // Preserve the local binary for recovery before accepting the remote file.
-   await dbPut('cloudSyncBase',{key:'assetConflict:photos:'+photo.id,projectId:state.projectId,createdAt:Date.now(),record:existing});
+   if(!(await dbGet('cloudSyncBase','assetConflict:photos:'+photo.id)))
+    await dbPut('cloudSyncBase',{key:'assetConflict:photos:'+photo.id,projectId:state.projectId,createdAt:Date.now(),record:existing});
   }
   const newContent=!existing?.blob||Boolean(remoteModified&&previous?.cloudBlobHash!==photo.cloudBlobHash);
   if(!newContent&&!remoteModified)continue;
@@ -1022,7 +1023,8 @@ async function cloudDeltaReceiveMaps(assets,baseAssets=null,queue=[],remoteSnaps
     if(queuedAt&&Number(remoteSnapshotAt)&&queuedAt>Number(remoteSnapshotAt)+2000)continue;
     // Both sides appear changed, or the baseline is missing. Preserve the full
     // local binary record before accepting the cloud copy. Never discard it.
-    await dbPut('cloudSyncBase',{key:'assetConflict:'+kind+':'+remote.id,projectId:state.projectId,createdAt:Date.now(),record:local});
+    if(!(await dbGet('cloudSyncBase','assetConflict:'+kind+':'+remote.id)))
+     await dbPut('cloudSyncBase',{key:'assetConflict:'+kind+':'+remote.id,projectId:state.projectId,createdAt:Date.now(),record:local});
    }
    const keys=kind==='rasters'
     ?['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize','cloudPreviewParts','cloudSourceParts','cloudPreviewHash','cloudSourceHash']
