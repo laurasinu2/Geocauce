@@ -86,7 +86,7 @@ function chooseManualLocation(){
  pendingManual={kind:tab};map.style.cursor='crosshair';
  manualMessage('Toca la vista previa para elegir la posición y después pulsa Guardar punto.');
 }
-function saveManualPoint(){
+async function saveManualPoint(){
  if(!api.canEdit())return manualMessage('Campaña de solo lectura.',true);
  const name=$('#gcManualName').value.trim(),location=manualLocation();
  if(!name)return manualMessage('Introduce el nombre.',true);
@@ -99,7 +99,7 @@ function saveManualPoint(){
  {id,kind:'gps',label:name,x:location.x,y:location.y,crs:api.epsg(),campaignId,importGroup:group,createdAt:Date.now(),attributes:{manual:true}};
  list.push(rec);
  try{
-  api.persistVerified();api.redraw();api.scheduleSync?.();
+  await api.persistVerified();api.redraw();api.scheduleSync?.();
   resetManualForm();
   rows.push({key:id,name,manualWorld:location,world:location,excluded:false,error:null,manualPreview:true,index:rows.length});
   selected=rows.length-1;listPage=Math.floor(selected/100);fitAll();render();
@@ -414,7 +414,7 @@ function editCoordinates(i){
  const lat=Number(normalized[0]),lon=Number(normalized[1]);if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180){api.notify('Coordenadas fuera de rango');return;}
  row.manualWorld=api.project(lon,lat);row.manualGps={lat,lon};row.locationSource='manual';selected=i;fitAll();render();
 }
-function ensureSavedPhotoPoint(record,world,group,campaignId){
+async function ensureSavedPhotoPoint(record,world,group,campaignId){
  if(!validXY(world)||!record.historicalPointId)return false;
  const list=api.getState().historicalPhotoPoints||(api.getState().historicalPhotoPoints=[]);
  const existing=list.find(p=>p.id===record.historicalPointId||(p.photos||[]).includes(record.id));
@@ -422,7 +422,7 @@ function ensureSavedPhotoPoint(record,world,group,campaignId){
   if((existing.photos||[]).includes(record.id))return true;
   existing.photos=Array.isArray(existing.photos)?existing.photos:[];
   existing.photos.push(record.id);
-  try{api.persistVerified();}catch(error){existing.photos=existing.photos.filter(id=>id!==record.id);throw error;}
+  try{await api.persistVerified();}catch(error){existing.photos=existing.photos.filter(id=>id!==record.id);throw error;}
   return true;
  }
  const point={id:record.historicalPointId,name:record.title||record.name||'Fotografía',
@@ -430,7 +430,7 @@ function ensureSavedPhotoPoint(record,world,group,campaignId){
   photos:[record.id],importGroup:group||record.importGroup||'Fotografías de campo',
   campaignId:campaignId||record.campaignId,createdAt:record.createdAt||Date.now()};
  list.push(point);
- try{api.persistVerified();}catch(error){
+ try{await api.persistVerified();}catch(error){
   const index=list.indexOf(point);if(index!==-1)list.splice(index,1);
   throw error;
  }
@@ -469,7 +469,7 @@ async function commit(){
       label:row.name,attributes:row.point?.properties||{},importGroup:group,
       createdAt:Date.now(),campaignId:startedCampaign};
     pins.push(pin);
-    try{api.persistVerified();}catch(error){pins.splice(pins.indexOf(pin),1);throw error;}
+    try{await api.persistVerified();}catch(error){pins.splice(pins.indexOf(pin),1);throw error;}
     done++;
    }else{
     const worldPoint=locationOf(row);
@@ -498,8 +498,8 @@ async function commit(){
          Object.assign(currentPoint,{x:savedWorld.x,y:savedWorld.y,crs:api.epsg(),
           photoPointPosition:{x:savedWorld.x,y:savedWorld.y,crs:api.epsg()}});
          currentPoint.photos=Array.from(new Set([...(currentPoint.photos||[]),existing.id]));
-         api.persistVerified();
-        }else ensureSavedPhotoPoint(recovered,savedWorld,recovered.importGroup,recovered.campaignId);
+         await api.persistVerified();
+        }else await ensureSavedPhotoPoint(recovered,savedWorld,recovered.importGroup,recovered.campaignId);
         restored++;
        }catch(repairError){
         await api.savePhoto(previous);
@@ -536,7 +536,7 @@ async function commit(){
     const saved=await api.readPhoto(photoId);
     if(!saved?.blob||saved.blob.size!==row.file.size||saved.contentHash!==row.hash)
      throw Error('No se ha verificado el guardado local');
-    if(pointId)ensureSavedPhotoPoint(saved,worldPoint,group,startedCampaign);
+    if(pointId)await ensureSavedPhotoPoint(saved,worldPoint,group,startedCampaign);
     known.add(row.hash);done++;
    }
    row.excluded=true;
