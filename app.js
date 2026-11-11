@@ -3686,7 +3686,11 @@ function endTouchNavigation(e){
   }
 }
 function onMapPointerDown(e){
-  if($('#mapScreen').classList.contains('hidden'))return;if(!$('#mapContextMenu')?.classList.contains('hidden'))hideMapContextMenu();
+  if($('#mapScreen').classList.contains('hidden'))return;
+  // Ctrl/Cmd-click selects regardless of the current drawing tool.
+  if((e.ctrlKey||e.metaKey)&&e.pointerType!=='touch'&&e.button===0){
+    e.preventDefault();selectAt(eventPoint(e,inkCanvas));return;
+  }if(!$('#mapContextMenu')?.classList.contains('hidden'))hideMapContextMenu();
   const p=eventPoint(e,inkCanvas);
   if(e.pointerType==='touch' && (mobileMapNaturalTouch()||(appSettings.inputMode==='pen' && state.tool!=='stop')||state.tool==='relocate'||!!state.relocatingPoint)){beginTouchNavigation(e,p);return;}
   if(e.pointerType==='touch' && appSettings.inputMode==='finger' && state.tool==='pan'){beginTouchNavigation(e,p);return;}
@@ -7070,7 +7074,21 @@ async function exportSelectedContents(){
 }
 
 
+function installMapPointerControls(){
+  // Install independently of the many modal controls below. A missing modal
+  // control must never leave the main map without pointer handlers.
+  if(inkCanvas._mapPointerControlsInstalled)return;
+  inkCanvas._mapPointerControlsInstalled=true;
+  inkCanvas.style.touchAction='none';
+  inkCanvas.addEventListener('pointerdown',onMapPointerDown);
+  inkCanvas.addEventListener('pointermove',onMapPointerMove);
+  inkCanvas.addEventListener('pointerup',onMapPointerUp);
+  inkCanvas.addEventListener('pointercancel',onMapPointerUp);
+  inkCanvas.addEventListener('contextmenu',e=>e.preventDefault());
+  inkCanvas.addEventListener('wheel',e=>{e.preventDefault();markMapMotion(220);const p=eventPoint(e,inkCanvas),before=screenToWorld(p),factor=Math.exp(-e.deltaY*.001);state.view.scale=Math.max(.002,Math.min(1000,state.view.scale*factor));keepWorldAtScreen(before,p);drawAll();persistState();},{passive:false});
+}
 function initUi(){
+  installMapPointerControls();
   window.addEventListener('popstate',()=>{
    const route=window.GeoCauceProjectAccess?.routeFromLocation(window.location);
    if(route){
@@ -7191,8 +7209,7 @@ function initUi(){
   $('#notebookFullColorBtn').onclick=()=>{state.notebookEditingColorSlot=-1;const pick=$('#notebookColorPicker');pick.value=state.notebookPenColor||appSettings.notebookPenColor||'#1f2b31';pick.click();};
   $('#notebookColorPicker').oninput=e=>{const color=e.target.value;if(Number.isInteger(state.notebookEditingColorSlot)&&state.notebookEditingColorSlot>=0){const arr=[...(appSettings.notebookQuickColors||DEFAULT_APP_SETTINGS.notebookQuickColors)];arr[state.notebookEditingColorSlot]=color;appSettings.notebookQuickColors=arr;}state.notebookEditingColorSlot=null;setNotebookPenColor(color);};
   $('#newNotebookPage').onclick=()=>newNotebookPage(false);$('#duplicateNotebookPage').onclick=()=>newNotebookPage(true);$('#deleteNotebookPage').onclick=deleteNotebookPage;$('#pagePrev').onclick=()=>gotoNotebookPage(-1);$('#pageNext').onclick=()=>gotoNotebookPage(1);$('#linkPositionBtn').onclick=()=>openLinkPages('position');$('#linkFeatureBtn').onclick=()=>openLinkPages('feature');$('#linkPagesClose').onclick=$('#linkPagesCancel').onclick=()=>$('#linkPagesModal').classList.add('hidden');$('#linkPagesApply').onclick=applyPageLinks;
-  inkCanvas.addEventListener('pointerdown',onMapPointerDown);inkCanvas.addEventListener('pointermove',onMapPointerMove);inkCanvas.addEventListener('pointerup',onMapPointerUp);inkCanvas.addEventListener('pointercancel',onMapPointerUp);inkCanvas.addEventListener('contextmenu',e=>e.preventDefault());
-  inkCanvas.addEventListener('wheel',e=>{e.preventDefault();markMapMotion(220);const p=eventPoint(e,inkCanvas),before=screenToWorld(p),factor=Math.exp(-e.deltaY*.001);state.view.scale=Math.max(.002,Math.min(1000,state.view.scale*factor));keepWorldAtScreen(before,p);drawAll();persistState();},{passive:false});
+  // Map controls are installed at the beginning of initUi().
   installInkCanvas($('#sheetCanvas'),'sheet');installInkCanvas($('#sectionCanvas'),'section');installSectionViewportGestures();installInkCanvas($('#notebookCanvas'),'notebook');installNotebookViewportGestures();installInkCanvas($('#sectionWidthInk'),'measure-width');installInkCanvas($('#sectionDepthInk'),'measure-depth');installInkCanvas($('#sectionNoteInk'),'measure-note');$('#sectionCanvas')._onchange=()=>{const f=state.features.find(x=>x.id===state.currentSection);if(f&&isEditableCampaign()){f.sectionInk=cloneAny($('#sectionCanvas')._inkStore||[]);persistState();}};$('#notebookCanvas')._onchange=()=>{const p=currentNotebookPage();if(notebookPageEditable(p)){p.ink=cloneAny($('#notebookCanvas')._inkStore||[]);$('#notebookCanvas')._redoStore=[];if(appSettings.notebookAutosave)persistState();}};for(const c of [$('#sectionWidthInk'),$('#sectionDepthInk'),$('#sectionNoteInk')])c._onchange=()=>saveSectionMeasures(false);window.addEventListener('deviceorientationabsolute',e=>{if(Number.isFinite(e.alpha)){state.deviceHeading=((360-e.alpha)%360+360)%360;updateGnssUi();}});window.addEventListener('deviceorientation',e=>{if(state.deviceHeading==null&&Number.isFinite(e.webkitCompassHeading)){state.deviceHeading=e.webkitCompassHeading;updateGnssUi();}});window.addEventListener('resize',resize);
 }
 
