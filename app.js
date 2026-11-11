@@ -5601,7 +5601,9 @@ async function openPhotoGallery(featureId=state.selectedId){
 
 const PACKAGE_MAGIC='GEOCAUCE11\n';
 async function exportProjectPackage(){
-  if(!state.projectId)return;persistState();await projectStateFlush(state.projectId);toast('Preparando copia completa…',1800);
+  if(!state.projectId)return;persistState();
+  try{await projectStateFlush(state.projectId);}catch(e){console.warn('Exportación de emergencia desde el estado en memoria',e);toast('El guardado local sigue pendiente; se exportarán los datos abiertos para recuperarlos.',6500);}
+  toast('Preparando copia completa…',1800);
   const sv=JSON.parse(projectStateStorage.getItem(projectStateKey(state.projectId))||'{}'),rasters=await dbAll('rasters'),photos=await dbAll('photos'),vectorLayers=await dbAll('vectorLayers'),assets=[];
   const addAsset=(blob,name)=>{if(!(blob instanceof Blob))return null;const idx=assets.length;assets.push({blob,name:name||`asset_${idx}`,type:blob.type||'application/octet-stream',size:blob.size});return idx;};
   const rr=rasters.map(r=>{const x={...r};delete x.blob;delete x.sourceBlob;return{...x,blobAsset:addAsset(r.blob,r.name+'.preview'),sourceAsset:addAsset(r.sourceBlob,r.name)};});
