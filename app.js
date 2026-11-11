@@ -4342,11 +4342,16 @@ function installInkCanvas(canvas,mode){
   });
   canvas.addEventListener('pointerup',()=>{
     if(mode==='section'&&canvas._sectionObjectActive){
-      const f=state.features.find(x=>x.id===state.currentSection),o=canvas._sectionObjectActive;canvas._sectionObjectActive=null;if(!f){redrawInkStore(canvas);return;}f.sectionObjects=f.sectionObjects||[];
-      if(o.freehand){if(o.pts?.length>=(o.kind==='polygon'?3:2))f.sectionObjects.push({kind:o.kind,pts:o.pts,geoClass:o.geoClass,color:o.color});}
-      else{const r=canvas.getBoundingClientRect(),dist=Math.hypot((o.b.x-o.a.x)*r.width,(o.b.y-o.a.y)*r.height);if(dist>=4){o.valueM=(o.kind==='measure'||o.kind==='height')?sectionMetricValue(f,canvas,o.a,o.b,o.kind):null;f.sectionObjects.push(o);}}
-      if(canvas._readOnly){canvas._viewerMeasurements=canvas._viewerMeasurements||[];if(o.valueM!=null)canvas._viewerMeasurements.push(o);f.sectionObjects.pop();}
-      else persistState();redrawInkStore(canvas);return;
+      const f=state.features.find(x=>x.id===state.currentSection),o=canvas._sectionObjectActive;canvas._sectionObjectActive=null;if(!f){redrawInkStore(canvas);return;}
+      const pending=[];
+      if(o.freehand){if(o.pts?.length>=(o.kind==='polygon'?3:2))pending.push({kind:o.kind,pts:o.pts,geoClass:o.geoClass,color:o.color});}
+      else{const r=canvas.getBoundingClientRect(),dist=Math.hypot((o.b.x-o.a.x)*r.width,(o.b.y-o.a.y)*r.height);if(dist>=4){o.valueM=(o.kind==='measure'||o.kind==='height')?sectionMetricValue(f,canvas,o.a,o.b,o.kind):null;pending.push(o);}}
+      if(canvas._readOnly){
+        // Measurements are temporary for viewers and never enter project state.
+        canvas._viewerMeasurements=canvas._viewerMeasurements||[];
+        canvas._viewerMeasurements.push(...pending.filter(x=>['measure','height'].includes(x.kind)));
+      }else if(pending.length){f.sectionObjects=f.sectionObjects||[];f.sectionObjects.push(...pending);persistState();}
+      redrawInkStore(canvas);return;
     }
     if(!canvas._active)return;
     if(canvas._active.profile){const f=state.features.find(x=>x.id===state.currentSection),active=canvas._active,manual=f?profileStrokeToData(f,canvas,active.pts):[];canvas._active=null;if(f&&manual.length>1){mergeManualProfile(f,manual,active.replaceId||null);canvas._sectionSelection=null;syncSectionSelectionUi();persistState();toast(active.replaceId?'Correcció del perfil modificada':'Perfil de camp actualitzat');}redrawInkStore(canvas);return;}
