@@ -5,8 +5,8 @@ const root=path.join(__dirname,'..');
 const app=fs.readFileSync(path.join(root,'app.js'),'utf8'),index=fs.readFileSync(path.join(root,'index.html'),'utf8'),sw=fs.readFileSync(path.join(root,'sw.js'),'utf8');
 test('export-only code parses and PWA rev includes new maps',()=>{
  assert.doesNotThrow(()=>new vm.Script(app));
- assert.match(index,/app\.js\?v=20261016-generalmap-r27/);
- assert.match(sw,/mobile-pwa-r27/);
+ assert.match(index,/app\.js\?v=20261016-sharing-r28/);
+ assert.match(sw,/mobile-pwa-r28/);
 });
 test('FITXA I keeps its original editable field form and restores first-page course map plus final profile',()=>{
  const first=app.indexOf('async function localPdfProfileCourse('),last=app.indexOf('async function localPdfReachSheet(',first);

@@ -113,7 +113,7 @@ test('general-map output is used by both individual and ZIP exports, FITXA rende
  assert.match(app,/const url=await generalMapDataUrl\(\),blob=dataUrlBlob\(url\)/);
  assert.match(app,/function renderProjectMapImage\(bounds,/);
  assert.doesNotMatch(isolated,/persistState\(|dbPut\(|cloudUpload/);
- assert.match(html,/app\.js\?v=20261016-generalmap-r27/);
- assert.match(sw,/mobile-pwa-r27/);
+ assert.match(html,/app\.js\?v=20261016-sharing-r28/);
+ assert.match(sw,/mobile-pwa-r28/);
  assert.doesNotThrow(()=>new vm.Script(app));
 });
