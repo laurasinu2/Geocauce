@@ -494,6 +494,14 @@ async function cloudReuseFeatures(features,size,hash){
  return await cloudReuseBlob(new Blob([JSON.stringify(features)],{type:'application/json'}),size,hash)?features:null;
 }
 async function cloudCollectObsoleteAssets(uid,cloudId,before,after){
+  // A legacy two-device merge may have retained an older file version for
+  // recovery. Do not garbage-collect immutable cloud objects until that
+  // recovery window is explicitly resolved by the user.
+  try{
+    const preserved=await dbGet('cloudSyncBase','conflictRecoveryRemote');
+    if(preserved?.projectId===state.projectId)return;
+  }catch(e){console.warn('Conservando archivos antiguos por precaución',e);return;}
+
   // Delete only unreferenced immutable versions AFTER the new snapshot is committed.
   // Old cloud backup projects can share these objects, so inspect every accessible snapshot.
   const paths=m=>{
