@@ -1973,7 +1973,9 @@ const projectStateStorage={
  getItem(key){const id=projectStateId(key);return id===null?localStorage.getItem(key):(projectStateCache.get(id)??localStorage.getItem(key));},
  setItem(key,raw){
   const id=projectStateId(key);if(id===null)return localStorage.setItem(key,raw);
-  raw=String(raw);projectStateCache.set(id,raw);
+  raw=String(raw);
+  if(projectStateCache.get(id)===raw&&!projectStateJobs.has(id)&&!projectStateFailures.has(id))return;
+  projectStateCache.set(id,raw);
   // One writer per project: collapse repeated map/stylus saves into the latest
   // complete snapshot. Flush only returns after the last revision is durable.
   if(projectStateJobs.has(id))return;
@@ -8017,7 +8019,7 @@ function initPhotoWorkspaceR29(){
  $('#gcPhotoGalleryOpen').onclick=()=>tool.showGallery();
 }
 
-loadSectionPalette();loadProjectCatalog();projectStateReady().then(()=>renderProjectHome()).catch(()=>{});initUi();initPhotoWorkspaceR29();fieldReportInit();initNativeAndroidUi();refreshAccountUi();applyAppSettings();renderMaterials();renderSectionColorChips();updateMaterialButton();$('#eraserSize').value=state.eraseSize;$$('[data-erase-mode]').forEach(b=>b.classList.toggle('active',b.dataset.eraseMode===state.eraseMode));setTool(state.tool,{quiet:true});updateCompass();renderProjectHome();window.addEventListener('beforeunload',()=>{if(state.projectId)persistState();});
+loadSectionPalette();loadProjectCatalog();projectStateReady().then(()=>renderProjectHome()).catch(()=>{});initUi();initPhotoWorkspaceR29();fieldReportInit();initNativeAndroidUi();refreshAccountUi();applyAppSettings();renderMaterials();renderSectionColorChips();updateMaterialButton();$('#eraserSize').value=state.eraseSize;$$('[data-erase-mode]').forEach(b=>b.classList.toggle('active',b.dataset.eraseMode===state.eraseMode));setTool(state.tool,{quiet:true});updateCompass();renderProjectHome();window.addEventListener('beforeunload',e=>{if(state.projectId){persistState();if(projectStateJobs.has(state.projectId)||projectStateFailures.has(state.projectId)){e.preventDefault();e.returnValue='';}}});
 
 // Bindings added in v0.16.18
 installReachProfileEditor();renderReachProfileColors();renderFicQuickColors();
