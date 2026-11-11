@@ -1,3 +1,14 @@
+### R40 · rama de corrección del límite de almacenamiento (11/11/2026)
+
+Rama de prueba: `fix/r40-indexeddb-state-safe-migration`, derivada de `r40-20261111`. No se modifica `main`, R40 original ni Supabase.
+
+- El estado JSON de cada proyecto se almacena en IndexedDB `GeoCauceProjectStateSafeV1` (`states`) en vez de `localStorage`, cuyo límite pequeño provocaba `QuotaExceededError`.
+- En el primer arranque, se copia primero el JSON preexistente a `states` y a `migrationBackups`, se lee y verifica cada copia, y **solo entonces** se elimina la clave JSON antigua de `localStorage`. Las fotos, mapas, teselas y colas de sincronización existentes no se eliminan.
+- Si la migración no puede verificarse se detiene, conserva la clave original y bloquea el cambio de proyecto/sincronización. Si una versión antigua del programa recrea una copia divergente, ambas versiones se conservan y no se selecciona una automáticamente.
+- Los guardados frecuentes se agrupan para escribir la revisión más reciente; las subidas, descargas y cambios de proyecto esperan la confirmación de IndexedDB. La importación de puntos y fotografías espera asimismo la verificación del guardado.
+- La copia de migración permanece en `migrationBackups` sin eliminación automática. La recuperación cloud de R40 sigue funcionando independientemente en su almacén de recuperación.
+- Precaución: la rama ha superado comprobaciones de sintaxis, pero todavía **no se ha probado** con el navegador y los datos reales de dos dispositivos. Antes de usarla con datos irreemplazables, exporta una copia completa `.geocauce` y conserva R40 como retorno seguro.
+
 Nota de seguretat R40 (11/11/2026): els binaris locals en col·lisió es guarden a l'IndexedDB persistent `cloudSyncBase` amb clau `assetConflict:<tipus>:<id>`, independent del magatzem de recuperació rotatiu `cloudRecovery`. Les revisions anteriors de blobs cloud no s'eliminen automàticament mentre hi hagi un snapshot de recuperació de conflictes. La cua offline es manté i la descàrrega segueix verificant mides. La resolució automàtica dels conflictes heretats es fa únicament després de guardar les dues versions estructurades, sense demanar decisions repetitives.
 
 ### R40 · fusió automàtica de conflictes heretats (11/11/2026)
