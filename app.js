@@ -631,13 +631,7 @@ async function cloudCommitStaging(projectId,sv){
     tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||new Error('Error al guardar la descarga'));
     tx.onabort=()=>reject(tx.error||new Error('La descarga no pudo guardarse; se conserva el proyecto anterior'));
     const recovery=tx.objectStore('cloudRecovery');
-    // Keep binary conflict archives when preparing the next full-pull
-    // recovery snapshot. Only the temporary state/asset rollback keys rotate.
-    const cleanup=recovery.openCursor();
-    cleanup.onsuccess=()=>{const row=cleanup.result;if(!row)return;
-      if(!String(row.key).startsWith('assetConflict:'))row.delete();
-      row.continue();
-    };
+    recovery.clear();
     recovery.put({key:'state',state:originalState,project:originalProject,createdAt:Date.now()});
     for(const storeName of stores){
       const target=tx.objectStore(storeName),old=target.openCursor();
@@ -977,7 +971,7 @@ async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[],remoteSna
    const queuedAt=Math.max(0,...queue.filter(q=>q.kind==='photos'&&q.path.split(':').slice(1).join(':')===photo.id).map(q=>Number(q.createdAt)||0));
    if(queuedAt&&remoteSnapshotAt&&queuedAt>remoteSnapshotAt+2000)continue;
    // Preserve the local binary for recovery before accepting the remote file.
-   await dbPut('cloudRecovery',{key:'assetConflict:photos:'+photo.id,projectId:state.projectId,createdAt:Date.now(),record:existing});
+   await dbPut('cloudSyncBase',{key:'assetConflict:photos:'+photo.id,projectId:state.projectId,createdAt:Date.now(),record:existing});
   }
   const newContent=!existing?.blob||Boolean(remoteModified&&previous?.cloudBlobHash!==photo.cloudBlobHash);
   if(!newContent&&!remoteModified)continue;
@@ -1028,7 +1022,7 @@ async function cloudDeltaReceiveMaps(assets,baseAssets=null,queue=[],remoteSnaps
     if(queuedAt&&Number(remoteSnapshotAt)&&queuedAt>Number(remoteSnapshotAt)+2000)continue;
     // Both sides appear changed, or the baseline is missing. Preserve the full
     // local binary record before accepting the cloud copy. Never discard it.
-    await dbPut('cloudRecovery',{key:'assetConflict:'+kind+':'+remote.id,projectId:state.projectId,createdAt:Date.now(),record:local});
+    await dbPut('cloudSyncBase',{key:'assetConflict:'+kind+':'+remote.id,projectId:state.projectId,createdAt:Date.now(),record:local});
    }
    const keys=kind==='rasters'
     ?['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize','cloudPreviewParts','cloudSourceParts','cloudPreviewHash','cloudSourceHash']
