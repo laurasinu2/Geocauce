@@ -949,7 +949,7 @@ function cloudDeltaRootError(reason,manual){
  if(manual){cloudProgressFinish(false,'Sincronización pendiente');toast(cloudLastError,6500);}
  refreshAccountUi();
 }
-async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[]){
+async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[],remoteSnapshotAt=0){
  const changed=[],baseline=new Map((baseAssets?.photos||[]).map(p=>[p.id,p]));
  const localMutations=new Set(queue.filter(q=>q.kind==='photos').map(q=>q.path.split(':').slice(1).join(':')));
  const locallyDeleted=new Set(queue.filter(q=>q.kind==='photos'&&q.path.startsWith('delete:')).map(q=>q.path.slice(7)));
@@ -957,11 +957,14 @@ async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[]){
   if(!photo.cloudBlobPath)continue;
   const previous=baseline.get(photo.id),existing=await dbGet('photos',photo.id);
   const remoteModified=previous&&cloudStableJson(previous)!==cloudStableJson(photo);
-  if((remoteModified||(!previous&&existing))&&localMutations.has(photo.id))
-   throw new Error('La foto '+(photo.name||photo.id)+' fue editada desde los dos dispositivos. Se conserva la copia local y se requiere revisión.');
-  if(locallyDeleted.has(photo.id)&&!remoteModified)continue;
-  if(!existing&&localMutations.has(photo.id))
-   throw new Error('La fotografía '+(photo.name||photo.id)+' se ha eliminado localmente. No se volverá a añadir sin resolverlo.');
+  if(locallyDeleted.has(photo.id))continue;
+  if(localMutations.has(photo.id)){
+   if(!existing||!remoteModified)continue;
+   const queuedAt=Math.max(0,...queue.filter(q=>q.kind==='photos'&&q.path.split(':').slice(1).join(':')===photo.id).map(q=>Number(q.createdAt)||0));
+   if(queuedAt&&remoteSnapshotAt&&queuedAt>remoteSnapshotAt+2000)continue;
+   // Preserve the local binary for recovery before accepting the remote file.
+   await dbPut('cloudRecovery',{key:'assetConflict:photos:'+photo.id,projectId:state.projectId,createdAt:Date.now(),record:existing});
+  }
   const newContent=!existing?.blob||Boolean(remoteModified&&previous?.cloudBlobHash!==photo.cloudBlobHash);
   if(!newContent&&!remoteModified)continue;
   let blob=existing?.blob;
@@ -1265,7 +1268,7 @@ async function cloudBidirectionalSync({manual=false}={}){
   if(!remote&&!localChange.length&&!localAssetsChanged)return true;
   if(remote&&!localChange.length&&!remoteChange.length&&!localAssetsChanged){
    cloudApplyingRemote=true;try{
-    await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
+    await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack,Date.parse(remote.updated_at||'')||0);
     await cloudDeltaReceiveMaps(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack,Date.parse(remote.updated_at||'')||0);
    }finally{cloudApplyingRemote=false;}
    await loadRasters();await hydrateReferenceLayersAfterOpen();
@@ -1335,7 +1338,7 @@ async function cloudBidirectionalSync({manual=false}={}){
   cloudApplyingRemote=true;
   try{
    if(remote){
-    await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
+    await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack,Date.parse(remote.updated_at||'')||0);
     await cloudDeltaReceiveMaps(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack,Date.parse(remote.updated_at||'')||0);
    }
    if(needApply){
