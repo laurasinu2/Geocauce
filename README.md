@@ -1,3 +1,14 @@
+## R41 · Persistencia segura y sincronización (11/11/2026)
+
+Rama publicada en GitHub: `r41-20261111`, basada en la rama correctiva `fix/r40-indexeddb-state-safe-migration` creada a partir de `r40-20261111`.
+
+- El estado JSON de cada proyecto pasa de `localStorage` a IndexedDB (`GeoCauceProjectStateSafeV1`) para evitar el error de cuota de almacenamiento que bloqueaba la sincronización.
+- La migración preserva primero el JSON original en `states` y `migrationBackups`, verifica ambas copias y solo después libera la clave antigua; no elimina los archivos de mapas, fotos ni la cola de cambios.
+- La sincronización espera a que termine el guardado persistente antes de continuar. Las importaciones de puntos y fotos verifican también su escritura.
+- Actualizados los parámetros de versión de `app.js` y `photo-workspace.js` de `index.html`, y la caché `sw.js`, para que GitHub Pages y las PWA reciban el código R41 y no reutilicen los scripts antiguos.
+- Esta rama **no configura por sí sola GitHub Pages**. La rama que se publique se selecciona en `Settings → Pages` del repositorio.
+- **Pendiente de validar con datos reales** en ordenador y tablet. Antes de utilizar R41 con datos únicos, generar una copia `.geocauce`. No se modifica el esquema ni los archivos de Supabase.
+
 ### R40 · rama de corrección del límite de almacenamiento (11/11/2026)
 
 Rama de prueba: `fix/r40-indexeddb-state-safe-migration`, derivada de `r40-20261111`. No se modifica `main`, R40 original ni Supabase.
