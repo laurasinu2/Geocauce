@@ -1,3 +1,9 @@
+### R40 · reparació de FITXA III i descàrrega cloud (11/11/2026)
+
+S'ha comparat `r40-20261111` amb `r39-20261108`: en afegir permisos de consulta es van introduir dos `querySelector(...).forEach(...)` que llançaven TypeError, tant en obrir FITXA III com en inicialitzar els botons de secció. Ambdós s'han substituït per `querySelectorAll`, recuperant les pestanyes i els controls sense alterar les fitxes guardades ni la navegació del mapa.
+
+S'ha corregit que la descàrrega manual no permetés recuperar fitxers absents si la data remota coincidia amb la coneguda localment. La reparació ara comprova també la presència dels binaris. La sincronització de lectura pot descarregar còpies cloud completes mitjançant el mecanisme de staging, verificació i recuperació existent, sense autoritzar pujades o edicions; si hi ha canvis locals a la cua, s'atura per protegir-los. Les fotos grans dividides en parts es descarreguen amb totes les rutes del manifest. Canvis exclusius a R40; `main` i el model de Supabase no s'han modificat. Revisió estàtica i sintaxi superades; proves amb dos dispositius i dades reals pendents.
+
 ### R40 · correcció de la interacció del mapa (11/11/2026)
 
 Els controls de moviment i selecció del mapa s'instal·len ara a l'inici de `initUi`, independentment dels nombrosos controladors dels diàlegs: una fallada en la inicialització d'un control secundari no pot deixar el mapa sense escoltadors. Es garanteix una sola instal·lació per evitar gestos duplicats. La selecció en el mapa amb `Ctrl + clic` / `Cmd + clic` funciona sense canviar l'eina. En ordinador, amb l'eina «Seleccionar» activa, un clic selecciona i un arrossegament mou el mapa; així la navegació i selecció funcionen conjuntament. Es mantenen els gestos tàctils preexistents, la geometria i les fitxes. Actualitzada la caché PWA. Sintaxi comprovada; prova funcional al navegador de l'usuari pendent.
