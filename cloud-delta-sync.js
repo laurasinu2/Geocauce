@@ -137,6 +137,19 @@
       continue;
      }
      const value=resolve(Object.prototype.hasOwnProperty.call(b===MISSING?{}:b,k)?b[k]:MISSING,Object.prototype.hasOwnProperty.call(l,k)?l[k]:MISSING,Object.prototype.hasOwnProperty.call(r,k)?r[k]:MISSING,[...p,k]);if(value!==MISSING)out[k]=value;}
+    // Cached terrain statistics must match the geometry chosen in the merge.
+    // Never combine a locally edited outline with a remote raster key.
+    if(p[0]==='campaigns'&&p.some(x=>x.startsWith('@'))&&
+       Array.isArray(l.points)&&Array.isArray(r.points)&&!eq(l.points,r.points)&&
+       Object.prototype.hasOwnProperty.call(out,'mdeStats')){
+      if(eq(out.points,l.points)&&!eq(out.points,r.points)){
+       if(Object.prototype.hasOwnProperty.call(l,'mdeStats'))out.mdeStats=clone(l.mdeStats);
+       else delete out.mdeStats;
+      }else if(eq(out.points,r.points)&&!eq(out.points,l.points)){
+       if(Object.prototype.hasOwnProperty.call(r,'mdeStats'))out.mdeStats=clone(r.mdeStats);
+       else delete out.mdeStats;
+      }else delete out.mdeStats;
+    }
     return out;
    }
    if(Array.isArray(l)&&Array.isArray(r)&&((b===MISSING)||Array.isArray(b))){
