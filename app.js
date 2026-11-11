@@ -2006,7 +2006,12 @@ const projectStateStorage={
   const job=previous.catch(()=>{}).then(async()=>{await projectStateReady();projectStateCache.delete(id);const db=await projectStateDb();await new Promise((res,rej)=>{
    const tx=db.transaction('states','readwrite');tx.objectStore('states').delete(id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);
   });});
-  projectStateJobs.set(id,job);job.catch(e=>{projectStateFailures.set(id,e);console.error(e);});
+  projectStateJobs.set(id,job);
+  job.then(()=>{
+   if(projectStateJobs.get(id)===job)projectStateJobs.delete(id);
+   // Reset workflows can create a new state while deletion is in flight.
+   if(projectStateCache.has(id))projectStateStorage.setItem(key,projectStateCache.get(id));
+  },e=>{if(projectStateJobs.get(id)===job)projectStateJobs.delete(id);projectStateFailures.set(id,e);console.error(e);});
  }
 };
 async function projectStateFlush(id){
