@@ -966,7 +966,7 @@ async function cloudDeltaReceivePhotos(assets,baseAssets=null,queue=[]){
   if(!newContent&&!remoteModified)continue;
   let blob=existing?.blob;
   if(newContent){
-   blob=await cloudDownloadBlob(photo.cloudBlobPath);
+   blob=await cloudDownloadBlob(photo.cloudBlobPath,photo.cloudBlobParts,photo.cloudBlobType);
    if(!(blob instanceof Blob)||(photo.cloudBlobSize!=null&&blob.size!==Number(photo.cloudBlobSize)))
     throw new Error('La fotografía '+(photo.name||photo.id)+' no se descargó completa');
   }
@@ -1162,8 +1162,45 @@ function cloudResolveFieldConflicts(conflicts,projectId){
  });
 }
 
+// Viewers can download verified snapshots, but never upload or merge edits.
+// Keep the previous IndexedDB version recoverable through cloudCommitStaging.
+async function cloudViewerPull({manual=false}={}){
+ const projectId=state.projectId,project=state.project;
+ if(!projectId||!project||!navigator.onLine||!loadCloudSession()?.access_token)return false;
+ if(cloudSyncEditingInProgress()){if(manual)toast('Cierra la ficha antes de actualizar el proyecto.');return false;}
+ if(cloudPendingChanges(projectId).length){
+  if(manual)toast('Hay cambios locales pendientes. No se reemplazarán mediante una descarga de solo lectura.',6500);
+  return false;
+ }
+ try{
+  const schema=await cloudSchema(),key=schema==='legacy'?'id_project':'project_id';
+  const cloudId=project.cloudProjectId||projectId;
+  const heads=await cloudFetch('/rest/v1/project_snapshots?'+key+'=eq.'+encodeURIComponent(cloudId)+'&select=updated_at&limit=1');
+  const remoteAt=Date.parse(heads?.[0]?.updated_at||'')||0;
+  if(!remoteAt){if(manual)toast('No existe una copia disponible en la nube.');return false;}
+  const baseline=await dbGet('cloudSyncBase','baseline');
+  const assetsComplete=baseline?.projectId===projectId&&baseline.state?.assetMetadata&&await cloudHasLocalAssetCopies(baseline.state.assetMetadata);
+  if(remoteAt===(project._cloudUpdatedAt||0)&&assetsComplete){
+   if(manual)toast('Proyecto actualizado · no hay cambios nuevos');return true;
+  }
+  if(!manual&&cloudDeferredRemoteRevisions.get(projectId)===remoteAt)return false;
+  if(!manual&&(project._cloudUpdatedAt||0)&&remoteAt>(project._cloudUpdatedAt||0)){
+   if(!window.confirm('Hay una versión nueva del proyecto en la nube. ¿Descargarla ahora?')){
+    cloudDeferredRemoteRevisions.set(projectId,remoteAt);return false;
+   }
+  }
+  // A full viewer pull stages and validates all binaries before replacing any.
+  if(!await restoreProjectFromCloud(projectId,{manual}))return false;
+  if(state.projectId!==projectId)return false;
+  restoreState(projectId);state.rasters=[];
+  await loadRasters();await hydrateReferenceLayersAfterOpen();
+  renderSectionList();updateCampaignUi();drawAll();refreshAccountUi();
+  if(manual)toast('Datos y mapas de la nube actualizados',4500);
+  return true;
+ }catch(e){cloudDeltaRootError(e.message||String(e),manual);return false;}
+}
 async function cloudBidirectionalSync({manual=false}={}){
- if(!canEditCurrentProject()){if(manual)toast('Proyecto de solo lectura: no se pueden sincronizar cambios de edición');return false;}
+ if(!canEditCurrentProject())return cloudViewerPull({manual});
  if(cloudDeltaRunning||cloudSyncRunning||cloudRestoreRunning||!state.projectId||!state.project)return false;
  if(!window.GeoCauceDeltaSync){if(manual)toast('Actualiza GeoCauce para activar la sincronización incremental');return false;}
  if(!loadCloudSession()?.access_token||!cloudConfigured()){if(manual)toast('Inicia sesión para sincronizar');return false;}
@@ -1517,7 +1554,7 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
   }catch(e){cloudLastError=`Pendiente: ${e.message||e}`;console.warn('Cloud sync',e);if(manual){cloudProgressFinish(false,'Error al subir');toast(`No se pudo sincronizar: ${e.message||e}`,6500);}refreshAccountUi();return false;}
   finally{cloudSyncRunning=false;refreshAccountUi();}
 }
-function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);if(state.project&&!canEditCurrentProject())return;if(!state.projectId||!cloudConfigured()||!loadCloudSession()?.access_token||!navigator.onLine||document.hidden)return;cloudSyncTimer=setTimeout(()=>{cloudBidirectionalSync({manual:false}).catch(e=>console.warn('Background sync',e));},Math.max(600,delay));}
+function scheduleCloudSync(delay=7000){clearTimeout(cloudSyncTimer);if(!state.projectId||!cloudConfigured()||!loadCloudSession()?.access_token||!navigator.onLine||document.hidden)return;cloudSyncTimer=setTimeout(()=>{cloudBidirectionalSync({manual:false}).catch(e=>console.warn('Background sync',e));},Math.max(600,delay));}
 function persistStateLocalOnly(){
   if(!state.projectId||!canEditCurrentProject())return;const previousCloudPayload=localStorage.getItem(projectStateKey(state.projectId));syncCurrentCampaign();const payload={appVersion:'0.16.39-android-alpha',projectId:state.projectId,tool:state.tool,material:state.material,materialStyles:state.materialStyles||{},mapInk:state.mapInk||[],mapInkColor:state.mapInkColor,mapInkWidth:state.mapInkWidth,mapInkMode:state.mapInkMode,mapPins:state.mapPins||[],activeFieldStopId:state.activeFieldStopId||null,historicalPhotoPoints:state.historicalPhotoPoints||[],showHistoricalPhotoPoints:state.showHistoricalPhotoPoints!==false,campaign:state.campaign,editableCampaign:state.editableCampaign,campaigns:state.campaigns,comparePrevious:state.comparePrevious,compareOpacity:state.compareOpacity,view:{...state.view,rotation:state.view.rotation||0},eraseMode:state.eraseMode,eraseSize:state.eraseSize,autoPanAfterDraw:state.autoPanAfterDraw,notebook:state.notebook,activeCourseId:state.activeCourseId,referenceLayers:(state.referenceLayers||[]).map(referenceLayerStateRecord),demGroups:state.demGroups,activeDemGroupId:state.activeDemGroupId};cloudQueueStateDiff(state.projectId,previousCloudPayload,payload);localStorage.setItem(projectStateKey(state.projectId),JSON.stringify(payload));touchProject();nativeSyncProject(payload);return payload;
 }
