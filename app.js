@@ -993,7 +993,7 @@ async function cloudHasLocalAssetCopies(assets){
  }
  return true;
 }
-async function cloudDeltaReceiveMaps(assets,baseAssets=null,queue=[]){
+async function cloudDeltaReceiveMaps(assets,baseAssets=null,queue=[],remoteSnapshotAt=0){
  const kinds=['rasters','vectorLayers'],prepared=[];
  const mutation=(kind,id)=>queue.some(q=>q.kind===kind&&q.path.split(':').slice(1).join(':')===id);
  const changed=(a,b)=>cloudStableJson(a)!==cloudStableJson(b);
@@ -1004,8 +1004,14 @@ async function cloudDeltaReceiveMaps(assets,baseAssets=null,queue=[]){
    const previous=base.get(remote.id),local=await dbGet(kind,remote.id);
    const remoteChanged=!previous||changed(previous,remote);
    if(mutation(kind,remote.id)){
-    if(remoteChanged&&local)throw new Error('La capa '+(remote.name||remote.id)+' cambió en dos dispositivos; revisa las versiones antes de reemplazarla.');
-    continue;
+    if(!local)continue; // A queued local deletion is never undone by a pull.
+    if(!remoteChanged)continue; // Remote still equals known baseline; local wins.
+    // A queued offline modification after the remote snapshot takes priority.
+    const queuedAt=Math.max(0,...queue.filter(q=>q.kind===kind&&q.path.split(':').slice(1).join(':')===remote.id).map(q=>Number(q.createdAt)||0));
+    if(queuedAt&&Number(remoteSnapshotAt)&&queuedAt>Number(remoteSnapshotAt)+2000)continue;
+    // Both sides appear changed, or the baseline is missing. Preserve the full
+    // local binary record before accepting the cloud copy. Never discard it.
+    await dbPut('cloudRecovery',{key:'assetConflict:'+kind+':'+remote.id,projectId:state.projectId,createdAt:Date.now(),record:local});
    }
    const keys=kind==='rasters'
     ?['cloudPreviewPath','cloudSourcePath','cloudPreviewType','cloudSourceType','cloudPreviewSize','cloudSourceSize','cloudPreviewParts','cloudSourceParts','cloudPreviewHash','cloudSourceHash']
@@ -1260,7 +1266,7 @@ async function cloudBidirectionalSync({manual=false}={}){
   if(remote&&!localChange.length&&!remoteChange.length&&!localAssetsChanged){
    cloudApplyingRemote=true;try{
     await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
-    await cloudDeltaReceiveMaps(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
+    await cloudDeltaReceiveMaps(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack,Date.parse(remote.updated_at||'')||0);
    }finally{cloudApplyingRemote=false;}
    await loadRasters();await hydrateReferenceLayersAfterOpen();
    await cloudDeltaSaveBase(projectId,{...local,assetMetadata:remote.state?.assetMetadata||null},remote.updated_at);
@@ -1306,7 +1312,7 @@ async function cloudBidirectionalSync({manual=false}={}){
    // the chosen side so a discarded old value cannot become newest later.
    const editTimes={...(remote.state?.syncEditTimes||{})};
    for(const [path,value] of Object.entries(local.syncEditTimes||{}))editTimes[path]=Math.max(Number(value)||0,Number(editTimes[path])||0);
-   for(const {path,choice} of [...(result.autoResolved||[]),...Object.entries(decisions||{}).map(([path,choice])=>({path,choice}))]){
+   for(const {path,choice} of [...(result.autoResolved||[]),]){
     const winning=choice==='local'?(Number(local.syncEditTimes?.[path])||Number(localQueueTimes[path])||0)
      :(Number(remote.state?.syncEditTimes?.[path])||Date.parse(remote.updated_at||'')||0);
     if(winning>0)editTimes[path]=winning;
@@ -1330,7 +1336,7 @@ async function cloudBidirectionalSync({manual=false}={}){
   try{
    if(remote){
     await cloudDeltaReceivePhotos(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
-    await cloudDeltaReceiveMaps(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack);
+    await cloudDeltaReceiveMaps(remote.state?.assetMetadata,baseline?.state?.assetMetadata,ack,Date.parse(remote.updated_at||'')||0);
    }
    if(needApply){
     localStorage.setItem(projectStateKey(projectId),JSON.stringify(merged));
