@@ -552,6 +552,7 @@ async function cloudSchema(){
   return cloudSchemaMode='legacy';
 }
 async function cloudRefreshProjectCatalog({quiet=true}={}){
+  await projectStateReady();
   if(!cloudConfigured()||!navigator.onLine||!loadCloudSession()?.access_token)return false;
   try{
     const schema=await cloudSchema();
@@ -687,6 +688,7 @@ async function restoreCloudLocalRecovery(){
   finally{cloudRestoreRunning=false;}
 }
 async function restoreProjectFromCloud(projectId,{manual=false}={}){
+  await projectStateFlush(projectId);
   if(!cloudConfigured()||!navigator.onLine||!loadCloudSession()?.access_token)return false;
   if(cloudSyncRunning||cloudRestoreRunning)return false;
   cloudRestoreRunning=true;const previousCloudApplyingRemote=cloudApplyingRemote;cloudApplyingRemote=true;let started=false;
@@ -822,6 +824,7 @@ function enterAppCore(){
  refreshAccountUi();
 }
 async function enterApp(){
+  try{await projectStateReady();}catch{return;}
   const session=loadCloudSession(),choice=authEntryChoice();
   if(session?.access_token){setAuthEntryChoice('account');try{if(sessionExpired(session)&&navigator.onLine)await refreshCloudSession();if(navigator.onLine)await cloudRefreshProjectCatalog();}catch(e){console.warn('Cloud entry',e);}enterAppCore();refreshAccountUi();scheduleCloudSync(500);return;}
   if(choice==='offline'){enterAppCore();return;}
@@ -1188,6 +1191,7 @@ function cloudResolveFieldConflicts(conflicts,projectId){
 // Keep the previous IndexedDB version recoverable through cloudCommitStaging.
 async function cloudViewerPull({manual=false}={}){
  const projectId=state.projectId,project=state.project;
+ try{await projectStateFlush(projectId);}catch(e){cloudDeltaRootError('Guardado local pendiente: '+e.message,manual);return false;}
  if(!projectId||!project||!navigator.onLine||!loadCloudSession()?.access_token)return false;
  if(cloudSyncEditingInProgress()){if(manual)toast('Cierra la ficha antes de actualizar el proyecto.');return false;}
  if(cloudPendingChanges(projectId).length){
@@ -1228,7 +1232,9 @@ async function cloudBidirectionalSync({manual=false}={}){
  if(!loadCloudSession()?.access_token||!cloudConfigured()){if(manual)toast('Inicia sesión para sincronizar');return false;}
  if(!navigator.onLine){if(manual)toast('Sin conexión. Los cambios permanecen en la cola local.');return false;}
  if(cloudSyncEditingInProgress()){if(manual)toast('Cierra la ficha abierta para fusionar los cambios guardados sin perder ninguna edición');return false;}
- const projectId=state.projectId,project=state.project,ack=cloudPendingChanges(projectId);
+ const projectId=state.projectId,project=state.project;
+ persistStateLocalOnly();
+ const ack=cloudPendingChanges(projectId);
  try{await projectStateFlush(projectId);}catch(e){cloudDeltaRootError('Guardado local pendiente: '+e.message,manual);return false;}
  cloudDeltaRunning=true;cloudLastError='';
  if(manual)cloudProgressStart('Comparando cambios pendientes con la nube',2);
@@ -1445,6 +1451,7 @@ async function uploadCloudChanges(){
   }catch(e){toast('No se pudo comprobar la versión de la nube: '+(e.message||e),5500);return false;}
 }
 async function downloadCloudChanges(){
+  try{await projectStateFlush(state.projectId);}catch(e){toast('Primero debe completarse el guardado local: '+e.message,7000);return false;}
   if(!state.projectId||!state.project){toast('Abre el proyecto que quieres descargar');return false;}
   if(!navigator.onLine){toast('Necesitas conexión para descargar cambios');return false;}
   if(cloudSyncRunning||cloudRestoreRunning||cloudDeltaRunning){toast('Ya hay una transferencia en curso');return false;}
@@ -1945,7 +1952,9 @@ async function projectStateReady(){
      throw Error('La migración no se pudo verificar: '+x.id);
     projectStateCache.set(x.id,x.raw);
    }else{
-    // A residual legacy key must never overwrite a newer durable IDB state.
+    // Never silently discard edits made in an older build after migration.
+    // Keep both copies and stop until the divergence can be examined.
+    if(primary.raw!==x.raw)throw Error('Dos versiones locales diferentes en '+x.id+'. Se conservan ambas; no se sobrescribe ninguna.');
     if(!(await projectStateReadRecord('migrationBackups',x.id))){
      await new Promise((resolve,reject)=>{
       const tx=db.transaction('migrationBackups','readwrite');tx.objectStore('migrationBackups').put({key:x.id,raw:x.raw,createdAt:Date.now()});
