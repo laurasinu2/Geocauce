@@ -56,6 +56,14 @@
    // For old field sheets the remote snapshot time is NOT the last field
    // edit. It only proves the edit already existed by the snapshot date.
    // Thus we may prefer a known later local edit, never infer remote wins.
+   // A locally queued modification made AFTER the last remote snapshot
+   // is reliably newer even when its remote per-field clock is absent.
+   if(!remote){
+    const queued=validTime(legacy.localQueue?.[path])||local;
+    const lastRemoteSave=validTime(legacy.remoteSnapshotAt);
+    if(queued&&lastRemoteSave&&queued>lastRemoteSave+2000)
+     return {path,choice:'local',localAt:queued,remoteAt:lastRemoteSave,source:'offline-after-remote'};
+   }
    if(!remote&&(/\/sheetIII\/workStatus$|\/order$/).test(path)){
     const queued=validTime(legacy.localQueue?.[path])||local;
     const lastRemoteSave=validTime(legacy.remoteSnapshotAt);
@@ -93,9 +101,23 @@
      return clone(out);
     }
    }
+   // A raster-derived statistic is a cache, not an independent field entry.
+   // Its key and computed numbers must originate from the same version.
+   if(p[p.length-1]==='mdeStats'&&plain(l)&&plain(r)){
+    const decision=latest(path);
+    const chosen=decision?.choice||'remote';
+    autoResolved.push(decision||{path,choice:chosen,source:'derived-cache'});
+    return clone(chosen==='local'?l:r);
+   }
    if(l===MISSING||r===MISSING){
     if(resolutions[pathName(p)]==='local')return clone(l);
     if(resolutions[pathName(p)]==='remote')return clone(r);
+    // Do not guess a deletion: two incompatible edits require a copy.
+    if(options.backedUpFallback==='remote'){
+     const d=latest(path),choice=d?.choice||'remote';
+     autoResolved.push(d||{path,choice,source:'recovered-legacy-delete'});
+     return clone(choice==='local'?l:r);
+    }
     conflicts.push({path:pathName(p),local:l===MISSING?null:clone(l),remote:r===MISSING?null:clone(r),type:'delete-versus-edit'});return clone(l);
    }
    if(plain(l)&&plain(r)&&(plain(b)||b===MISSING)){
@@ -144,6 +166,14 @@
     const valid=v=>['pending','started','done'].includes(v);
     if(unclassified(l)&&valid(r))return clone(r);
     if(unclassified(r)&&valid(l))return clone(l);
+   }
+   // Older snapshots cannot prove per-field chronology. Prefer the existing
+   // cloud value only when both snapshots have been preserved before applying.
+   // This fallback is opt-in from the sync orchestrator, never from a dry run.
+   if(options.backedUpFallback==='remote'){
+    const decision=latest(path),choice=decision?.choice||'remote';
+    autoResolved.push(decision||{path,choice,source:'recovered-legacy'});
+    return clone(choice==='local'?l:r);
    }
    conflicts.push({path,local:clone(l),remote:clone(r),type:'concurrent-edit'});
    return clone(l);
