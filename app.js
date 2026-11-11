@@ -1427,8 +1427,13 @@ async function downloadCloudChanges(){
     const remote=await cloudRemoteSnapshotInfo();
     if(!remote){toast('Todavía no hay una copia de este proyecto en la nube');return false;}
     const cloudTime=Date.parse(remote.updated_at||0)||0,known=state.project._cloudUpdatedAt||0;
-    if(cloudTime&&known&&(state.project._cloudSyncedAt||state.project._cloudPulledAt)&&cloudTime===known){
-      toast('La nube no contiene una versión más reciente');return false;
+    // Same snapshot timestamp does not imply that this device has every
+    // binary. Allow a manual repair download when local map files are missing.
+    const syncBase=await dbGet('cloudSyncBase','baseline');
+    const complete=syncBase?.projectId===state.projectId&&syncBase.state?.assetMetadata
+     &&await cloudHasLocalAssetCopies(syncBase.state.assetMetadata);
+    if(cloudTime&&known&&(state.project._cloudSyncedAt||state.project._cloudPulledAt)&&cloudTime===known&&complete){
+      toast('La nube está al día y todos los archivos locales están presentes');return false;
     }
     const priorRecovery=await dbGet('cloudRecovery','state').catch(()=>null);
     if(priorRecovery?.state&&!confirm('Ya existe una versión local anterior recuperable. Una nueva descarga reemplazará esa copia. Exporta un archivo .geocauce si quieres conservarla. ¿Continuar?'))return false;
