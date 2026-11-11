@@ -2000,9 +2000,8 @@ const projectStateStorage={
  },
  removeItem(key){
   const id=projectStateId(key);if(id===null)return localStorage.removeItem(key);
-  projectStateCache.delete(id);
   const previous=projectStateJobs.get(id)||Promise.resolve();
-  const job=previous.catch(()=>{}).then(async()=>{await projectStateReady();const db=await projectStateDb();await new Promise((res,rej)=>{
+  const job=previous.catch(()=>{}).then(async()=>{await projectStateReady();projectStateCache.delete(id);const db=await projectStateDb();await new Promise((res,rej)=>{
    const tx=db.transaction('states','readwrite');tx.objectStore('states').delete(id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);
   });});
   projectStateJobs.set(id,job);job.catch(e=>{projectStateFailures.set(id,e);console.error(e);});
