@@ -1549,6 +1549,17 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
      const missing=remoteRecords.filter(x=>!localIds.has(x.id)&&!queuedDeletes.has(x.id));
      if(missing.length)throw new Error('Faltan '+missing.length+' archivos de '+kind+' en este dispositivo. Descarga los mapas de la nube antes de subir; no se borrará ningún archivo remoto.');
     }
+    // The self-hosted file API validates the project owner on EVERY upload.
+    // A brand-new project must be registered before its photos/GeoTIFF chunks.
+    // Do not announce a cloud backup until the snapshot is successfully committed.
+    if(schema==='modern'&&!previous){
+      const initialRow={id:cloudId,owner_id:p.ownerUserId||uid,name:p.name||'Proyecto',
+        zone:p.zone||null,torrent:p.torrent||null,crs:p.crs||'EPSG:25831',
+        metadata:{author:p.author||'',institution:p.institution||'',startDate:p.startDate||'',
+          objective:p.objective||'',methodology:p.methodology||'',notes:p.notes||''}};
+      await cloudFetch('/rest/v1/projects?on_conflict=id',{method:'POST',body:[initialRow],
+        headers:{Prefer:'resolution=merge-duplicates,return=minimal'}});
+    }
     const assets=await cloudUploadProjectAssets(p.ownerUserId||uid,cloudId,{manual,remoteAssets:previous?.state?.assetMetadata});
     cloudLastAssetManifest=assets.metadata;
     if(state.projectId!==uploadingProjectId)throw new Error('El proyecto cambió durante la subida');
@@ -1558,10 +1569,10 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
     const payload=await cloudStructuredSnapshot(assets.metadata),now=new Date().toISOString();
     await projectStateFlush(uploadingProjectId);
     if(projectStateStorage.getItem(projectStateKey(uploadingProjectId))!==startingPayload)throw new Error('Se han modificado datos durante la subida. Repite la sincronización cuando termines de editar.');
-    if(!p.ownerUserId){p.ownerUserId=uid;p._sharedRole='owner';p._roleUser=uid;p.updatedAt=Date.now();saveProjectCatalog();state.project=p;nativeSyncProject(payload);}
+    // Do not mark this local project as cloud-owned until its snapshot exists.
     const row=schema==='legacy'
-      ? {id_project:cloudId,owner_user_id:p.ownerUserId,name:p.name||'Proyecto',zona:p.zone||null,torrent:p.torrent||null,institution:p.institution||null,autor:p.author||null,start_date:p.startDate||new Date().toISOString().slice(0,10),crs:p.crs||'EPSG:25831',objective:p.objective||null,methodology:p.methodology||null,notes:p.notes||null,updated_at:now,deleted_at:null}
-      : {id:cloudId,owner_id:p.ownerUserId,name:p.name||'Proyecto',zone:p.zone||null,torrent:p.torrent||null,crs:p.crs||'EPSG:25831',metadata:{author:p.author||'',institution:p.institution||'',startDate:p.startDate||'',objective:p.objective||'',methodology:p.methodology||'',notes:p.notes||''},updated_at:now};
+      ? {id_project:cloudId,owner_user_id:p.ownerUserId||uid,name:p.name||'Proyecto',zona:p.zone||null,torrent:p.torrent||null,institution:p.institution||null,autor:p.author||null,start_date:p.startDate||new Date().toISOString().slice(0,10),crs:p.crs||'EPSG:25831',objective:p.objective||null,methodology:p.methodology||null,notes:p.notes||null,updated_at:now,deleted_at:null}
+      : {id:cloudId,owner_id:p.ownerUserId||uid,name:p.name||'Proyecto',zone:p.zone||null,torrent:p.torrent||null,crs:p.crs||'EPSG:25831',metadata:{author:p.author||'',institution:p.institution||'',startDate:p.startDate||'',objective:p.objective||'',methodology:p.methodology||'',notes:p.notes||''},updated_at:now};
     if(previous?.state&&cloudStableJson(previous.state)===cloudStableJson(payload)){
       const table=schema==='legacy'?'project':'projects',idCol=schema==='legacy'?'id_project':'id';
       const rows=await cloudFetch(`/rest/v1/${table}?${idCol}=eq.${encodeURIComponent(cloudId)}&select=*&limit=1`),remoteRow=rows?.[0];
@@ -1582,11 +1593,12 @@ async function syncCurrentProjectToCloud({manual=false,expectedUpdatedAt=null}={
       });
     }else{
       saved=await cloudFetch(schema==='legacy'?'/rest/v1/project_snapshots?on_conflict=id_project&select=updated_at':'/rest/v1/project_snapshots?on_conflict=project_id&select=updated_at',{
-        method:'POST',body:[schema==='legacy'?{id_project:cloudId,schema_version:4,state:payload,updated_at:now}:{project_id:cloudId,owner_id:p.ownerUserId,state:payload,palette:cloneAny(sectionPalette||[]),updated_at:now}],
+        method:'POST',body:[schema==='legacy'?{id_project:cloudId,schema_version:4,state:payload,updated_at:now}:{project_id:cloudId,owner_id:p.ownerUserId||uid,state:payload,palette:cloneAny(sectionPalette||[]),updated_at:now}],
         headers:{Prefer:'resolution=ignore-duplicates,return=representation'}
       });
     }
     if(!Array.isArray(saved)||saved.length!==1)throw new Error('Conflicto al guardar: el proyecto remoto cambió. No se ha sobrescrito su snapshot.');
+    if(!p.ownerUserId){p.ownerUserId=uid;p._sharedRole='owner';p._roleUser=uid;p.updatedAt=Date.now();saveProjectCatalog();state.project=p;nativeSyncProject(payload);}
     cloudLastSyncAt=Date.now();cloudLastError='';p.cloudProjectId=cloudId;p._cloudOnly=false;p._cloudSyncedAt=cloudLastSyncAt;p._cloudUpdatedAt=Date.parse(saved[0].updated_at||now)||cloudLastSyncAt;saveProjectCatalog();
     if(manual){cloudProgressUpdate('Sincronización completada',assets.total,assets.total);cloudProgressFinish(true,'Subida completada');toast(`Proyecto sincronizado ✓ · ${assets.uploaded} archivos subidos, ${assets.reused} reutilizados`,6000);}
     cloudCollectObsoleteAssets(p.ownerUserId||uid,cloudId,previous?.state?.assetMetadata,assets.metadata).catch(e=>console.warn('Cloud asset cleanup',e));
