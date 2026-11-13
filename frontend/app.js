@@ -2181,9 +2181,13 @@ async function openProject(id,opt={}){
   // Never try to restore an unconfirmed new local project as if it were backed up.
   const hasLocalState=!!projectStateStorage.getItem(projectStateKey(id));
   const verifiedCloudCopy=!!(p._cloudOnly||p._cloudSyncedAt||p._cloudPulledAt||p._cloudUpdatedAt||p._cloudCatalogUpdatedAt);
-  if((!hasLocalState||projectStateFailures.has(id))&&!verifiedCloudCopy){
+  if(!hasLocalState&&!verifiedCloudCopy){
     toast('⚠ Este proyecto no tiene un guardado local confirmado ni una copia cloud conocida. No se sobrescribirán sus datos.',9000);
     return;
+  }
+  if(hasLocalState&&(projectStateFailures.has(id)||p._localSaveUnconfirmed)){
+    // Preserve access to the in-memory state so the user can export an emergency copy.
+    toast('⚠ El guardado local no está confirmado. Exporta una copia antes de cerrar o sincronizar.',9000);
   }
   let role;
   try{role=await cloudProjectRole(p);}catch(e){toast('Acceso denegado: '+(e.message||String(e)),6000);return;}
