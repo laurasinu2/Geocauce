@@ -1,0 +1,139 @@
+name: Deploy Geocauce to Contabo (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Confirma el despliegue de R42 al VPS'
+        required: true
+        type: choice
+        default: 'NO'
+        options:
+          - 'NO'
+          - 'DESPLEGAR'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: geocauce-contabo-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify exact branch and source
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require explicit confirmation and R42 branch
+        shell: bash
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRM" != "DESPLEGAR" ]]; then
+            echo "::error::Selecciona DESPLEGAR para confirmar el despliegue."
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" != "refs/heads/r42-20261113-monorepo" ]]; then
+            echo "::error::Elige la rama r42-20261113-monorepo en Run workflow (no main)."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify monorepo and source SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -f compose.yaml
+          test -f backend/geocauce_api/app.py
+          test -f frontend/index.html
+          test -f scripts/deploy-contabo.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Backend tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -r backend/requirements-test.txt
+          cd backend
+          PYTHONPATH=. python -m pytest -q tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Frontend syntax and auth contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check frontend/app.js
+          node --check frontend/sw.js
+          node --test frontend/tests/api-auth.test.cjs
+      - name: Docker Compose configuration
+        shell: bash
+        env:
+          POSTGRES_PASSWORD: ci-placeholder-password
+          JWT_SECRET: ci-placeholder-signing-key
+          SITE_ADDRESS: geocauce.example.org
+        run: |
+          set -euo pipefail
+          docker compose config --quiet
+
+  deploy:
+    name: Upload verified source and deploy through SSH
+    needs: verify
+    runs-on: ubuntu-24.04
+    environment: contabo-production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Transfer source and deploy on VPS
+        shell: bash
+        env:
+          CONTABO_HOST: ${{ secrets.CONTABO_HOST }}
+          CONTABO_USER: ${{ secrets.CONTABO_USER }}
+          CONTABO_SSH_PRIVATE_KEY: ${{ secrets.CONTABO_SSH_PRIVATE_KEY }}
+          CONTABO_SSH_KNOWN_HOSTS: ${{ secrets.CONTABO_SSH_KNOWN_HOSTS }}
+          CONTABO_SSH_PORT: ${{ vars.CONTABO_SSH_PORT || '22' }}
+        run: |
+          set -euo pipefail
+          for name in CONTABO_HOST CONTABO_USER CONTABO_SSH_PRIVATE_KEY CONTABO_SSH_KNOWN_HOSTS; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Falta el secret $name en el entorno contabo-production."
+              exit 1
+            fi
+          done
+          [[ "$CONTABO_HOST" =~ ^[a-zA-Z0-9.-]+$ ]] || { echo "::error::Host SSH no válido"; exit 1; }
+          [[ "$CONTABO_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "::error::Usuario SSH no válido"; exit 1; }
+          [[ "$CONTABO_SSH_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "::error::Puerto SSH no válido"; exit 1; }
+
+          ssh_dir="$RUNNER_TEMP/geocauce-ssh"
+          install -d -m 700 "$ssh_dir"
+          key="$ssh_dir/deploy_key"
+          known_hosts="$ssh_dir/known_hosts"
+          printf '%s\n' "$CONTABO_SSH_PRIVATE_KEY" > "$key"
+          printf '%s\n' "$CONTABO_SSH_KNOWN_HOSTS" > "$known_hosts"
+          chmod 600 "$key" "$known_hosts"
+
+          ssh_args=(-i "$key" -o IdentitiesOnly=yes -o BatchMode=yes
+                    -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts"
+                    -o ConnectTimeout=20)
+          target="${CONTABO_USER}@${CONTABO_HOST}"
+          short_sha="${GITHUB_SHA:0:12}"
+          archive="$RUNNER_TEMP/geocauce-${short_sha}.tar.gz"
+          remote_archive="/tmp/geocauce-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${short_sha}.tar.gz"
+
+          # Whitelist: never transfer .env, local backups, IndexedDB, credentials or git internals.
+          tar -czf "$archive" \
+            compose.yaml frontend backend infra scripts docs README.md .env.example
+          scp "${ssh_args[@]}" -P "$CONTABO_SSH_PORT" "$archive" "$target:$remote_archive"
+          ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
+            "bash -s -- '$GITHUB_SHA' '$remote_archive'" < scripts/deploy-contabo.sh
+
+          echo "### Contabo deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Branch: $GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Result: deployment and HTTPS health checks completed" >> "$GITHUB_STEP_SUMMARY"
