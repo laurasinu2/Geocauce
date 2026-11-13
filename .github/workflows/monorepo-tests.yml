@@ -8,6 +8,8 @@ on:
       - 'backend/**'
       - 'compose.yaml'
       - 'infra/**'
+      - 'scripts/**'
+      - '.github/workflows/deploy-contabo.yml'
       - '.github/workflows/monorepo-tests.yml'
 jobs:
   frontend:
@@ -34,6 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: bash -n scripts/deploy-contabo.sh
       - run: docker compose config -q
         env:
           SITE_ADDRESS: geocauce.example.org
