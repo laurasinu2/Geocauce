@@ -1,0 +1,54 @@
+name: geocauce
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: geocauce
+      POSTGRES_USER: geocauce
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geocauce -d geocauce"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [private]
+  api:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://geocauce:${POSTGRES_PASSWORD:?Falta contraseña}@db:5432/geocauce
+      JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en .env}
+      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-false}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-16777216}
+      FILE_ROOT: /data/files
+    volumes:
+      - files_data:/data/files
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [private]
+    security_opt: [no-new-privileges:true]
+  web:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Define SITE_ADDRESS en .env}
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend:/srv/frontend:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api]
+    networks: [private]
+    security_opt: [no-new-privileges:true]
+networks:
+  private:
+volumes:
+  postgres_data:
+  files_data:
+  caddy_data:
+  caddy_config:

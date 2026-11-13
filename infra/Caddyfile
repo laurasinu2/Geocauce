@@ -1,0 +1,19 @@
+{$SITE_ADDRESS} {
+  encode zstd gzip
+  header {
+    X-Content-Type-Options nosniff
+    Referrer-Policy strict-origin-when-cross-origin
+    X-Frame-Options DENY
+  }
+  @api path /api/* /auth/* /rest/* /storage/* /health /docs /docs/* /redoc /openapi.json
+  handle @api {
+    header Cache-Control "no-store"
+    reverse_proxy api:8000
+  }
+  handle {
+    root * /srv/frontend
+    @nocache path /index.html /sw.js /supabase-config.js /manifest.webmanifest
+    header @nocache Cache-Control "no-cache"
+    file_server
+  }
+}

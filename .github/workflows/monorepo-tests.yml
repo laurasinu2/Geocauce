@@ -1,0 +1,41 @@
+name: R42 monorepo tests
+on:
+  push:
+    branches: [r42-20261113-monorepo]
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - 'compose.yaml'
+      - 'infra/**'
+      - '.github/workflows/monorepo-tests.yml'
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm test
+        working-directory: frontend
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-test.txt
+        working-directory: backend
+      - run: PYTHONPATH=. pytest -q tests
+        working-directory: backend
+  docker-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config -q
+        env:
+          SITE_ADDRESS: geocauce.example.org
+          POSTGRES_PASSWORD: not-a-real-database-password
+          JWT_SECRET: not-a-real-signing-secret-use-env
