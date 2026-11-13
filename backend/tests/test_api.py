@@ -161,3 +161,84 @@ def test_v1_api_contract(env):
                          "expected_updated_at": version}, headers=h(session)).status_code == 200
     assert c.put(f"/api/v1/projects/{pid}/snapshot", json={"state": {"campaigns": [], "v": 2},
                          "expected_updated_at": version}, headers=h(session)).status_code == 409
+
+
+def test_first_cloud_sync_from_r43_with_map_and_photo(env):
+    """Regression: first GET is empty, then create project, upload binary chunks and commit snapshot."""
+    c, _, _ = env
+    owner = login(c)
+    stranger = login(c, "other@example.org", "other-very-long-password")
+    pid = str(uuid4())
+    base = f"/rest/v1/project_snapshots?project_id=eq.{pid}&select=updated_at&limit=1"
+
+    # A new local-only project does not exist in PostgreSQL yet; GET is NOT an error.
+    response = c.get(base, headers=h(owner))
+    assert response.status_code == 200 and response.json() == []
+    assert c.get(base, headers=h(stranger)).status_code == 200
+    assert c.get("/rest/v1/projects?select=id&limit=0", headers=h(owner)).json() == []
+
+    project = {"id": pid, "owner_id": owner["user"]["id"], "name": "Test Cauces",
+               "zone": "Ensayo", "crs": "EPSG:25831", "metadata": {"author": "Laura"}}
+    register = c.post("/rest/v1/projects?on_conflict=id",
+                      json=[project], headers={**h(owner),
+                                             "Prefer": "resolution=merge-duplicates,return=minimal"})
+    assert register.status_code in (200, 201), register.text
+    assert c.get(base, headers=h(owner)).json() == []
+    assert c.get(base, headers=h(stranger)).status_code == 404
+
+    path = f"{owner['user']['id']}/{pid}/rasters/map-file.part0000"
+    object_url = f"/storage/v1/object/geocauce-files/{path}"
+    chunk = b"example-geotiff-fragment"
+    uploaded = c.post(object_url, content=chunk, headers=h(owner))
+    assert uploaded.status_code == 200, uploaded.text
+    info = c.get(f"/storage/v1/object/info/geocauce-files/{path}", headers=h(owner))
+    assert info.status_code == 200
+    assert info.json()["metadata"]["size"] == len(chunk)
+
+    state = {"projectId": "P-local", "campaigns": [{"id": "D01", "upserts": [
+        {"id": "r1", "type": "watercourse"}, {"id": "r2", "type": "reach"}]}],
+        "assetMetadata": {"photos": [], "rasters": [{"id": "m1", "cloudPreviewPath": path}],
+                          "vectorLayers": []}}
+    inserted = c.post("/rest/v1/project_snapshots?on_conflict=project_id&select=updated_at",
+                      json=[{"project_id": pid, "owner_id": owner["user"]["id"],
+                             "state": state, "palette": []}],
+                      headers={**h(owner), "Prefer": "resolution=ignore-duplicates,return=representation"})
+    assert inserted.status_code == 200, inserted.text
+    assert len(inserted.json()) == 1
+    version = inserted.json()[0]["updated_at"]
+
+    restored = c.get(f"/rest/v1/project_snapshots?project_id=eq.{pid}&select=state,updated_at",
+                     headers=h(owner))
+    assert restored.status_code == 200
+    assert restored.json()[0]["state"] == state
+    assert restored.json()[0]["updated_at"] == version
+    downloaded = c.get(f"/storage/v1/object/authenticated/geocauce-files/{path}", headers=h(owner))
+    assert downloaded.status_code == 200 and downloaded.content == chunk
+
+    # A stale device must not overwrite the committed version.
+    first_patch = c.patch(
+        f"/rest/v1/project_snapshots?project_id=eq.{pid}&updated_at=eq.{quote(version)}&select=updated_at",
+        json={"state": {**state, "revision": 2}},
+        headers={**h(owner), "Prefer": "return=representation"})
+    assert first_patch.status_code == 200 and len(first_patch.json()) == 1
+    stale_patch = c.patch(
+        f"/rest/v1/project_snapshots?project_id=eq.{pid}&updated_at=eq.{quote(version)}&select=updated_at",
+        json={"state": {**state, "revision": -1}},
+        headers={**h(owner), "Prefer": "return=representation"})
+    assert stale_patch.status_code == 200 and stale_patch.json() == []
+    verify = c.get(f"/rest/v1/project_snapshots?project_id=eq.{pid}&select=state", headers=h(owner))
+    assert verify.json()[0]["state"]["revision"] == 2
+
+
+def test_snapshot_not_found_is_not_permission_bypass(env):
+    c, _, _ = env
+    owner = login(c)
+    stranger = login(c, "other@example.org", "other-very-long-password")
+    pid = make_project(c, owner)
+    # Existing private project must not be readable by another user even with no snapshot.
+    response = c.get(f"/rest/v1/project_snapshots?project_id=eq.{pid}&select=updated_at",
+                     headers=h(stranger))
+    assert response.status_code == 404
+    response = c.get(f"/rest/v1/project_snapshots?project_id=eq.{pid}&select=updated_at",
+                     headers=h(owner))
+    assert response.status_code == 200 and response.json() == []
