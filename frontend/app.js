@@ -344,7 +344,11 @@ async function cloudDownloadBlob(objectPath,parts=null,type='application/octet-s
   const response=await cloudBinaryFetch(`/storage/v1/object/authenticated/geocauce-files/${p}`,{method:'GET',contentType:null});
   blobs.push(await response.blob());
  }
- return objectPaths.length===1?blobs[0]:new Blob(blobs,{type:type||''});
+ // The private REST API serves binaries as application/octet-stream. Blob.type
+ // is part of the existing GeoCauce fingerprint, so a single-part download
+ // MUST be reconstructed with its original MIME type just like a chunked one.
+ // The caller still checks size and SHA-256 before committing downloaded data.
+ return new Blob(blobs,{type:type||''});
 }
 async function cloudAssetDigest(blob){
   if(!(blob instanceof Blob))throw new Error('Archivo local inválido');
