@@ -67,6 +67,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash -n scripts/deploy-contabo.sh
           node --check frontend/app.js
           node --check frontend/sw.js
           node --test frontend/tests/api-auth.test.cjs
@@ -124,11 +125,13 @@ jobs:
           target="${CONTABO_USER}@${CONTABO_HOST}"
           short_sha="${GITHUB_SHA:0:12}"
           archive="$RUNNER_TEMP/geocauce-${short_sha}.tar.gz"
-          remote_archive="/tmp/geocauce-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${short_sha}.tar.gz"
+          remote_archive="/opt/geocauce/incoming/geocauce-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${short_sha}.tar.gz"
 
           # Whitelist: never transfer .env, local backups, IndexedDB, credentials or git internals.
           tar -czf "$archive" \
             compose.yaml frontend backend infra scripts docs README.md .env.example
+          ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
+            "install -d -m 700 /opt/geocauce/incoming"
           scp "${ssh_args[@]}" -P "$CONTABO_SSH_PORT" "$archive" "$target:$remote_archive"
           ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
             "bash -s -- '$GITHUB_SHA' '$remote_archive'" < scripts/deploy-contabo.sh
