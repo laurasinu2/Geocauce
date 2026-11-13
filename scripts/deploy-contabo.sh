@@ -12,7 +12,7 @@ PREVIOUS=""
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || die "Invalid commit SHA."
-[[ "$ARCHIVE" =~ ^/tmp/geocauce-release-[0-9]+-[0-9]+-[0-9a-f]{12}\.tar\.gz$ ]] ||
+[[ "$ARCHIVE" =~ ^/opt/geocauce/incoming/geocauce-release-[0-9]+-[0-9]+-[0-9a-f]{12}\.tar\.gz$ ]] ||
   die "Unexpected upload path."
 [[ -f "$ARCHIVE" ]] || die "Uploaded release archive not found."
 [[ -d "$ROOT" && -f "$ROOT/.env" ]] ||
@@ -88,10 +88,13 @@ if docker volume inspect geocauce_postgres_data >/dev/null 2>&1; then
     exec -T db pg_dump -U geocauce -d geocauce -Fc > "$db_backup"
   [[ -s "$db_backup" ]] || die "PostgreSQL backup is empty."
   echo "Backing up the private file volume..."
+  # The container needs root to read private blobs; make the encrypted-backup candidate
+  # private and owned by the deployment user after writing it.
   docker run --rm --network none \
     -v geocauce_files_data:/input:ro \
     -v "$ROOT/backups:/output" alpine:3.21 \
-    tar -czf "/output/$(basename "$file_backup")" -C /input .
+    sh -c 'umask 077; tar -czf "/output/$1" -C /input . && chown "$2:$3" "/output/$1"' \
+    sh "$(basename "$file_backup")" "$(id -u)" "$(id -g)"
   [[ -s "$file_backup" ]] || die "Storage backup is empty."
   echo "Local backups created. Remember to copy them encrypted OFF the VPS."
 elif [[ -n "$PREVIOUS" ]]; then
@@ -105,11 +108,11 @@ docker compose --env-file "$ROOT/.env" -f "$RELEASE/compose.yaml" \
 
 url="https://$site"
 echo "Checking API and frontend through HTTPS..."
-curl --fail --silent --show-error --retry 10 --retry-delay 3 \
+curl --noproxy "*" --resolve "$site:443:127.0.0.1" --fail --silent --show-error --retry 10 --retry-delay 3 \
   --retry-connrefused --max-time 15 "$url/health" >/dev/null
-curl --fail --silent --show-error --retry 5 --retry-delay 3 \
+curl --noproxy "*" --resolve "$site:443:127.0.0.1" --fail --silent --show-error --retry 5 --retry-delay 3 \
   --retry-connrefused --max-time 15 "$url/" >/dev/null
-curl --fail --silent --show-error --max-time 15 "$url/supabase-config.js" |
+curl --noproxy "*" --resolve "$site:443:127.0.0.1" --fail --silent --show-error --max-time 15 "$url/supabase-config.js" |
   grep -q 'window.location.origin' || die "Frontend is not configured for the local API."
 
 # Only mark as current after all smoke checks pass.
