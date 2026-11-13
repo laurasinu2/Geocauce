@@ -256,6 +256,11 @@ def list_snapshots(project_id: str | None = None, id_project: str | None = None,
     if limit == 0:
         return []
     if selected_id:
+        # PostgREST returns an empty array for a missing row. R41 checks for a
+        # missing snapshot BEFORE creating a new project's DB row.
+        # Keep 404 for an existing project that is not visible to this user.
+        if db.get(Project, selected_id) is None:
+            return []
         require_role(db, user, selected_id)
         s = db.get(Snapshot, selected_id)
         return [snapshot_json(s, select)] if s else []
