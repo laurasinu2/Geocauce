@@ -28,3 +28,9 @@ Requiere DNS y HTTPS antes de usar credenciales reales. Abre `https://TU-DOMINIO
 **Migración pendiente**: La nueva web está en un origen distinto de GitHub Pages; IndexedDB, fotos y demás datos locales **no se transfieren automáticamente**. Haz copias `.geocauce` en todos los dispositivos y exporta SQL + bucket de Supabase antes de mover datos. No cambies la app estable hasta verificar sincronización de ordenador y tablet. `docker compose` arranca un sistema nuevo, vacío.
 
 Consulta [backend/README.md](backend/README.md) para el contrato de API y [docs/DEPLOY.md](docs/DEPLOY.md) para despliegue seguro, copias y validaciones.
+
+## Despliegue manual por GitHub Actions a Contabo
+
+Hay un flujo **100 % manual** en `Actions → Deploy Geocauce to Contabo (manual)`. Selecciona la rama `r42-20261113-monorepo` y confirma `DESPLEGAR`. El workflow `workflow_dispatch` también está registrado en `main` únicamente para que GitHub muestre el botón, pero **no despliega la rama main**.
+
+Antes del primer despliegue, configura el DNS/HTTPS, el usuario SSH, los secrets del entorno `contabo-production` y el archivo privado `/opt/geocauce/.env` en el servidor. **No se ha realizado ningún despliegue ni migración de Supabase.** La guía completa está en [docs/CI_CD_CONTABO.md](docs/CI_CD_CONTABO.md).
