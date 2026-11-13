@@ -1903,6 +1903,7 @@ const PROJECTS_KEY='geocauce-projects-v010';
 const ACTIVE_PROJECT_KEY='geocauce-active-project-v010';
 let projectCatalog=[];
 let editingProjectId=null;
+let pendingNewProjectId=null,projectCreateSaveRunning=false;
 function projectStateKey(id){return `geocauce-state::${id}`;}
 /* R40: durable large project state outside localStorage's small per-origin quota. */
 const projectStateCache=new Map(),projectStateJobs=new Map(),projectStateFailures=new Map();
@@ -2107,11 +2108,61 @@ function leaveProjectCreate(){
 // enterApp se define en el módulo de acceso local-first de v0.13
 function readProjectForm(){return{name:$('#projectName').value.trim(),zone:$('#projectZone').value.trim(),torrent:$('#projectTorrent').value.trim(),author:$('#projectAuthor').value.trim(),institution:$('#projectInstitution').value.trim(),startDate:$('#projectStartDate').value||isoToday(),crs:$('#projectCrs').value||'EPSG:25831',objective:$('#projectObjective').value.trim(),methodology:$('#projectMethodology').value.trim(),notes:$('#projectNotes').value.trim()};}
 async function saveProjectForm(){
-  const v=readProjectForm();if(!v.name){toast('Escribe un nombre para el proyecto');return;}
-  if(editingProjectId){const p=projectById(editingProjectId);if(!p||!canEditProjectInUi(p)||(p.id===state.projectId&&!canEditCurrentProject()))return;Object.assign(p,v,{updatedAt:Date.now()});saveProjectCatalog();if(state.projectId===p.id){state.project=p;updateProjectUi();}editingProjectId=null;if(projectCreateReturn==='map'){hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';updateProjectUi();resize();}else showProjectHome();toast('Información del proyecto actualizada');return;}
-  if(state.projectId)persistState();
-  const id='P'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);const meta={id,...v,createdAt:Date.now(),updatedAt:Date.now(),dbName:`GeoCauceDB_${id}`};projectCatalog.push(meta);saveProjectCatalog();localStorage.setItem(ACTIVE_PROJECT_KEY,id);editingProjectId=null;
-  state.projectId=id;state.project=meta;resetStateForProject(meta);persistState();await openProject(id,{skipSave:true});toast(`Proyecto “${meta.name}” creado`);
+  const v=readProjectForm();
+  if(!v.name){toast('Escribe un nombre para el proyecto');return;}
+  if(projectCreateSaveRunning)return;
+  if(editingProjectId){
+    const p=projectById(editingProjectId);
+    if(!p||!canEditProjectInUi(p)||(p.id===state.projectId&&!canEditCurrentProject()))return;
+    Object.assign(p,v,{updatedAt:Date.now()});
+    saveProjectCatalog();
+    if(state.projectId===p.id){state.project=p;updateProjectUi();}
+    editingProjectId=null;
+    if(projectCreateReturn==='map'){hideMainScreens();$('#mapScreen').classList.remove('hidden');state.screen='map';updateProjectUi();resize();}
+    else showProjectHome();
+    toast('Información del proyecto actualizada');
+    return;
+  }
+  projectCreateSaveRunning=true;
+  try{
+    // Preserve edits in the previously open project before switching context.
+    if(state.projectId && state.projectId!==pendingNewProjectId){
+      persistStateLocalOnly();
+      await projectStateFlush(state.projectId);
+    }
+    // Reuse an unconfirmed draft on retry, never create a second phantom catalog entry.
+    const id=pendingNewProjectId||('P'+Date.now().toString(36)+Math.random().toString(36).slice(2,6));
+    let meta=projectById(id);
+    if(!meta){
+      meta={id,...v,createdAt:Date.now(),updatedAt:Date.now(),dbName:'GeoCauceDB_'+id};
+      projectCatalog.push(meta);
+    }else Object.assign(meta,v,{updatedAt:Date.now()});
+    pendingNewProjectId=id;
+    meta._localSaveUnconfirmed=true;
+    saveProjectCatalog();
+    state.projectId=id;state.project=meta;
+    resetStateForProject(meta);
+    // Do not display success or open the project until IndexedDB commits AND verifies it.
+    const payload=persistStateLocalOnly();
+    if(!payload)throw Error('No se pudo preparar el estado local del proyecto');
+    await projectStateFlush(id);
+    const raw=projectStateStorage.getItem(projectStateKey(id));
+    if(!raw||(await projectStateReadRecord('states',id))?.raw!==raw){
+      throw Error('El guardado local no ha superado la verificación de lectura');
+    }
+    delete meta._localSaveUnconfirmed;
+    saveProjectCatalog();
+    pendingNewProjectId=null;
+    editingProjectId=null;
+    await openProject(id,{skipSave:true});
+    if(state.projectId===id&&state.screen==='map')toast('Proyecto “'+meta.name+'” creado');
+  }catch(e){
+    // Keep the pending catalog entry and in-memory state intact for emergency export.
+    console.error('Creación de proyecto: guardado no confirmado',e);
+    toast('⚠ Proyecto NO guardado. No cierres ni sincronices; exporta una copia si es posible. '+(e?.message||e),12000);
+  }finally{
+    projectCreateSaveRunning=false;
+  }
 }
 function resetStateForProject(meta=state.project){
   state.tool='pan';state.material='coarse';state.materialStyles={};state.mapInk=[];state.mapInkColor='#d73a49';state.mapInkWidth=4;state.mapInkMode='pen';state.mapPins=[];state.mapContextPoint=null;state.pendingPhotoLocation=null;state.historicalPhotoPoints=[];state.showHistoricalPhotoPoints=true;state.currentHistoricalPointId=null;state.pendingHistoricalPhotoPointId=null;state.pendingHistoricalPhotoMode=null;state.historicalLinkPointId=null;state.currentStopId=null;state.activeFieldStopId=null;state.stopCreationPending=false;state.sectionTool='pen';state.sectionMaterial='none';state.sectionColor='#1f2b31';state.sectionFillOpacity=.45;state.sectionMeasureTool='pen';state.sectionStraightSegments=true;state.sectionGeoClass='none';state.sectionZoneClass='channel';state.sectionZoneCustom='';state.campaign='D01';state.editableCampaign='D01';state.comparePrevious=false;state.compareOpacity=.35;state.view={cx:0,cy:0,scale:1,rotation:0};state.view3d={active:false,exaggeration:1};state.rasters=[];state.demGroups=[];state.activeDemGroupId=null;state.referenceLayers=[];state.vectorExtract=null;state.pendingImportedCourseFragments=null;state.features=[];state.selectedId=null;state.currentStroke=null;state.touches=new Map();state.pinch=null;state.panStart=null;state.pointerPan=null;state.gnss=null;state.currentSection=null;state.pendingPhotoFor=null;state.eraseMode='zone';state.eraseSize=38;state.autoPanAfterDraw=false;state.history=[];state.notebook={pages:[],currentPageId:null};state.notebookTool='pen';state.notebookPenColor=appSettings.notebookPenColor||'#1f2b31';state.notebookView={zoom:1,touches:new Map(),pinch:null,pan:null};state.notebookLinkTarget=null;state.activeCourseId=null;state.pendingCourseStroke=null;state.pendingCourseJoin=null;state.pendingReachStart=null;state.pendingReachBoundaryMove=null;state.editReachId=null;state.profileInkTool='pen';state.profileSheetZoom=1;state.profileSheetTouches=new Map();state.profileSheetGesture=null;state.currentProfileCourseId=null;state.currentReachSheetId=null;state.reachSheetZoom=1;state.reachSheetTouches=new Map();state.reachSheetGesture=null;state.reachSheetSchemeTool='pen';state.editCourseId=null;state.editContourFeatureId=null;state.longProfileReachStart=null;
@@ -2126,6 +2177,14 @@ async function openProject(id,opt={}){
   if((cloudRestoreRunning||cloudSyncRunning||cloudDeltaRunning)&&state.projectId&&id!==state.projectId){toast('Espera a que termine la sincronización antes de cambiar de proyecto');return;}
   if(state.view3d?.active)exit3DMode({quiet:true});
   const p=projectById(id);if(!p)return;
+  // A generated cloudProjectId does not prove that a snapshot exists remotely.
+  // Never try to restore an unconfirmed new local project as if it were backed up.
+  const hasLocalState=!!projectStateStorage.getItem(projectStateKey(id));
+  const verifiedCloudCopy=!!(p._cloudOnly||p._cloudSyncedAt||p._cloudPulledAt||p._cloudUpdatedAt||p._cloudCatalogUpdatedAt);
+  if((!hasLocalState||projectStateFailures.has(id))&&!verifiedCloudCopy){
+    toast('⚠ Este proyecto no tiene un guardado local confirmado ni una copia cloud conocida. No se sobrescribirán sus datos.',9000);
+    return;
+  }
   let role;
   try{role=await cloudProjectRole(p);}catch(e){toast('Acceso denegado: '+(e.message||String(e)),6000);return;}
   if(!window.GeoCauceProjectAccess.canView(role)){toast('No tienes acceso a este proyecto',5500);return;}
