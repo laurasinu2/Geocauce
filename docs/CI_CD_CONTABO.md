@@ -2,9 +2,9 @@
 
 Workflow: [Deploy Geocauce to Contabo (manual)](../.github/workflows/deploy-contabo.yml).
 
-**Rama de aplicación:** `r42-20261113-monorepo`.
+**Rama de aplicación:** `fix/r45-cloud-blob-mime-20261113`.
 **Disparador:** únicamente `workflow_dispatch` con confirmación explícita `DESPLEGAR`. No se despliega con `push` ni con `pull_request`.
-**Importante:** el archivo de registro del workflow también existe en `main` para que GitHub muestre `Run workflow`. El workflow rechaza cualquier rama distinta de R42. No se fusionan los archivos del frontend/backend en `main`.
+**Importante:** el archivo de registro del workflow también existe en `main` para que GitHub muestre `Run workflow`. El workflow rechaza cualquier rama distinta de R45. No se fusionan los archivos del frontend/backend en `main`.
 
 ## Preparación inicial del VPS (una sola vez)
 
@@ -75,7 +75,7 @@ No hace falta clonar el repositorio en Contabo: Actions sube la release verifica
 
 ## Configuración de GitHub
 
-Abre el repositorio → **Settings → Environments → New environment** y crea **`contabo-production`**. Se recomienda configurar revisión manual por un aprobador si las opciones del repositorio lo permiten y limitar el entorno a la rama `r42-20261113-monorepo`.
+Abre el repositorio → **Settings → Environments → New environment** y crea **`contabo-production`**. Se recomienda configurar revisión manual por un aprobador si las opciones del repositorio lo permiten y limitar el entorno a la rama `fix/r45-cloud-blob-mime-20261113`.
 
 En **Environment secrets** crea:
 
@@ -111,7 +111,7 @@ Nunca publiques ni envíes por chat el contenido de `CONTABO_SSH_PRIVATE_KEY`, `
 
 1. Entra en [GitHub Actions](https://github.com/laurasinu2/Geocauce/actions).
 2. Selecciona **Deploy Geocauce to Contabo (manual)**.
-3. Pulsa **Run workflow**, elige la rama **`r42-20261113-monorepo`** y la opción **`DESPLEGAR`**.
+3. Pulsa **Run workflow**, elige la rama **`fix/r45-cloud-blob-mime-20261113`** y la opción **`DESPLEGAR`**.
 4. Ejecuta y revisa las dos tareas: `verify` y `deploy`.
 
 Si seleccionas `main` o no confirmas, el workflow **falla antes de abrir conexión SSH**, por diseño. El workflow corre con `contents: read`, no modifica el repositorio y no crea ni borra usuarios de Supabase.
@@ -122,7 +122,7 @@ La fase `verify` comprueba:
 - Sintaxis JavaScript y test de autenticación del frontend.
 - Validez básica de Docker Compose.
 
-**No pasa aún la suite completa de frontend:** R42 tenía tests heredados fallando. La comprobación no significa que la sincronización con datos reales esté validada. No usar la nueva instalación para datos únicos hasta completar pruebas manuales.
+**No pasa aún la suite completa de frontend:** R45 tenía tests heredados fallando. La comprobación no significa que la sincronización con datos reales esté validada. No usar la nueva instalación para datos únicos hasta completar pruebas manuales.
 
 La fase `deploy`:
 1. Empaqueta únicamente el código necesario y lo transmite por SSH con clave de host verificada.
