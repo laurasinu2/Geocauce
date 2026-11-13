@@ -89,7 +89,7 @@ if docker volume inspect geocauce_postgres_data >/dev/null 2>&1; then
   [[ -s "$db_backup" ]] || die "PostgreSQL backup is empty."
   echo "Backing up the private file volume..."
   # The container needs root to read private blobs; make the encrypted-backup candidate
-  # private and owned by the deployment user after writing it.
+  # private (but still unencrypted) and owned by the deploy user after writing it.
   docker run --rm --network none \
     -v geocauce_files_data:/input:ro \
     -v "$ROOT/backups:/output" alpine:3.21 \
@@ -116,6 +116,6 @@ curl --noproxy "*" --resolve "$site:443:127.0.0.1" --fail --silent --show-error 
   grep -q 'window.location.origin' || die "Frontend is not configured for the local API."
 
 # Only mark as current after all smoke checks pass.
-ln -s "$RELEASE" "$ROOT/.current-next"
+ln -sfn "$RELEASE" "$ROOT/.current-next"
 mv -Tf "$ROOT/.current-next" "$ROOT/current"
 echo "Deployment successful: $url ($SHA)"
