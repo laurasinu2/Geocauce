@@ -1,0 +1,246 @@
+## R41 · Persistencia segura y sincronización (11/11/2026)
+
+Rama publicada en GitHub: `r41-20261111`, basada en la rama correctiva `fix/r40-indexeddb-state-safe-migration` creada a partir de `r40-20261111`.
+
+- El estado JSON de cada proyecto pasa de `localStorage` a IndexedDB (`GeoCauceProjectStateSafeV1`) para evitar el error de cuota de almacenamiento que bloqueaba la sincronización.
+- La migración preserva primero el JSON original en `states` y `migrationBackups`, verifica ambas copias y solo después libera la clave antigua; no elimina los archivos de mapas, fotos ni la cola de cambios.
+- La sincronización espera a que termine el guardado persistente antes de continuar. Las importaciones de puntos y fotos verifican también su escritura.
+- Actualizados los parámetros de versión de `app.js` y `photo-workspace.js` de `index.html`, y la caché `sw.js`, para que GitHub Pages y las PWA reciban el código R41 y no reutilicen los scripts antiguos.
+- Esta rama **no configura por sí sola GitHub Pages**. La rama que se publique se selecciona en `Settings → Pages` del repositorio.
+- **Pendiente de validar con datos reales** en ordenador y tablet. Antes de utilizar R41 con datos únicos, generar una copia `.geocauce`. No se modifica el esquema ni los archivos de Supabase.
+
+### R40 · rama de corrección del límite de almacenamiento (11/11/2026)
+
+Rama de prueba: `fix/r40-indexeddb-state-safe-migration`, derivada de `r40-20261111`. No se modifica `main`, R40 original ni Supabase.
+
+- El estado JSON de cada proyecto se almacena en IndexedDB `GeoCauceProjectStateSafeV1` (`states`) en vez de `localStorage`, cuyo límite pequeño provocaba `QuotaExceededError`.
+- En el primer arranque, se copia primero el JSON preexistente a `states` y a `migrationBackups`, se lee y verifica cada copia, y **solo entonces** se elimina la clave JSON antigua de `localStorage`. Las fotos, mapas, teselas y colas de sincronización existentes no se eliminan.
+- Si la migración no puede verificarse se detiene, conserva la clave original y bloquea el cambio de proyecto/sincronización. Si una versión antigua del programa recrea una copia divergente, ambas versiones se conservan y no se selecciona una automáticamente.
+- Los guardados frecuentes se agrupan para escribir la revisión más reciente; las subidas, descargas y cambios de proyecto esperan la confirmación de IndexedDB. La importación de puntos y fotografías espera asimismo la verificación del guardado.
+- La copia de migración permanece en `migrationBackups` sin eliminación automática. La recuperación cloud de R40 sigue funcionando independientemente en su almacén de recuperación.
+- Precaución: la rama ha superado comprobaciones de sintaxis, pero todavía **no se ha probado** con el navegador y los datos reales de dos dispositivos. Antes de usarla con datos irreemplazables, exporta una copia completa `.geocauce` y conserva R40 como retorno seguro.
+
+Nota de seguretat R40 (11/11/2026): els binaris locals en col·lisió es guarden a l'IndexedDB persistent `cloudSyncBase` amb clau `assetConflict:<tipus>:<id>`, independent del magatzem de recuperació rotatiu `cloudRecovery`. Les revisions anteriors de blobs cloud no s'eliminen automàticament mentre hi hagi un snapshot de recuperació de conflictes. La cua offline es manté i la descàrrega segueix verificant mides. La resolució automàtica dels conflictes heretats es fa únicament després de guardar les dues versions estructurades, sense demanar decisions repetitives.
+
+### R40 · fusió automàtica de conflictes heretats (11/11/2026)
+
+Resolució per camps amb timestamps vàlids. Les modificacions locals en cua amb data posterior a l'últim snapshot de la nube continuen prioritzant-se. Per diferències antigues sense rellotges comparables, es fa una còpia recuperable de tots dos snapshots abans d'aplicar la versió cloud, sense obrir repetidament la pantalla de 48 diferències. La geometria `points` i la caché `mdeStats` es mantenen coherents, sense barrejar estadístiques d'una geometria diferent. Les capes ràster/vectorials i fotografies que semblen editades en tots dos dispositius ja no llancen un error només per tenir un manifest base absent: es protegeix el binari local complet a IndexedDB abans d'adoptar la còpia remota, o es prioritza la modificació local feta amb posterioritat al snapshot remot. Les eliminacions locals explícites es respecten. Els blobs cloud antics no es netegen automàticament mentre existeixin snapshots de recuperació. `main` i l'esquema de Supabase no s'han tocat. Proves unitàries de fusió i sintaxi completades; cal confirmar el comportament amb dades reals i dispositius vinculats. Els backups locals d'arxius en conflicte queden a `cloudRecovery` sota `assetConflict:<tipus>:<id>`.
+
+### R40 · reparació de FITXA III i descàrrega cloud (11/11/2026)
+
+S'ha comparat `r40-20261111` amb `r39-20261108`: en afegir permisos de consulta es van introduir dos `querySelector(...).forEach(...)` que llançaven TypeError, tant en obrir FITXA III com en inicialitzar els botons de secció. Ambdós s'han substituït per `querySelectorAll`, recuperant les pestanyes i els controls sense alterar les fitxes guardades ni la navegació del mapa.
+
+S'ha corregit que la descàrrega manual no permetés recuperar fitxers absents si la data remota coincidia amb la coneguda localment. La reparació ara comprova també la presència dels binaris. La sincronització de lectura pot descarregar còpies cloud completes mitjançant el mecanisme de staging, verificació i recuperació existent, sense autoritzar pujades o edicions; si hi ha canvis locals a la cua, s'atura per protegir-los. Les fotos grans dividides en parts es descarreguen amb totes les rutes del manifest. Canvis exclusius a R40; `main` i el model de Supabase no s'han modificat. Revisió estàtica i sintaxi superades; proves amb dos dispositius i dades reals pendents.
+
+### R40 · correcció de la interacció del mapa (11/11/2026)
+
+Els controls de moviment i selecció del mapa s'instal·len ara a l'inici de `initUi`, independentment dels nombrosos controladors dels diàlegs: una fallada en la inicialització d'un control secundari no pot deixar el mapa sense escoltadors. Es garanteix una sola instal·lació per evitar gestos duplicats. La selecció en el mapa amb `Ctrl + clic` / `Cmd + clic` funciona sense canviar l'eina. En ordinador, amb l'eina «Seleccionar» activa, un clic selecciona i un arrossegament mou el mapa; així la navegació i selecció funcionen conjuntament. Es mantenen els gestos tàctils preexistents, la geometria i les fitxes. Actualitzada la caché PWA. Sintaxi comprovada; prova funcional al navegador de l'usuari pendent.
+
+## R40 · mesures de secció per visualitzadors i selecció Ctrl+clic (11/11/2026)
+
+Branca creada a partir de `r39-20261108`. Els usuaris de només lectura poden activar les eines «Mesura» (distància/amplada) i «Alçada» a FITXA III, i també «Seleccionar». Les mesures noves dels visualitzadors es representen temporalment sobre el llenç i no modifiquen les fitxes, ni la geometria, ni la base de dades, ni les dades de Supabase. Els editors continuen desant mesures com abans. L'escala vertical per defecte de la secció és «Real (1:1)», també quan s'obre una secció amb la configuració anterior ×1. Amb qualsevol eina activa de la secció, `Ctrl + clic` (o `Cmd + clic` en Mac) selecciona un element sense canviar d'eina ni iniciar cap traç. Es preserva la prohibició d'editar, esborrar o desar per a visualitzadors. Actualitzada la caché PWA. Prova de sintaxi superada; verificació de gestos i permisos amb usuaris reals pendent.
+
+### Correcció R39 · recuperació de mapes en altres dispositius (09/11/2026)
+
+La sincronització incremental descarregava fotos i fitxes però no hidratava els ràsters (GeoTIFF/MDT) ni les capes vectorials (SHP) al dispositiu receptor. Ara comprova el manifest d'assets de Supabase, descarrega i verifica els arxius cartogràfics absents abans de guardar-los a IndexedDB, i recarrega les capes després d'aplicar l'estat fusionat. No se suprimeixen els mapes locals en aquesta operació; les baixades fallides mantenen intactes els registres ja existents. El camí ràpid «sense canvis» també comprova la presència dels arxius locals abans d'ometre la descàrrega. La línia de base conserva el manifest de fitxers de la darrera revisió. Abans de pujar, si el dispositiu no té una capa del manifest remot i no existeix una eliminació explícita pendent, s'atura la pujada en lloc d'eliminar-la de la nube. Sense canvi d'esquema de Supabase ni canvis a `main`. La sintaxi JS està comprovada; la descàrrega efectiva en un ordinador amb dades reals continua pendent de validació.
+
+## R39 · sincronització per revisió i perfils regenerats (08/11/2026)
+
+Branca derivada de `r38-20261104` sense modificar `main` ni l'esquema de Supabase. Conserva la cua offline i els timestamps per camp ja existents. Quan tots dos dispositius han regenerat un perfil longitudinal amb dates de generació vàlides, es pren conjuntament la versió més recent de les dades derivades (signatura, generació, mostres, trams, etc.) i es fusionen independentment les anotacions manuals i opcions del perfil. Això evita que una regeneració del perfil bloquegi la sincronització amb múltiples conflictes de metadades. Els canvis reals simultanis sense una data fiable continuen requerint revisió, sense descartaments silenciosos.
+
+Quan existeix una revisió remota posterior a la coneguda localment i aquest dispositiu no té modificacions pendents, s'ofereix un diàleg d'actualització en la sincronització automàtica. Si s'ajorna, la mateixa revisió no es tornarà a oferir fins que es torni a obrir el projecte. Amb modificacions offline pendents continua funcionant la fusió bidireccional: mai es dona prioritat global a la nube per la seva data de pujada. Les dades es protegeixen amb el mecanisme preexistent de recuperació abans d'aplicar una fusió, i es manté l'actualització incremental. Actualitzades les versions d'assets i la caché PWA. Cal validar la sincronització multidispositiu real i els permisos.
+
+## R38 · alternança de taronges als trams (04/11/2026)
+
+Branca derivada de `r37-20261103`. Els trams consecutius d'un mateix curs alternen automàticament taronja intens (`#d58425`) i taronja clar (`#f4ac61`) segons l'ordre de `orderedCourseReaches`. S'aplica al mapa i a les exportacions cartogràfiques que representen els trams. Els colors personalitzats explícits es respecten. Canvi exclusivament visual, sense alterar geometries, IDs, codis, fitxes, dades persistides ni Supabase. Prova funcional en dispositiu pendent.
+
+## R37 · interfície mòbil i gestos naturals (03/11/2026)
+
+Branca derivada de `r36-20261103`, sense modificar `main` ni Supabase. En la interfície mòbil simplificada (fins a 820 px), un toc amb **un dit** selecciona elements del mapa sense haver d'activar «Seleccionar»; amb **dos dits** es mou, amplia, redueix i gira el mapa. Arrossegar un únic dit no desplaça ni modifica les geometries. El llapis i el comportament d'escriptori/tauleta queden preservats. En el mode de col·locació explícita, un toc situa una parada o un punt fotogràfic i es torna a «Seleccionar». La creació GPS continua utilitzant la posició del dispositiu.
+
+S'ha corregit el controlador del panell «Nova observació»: abans `querySelector` només intentava connectar el primer botó; ara es connecten tots els controls amb `querySelectorAll`. Les accions visibles són GPS, Foto, Fotografia, Crear parada, Capes i Importar. El selector de fotografies s'obre directament sense requerir un segon toc; el projecte es carrega abans de presentar el panell. Els controls de campanyes i capes de la pantalla mòbil deixen de simular interruptors sense acció i permeten obrir els panells reals. Els panells i formularis recuperen el desplaçament tàctil, mentre que el llenç del mapa conserva els gestos personalitzats. S'han renovat les referències d'assets i la memòria cau offline de la PWA.
+
+Comprovacions de codi: sintaxi JavaScript, simulació de selecció amb un dit i zoom amb dos dits, i revisió dels elements i enllaços de la interfície. **Calen proves funcionals en un mòbil Android real**, especialment permisos GPS/càmera, desplaçament tàctil dels formularis i sincronització; la branca no s'ha provat en un dispositiu físic.
+
+### Prefix general des de la FITXA I (03/11/2026)
+
+A FITXA I s'ha afegit «Editar prefix general», també disponible a «Més opcions» quan es selecciona el curs. Des d'aquí es modifica el prefix de tots els trams associats al mateix curs en una sola operació, amb una vista prèvia del canvi abans de guardar. Per exemple, TSJA-3, TSJA-5 i TSJA-7 esdevenen TSJB-3, TSJB-5 i TSJB-7. Es conserven els sufixos numèrics, els IDs interns, les geometries i totes les fitxes. Tots els codis, inclosos els prèviament personalitzats, reben el nou prefix i queden protegits contra renumeracions involuntàries. Si hi ha sufixos numèrics duplicats o algun codi no té format prefix-número, s'atura l'operació sense fer canvis. Les seccions mostren la nova denominació a través de la relació existent amb els trams. No cal SQL ni cap canvi de Supabase. Sintaxi i casos de prova de codis comprovats; validació tàctil final en PWA pendent.
+
+### Ajust de l'editor de trams: prefix independent (03/11/2026)
+
+A «Més opcions → Editar nom i codi», els trams mostren ara el camp editable «Prefix del tram» (p. ex. TSJA) i el sufix numèric actual (p. ex. -3) separat i de només lectura. En guardar el prefix, es manté el mateix número, es comprova que el codi complet sigui únic dins del curs i es protegeix com a personalitzat davant de renumeracions posteriors. El nom descriptiu no és necessari ni es modifica en aquesta operació. L'editor del curs manté els seus camps de nom i abreviatura. Les fitxes de les seccions vinculades continuen consultant el codi visible del tram per ID; no s'alteren ni les geometries ni les dades. Sense canvis a Supabase.
+
+### Edició manual de noms i codis (03/11/2026)
+
+A la targeta de cada curs o tram, dins de «Més opcions», hi ha «Editar nom i codi». Permet canviar el nom del curs, la seva abreviatura, el codi visible del tram i el nom descriptiu del tram. Els trams poden tenir codi automàtic o personalitzat; els personalitzats no es renumeren quan canvien els límits, l'ordre o l'abreviatura del curs. Els codis automàtics eviten col·lisions amb els manuals. L'usuari pot tornar al mode automàtic. Els noms s'actualitzen a mapes, fitxes, llistes i informes mitjançant els IDs interns estables. Les fitxes i la geometria no es modifiquen, i les dades es guarden amb el sistema de sincronització existent. No cal SQL de Supabase. Proves sintàctiques i de numeració superades; proves de PWA al dispositiu pendents.
+
+### Correcció r36: vinculacions antigues i selecció explícita (03/11/2026)
+
+La comprovació de seccions també s'executa en obrir projectes editables i en consultar la fitxa o targeta d'una secció. Es prioritza el punt d'intersecció original (anchorPoint) en lloc del centre geomètric de la secció quan hi ha múltiples interseccions. A la fitxa III, al costat de «Nom tram», es pot seleccionar explícitament el tram correcte, per exemple TSJ2-5. Aquesta correcció manual es conserva mentre la geometria del tram no canviï. Si canvia, es torna a calcular la relació. No es mou cap secció ni es modifica el seu perfil, contingut o geometria. Si no hi ha intersecció real, no s'inventa una vinculació per proximitat. Codi validat sintàcticament; prova funcional amb dades reals pendent.
+
+## R36 (03/11/2026): reassociacio de seccions
+
+Quan es modifiquen els trams, les seccions mantenen totes les seves coordenades i geometries originals. Es recalcula exclusivament la relacio amb el tram intersectat, sense alterar perfils, fitxes o anotacions. Sense canvis a Supabase. Pendent de prova funcional en PWA.
+
+### Correcció de creació manual (03/11/2026)
+
+La creació de punts manuals es fa amb un formulari integrat a «Importar elements», sense diàlegs `prompt()` del navegador. Inclou nom, camps X/Y ETRS89 UTM31N, selecció sobre la vista prèvia, validació i un botó explícit «Guardar punto». Després de guardar, el marcador queda a les dades del projecte i es mostra a la vista prèvia; les seves files de vista prèvia no s'importen de nou. Els punts fotogràfics poden tenir zero fotografies, i s'hi poden afegir posteriorment. Tota la correcció s'ha aplicat a la mateixa branca r35; no s'han creat branques noves ni cal SQL a Supabase. Sintaxi comprovada; prova tàctil real pendent.
+
+## R35 · puntos manuales sin importar archivos (03/11/2026)
+
+El importador permite crear directamente puntos GPS o puntos fotográficos vacíos sin cargar CSV, GPX, KML ni imágenes. En la pestaña Fotografías, «Crear punto fotográfico sin foto» guarda un punto con `photos: []`, para añadir imágenes después desde su marcador. En Puntos, «Crear punto manualmente» añade un marcador GPS normal. El usuario introduce nombre y posición ETRS89 / UTM 31N (EPSG:25831) en X, Y, o deja vacío el campo y toca la vista previa del mapa. Se guardan en el proyecto/campaña mediante la persistencia local existente y se programan para la sincronización habitual. No hay cambios en SQL ni en Supabase. Sintaxis validada; pruebas reales PWA pendientes.
+
+## R34 · copiar coordenadas UTM31N desde el mapa (03/11/2026)
+
+En el menú **Eines / Herramientas** se añade «Copiar coordenadas (UTM 31N)». Al tocar el mapa, la aplicación copia la ubicación como `X, Y` con dos decimales, en metros y en **ETRS89 / UTM zona 31N (EPSG:25831)**. Utiliza las coordenadas reales del mapa y transforma automáticamente desde otro CRS compatible (UTM o coordenadas geográficas) al EPSG:25831. La herramienta permanece activa para copiar varios puntos, funciona en modo táctil y lápiz, y no modifica geometrías ni datos. Para navegadores sin permiso de portapapeles incluye un método alternativo y, si este también falla, muestra los valores para copiarlos manualmente. No requiere Supabase ni migraciones. Pendiente de prueba funcional sobre dispositivos reales.
+
+## R33 · cauces y tramos en primer plano (30/10/2026)
+
+Los cauces, tramos, secciones y canales se dibujan encima de anotaciones, fotografías y otras geometrías del usuario, sin cambiar el orden guardado de datos. Para seleccionar se prioriza el toque próximo (9 píxeles) al trazado hidrográfico, con prioridad de tramos sobre secciones, cauces y canales; el interior de un polígono sigue sin bloquear un cauce. Fuera de esa distancia, fotografías, paradas y notas se pueden tocar como antes. No requiere SQL ni cambios en Supabase. Se ha validado la sintaxis JavaScript; pendiente de prueba visual/táctil en PWA.
+
+## R32 · reparación de fotografías repetidas sin punto (30/10/2026)
+
+Las fotografías anteriores que carecen de huella SHA-256 almacenada ahora pueden localizarse mediante el hash del archivo binario. Al verificar de nuevo una foto repetida, si tiene coordenadas y el punto fotográfico falta o carece de coordenadas, el marcador se reconstruye sin duplicar el archivo ni desplazar los puntos válidos. Las fotografías sin coordenadas requieren asignarlas con el botón del lápiz y repetir la verificación. La capa de puntos fotográficos debe estar visible. No hay cambios SQL ni migraciones destructivas. Validación de sintaxis completada; pruebas en PWA real pendientes.
+
+## R31 · recuperación de fotografías duplicadas sin marcador (30/10/2026)
+
+El importador de fotografías recupera la posición cartográfica cuando una fotografía R29 con SHA-256 idéntico ya existe en IndexedDB pero no tiene punto asociado por una subida interrumpida. Al reimportar el archivo original, se reutiliza el registro y se recupera el marcador con la posición guardada o con las coordenadas de la nueva importación, sin duplicar el binario ni desplazar puntos válidos. Si el original no tiene coordenadas, es necesario introducirlas manualmente. Respeta el interruptor de visibilidad de puntos fotográficos. No precisa cambios en Supabase. Pendiente de validación funcional con datos reales.
+
+## R30 · corrección de perfiles MDE/LiDAR (30/10/2026)
+
+- Se recalculan perfiles de secciones, tramos y cauces cuando un cálculo anterior carece de elevaciones válidas; no se reutilizan resultados vacíos como si fueran correctos.
+- El muestreo descarta fuentes GeoTIFF originales ausentes y devuelve un error explícito si ninguna fuente está disponible.
+- La caché de secciones tiene en cuenta la geometría y el tamaño del raster original; la de perfiles longitudinales y estadísticas también comprueba la disponibilidad del original.
+- Se conserva la edición manual de perfiles y las correcciones existentes. No requiere migraciones SQL ni cambios en Supabase.
+- Pendiente de prueba funcional con archivos GeoTIFF reales en PWA móvil/tablet.
+
+# Convención de versiones y ramas de GeoCauce
+
+**Norma de desarrollo desde el 29/10/2026:** cada rama nueva representa una versión nueva y su nombre debe incluir **solamente el número de revisión y la fecha de creación**, con el formato `rNN-AAAAMMDD`, por ejemplo `r29-20261029`, `r30-20261030`. No utilizar prefijos `feature/`, `backup/` ni sufijos descriptivos en las ramas nuevas. Incrementar `NN` en cada rama creada, aunque el trabajo sea una continuación de la versión anterior. Consultar las ramas existentes antes de asignar el siguiente número.
+
+La rama histórica `backup/r28-copia-20261027` permanece como referencia funcional sin modificar. La rama `r29-20261029` se creó desde el trabajo inicial de fotografías unificadas y es el desarrollo activo. Mantener `main` intacta salvo petición expresa. Los nombres anteriores se conservan por compatibilidad histórica; esta norma se aplica a las nuevas ramas.
+
+**Plataforma principal de desarrollo y pruebas:** PWA (navegador e instalación como aplicación, principalmente Android). No exigir una app nativa ni conexión a Supabase para las funciones locales. Reutilizar IndexedDB, el almacenamiento binario y la cola incremental de sincronización existentes. Los datos de prueba sintéticos son suficientes para desarrollar e iniciar pruebas; fotografías reales y copias de proyectos son opcionales para validar compatibilidad con cámaras y proyectos concretos, no requisitos para empezar.
+
+---
+### R29 · Mover cualquier elemento cartográfico creado
+
+En la versión `r29-20261029`, la herramienta **Mover elemento a otro punto** permite seleccionar un marcador, fotografía, punto fotográfico, parada, punto GPS importado, nota georreferenciada, anotación dibujada, sección, tramo, cauce o polígono; tocar un nuevo lugar del mapa y confirmar el anclaje. La posición y las coordenadas almacenadas se actualizan sin alterar los archivos originales. También hay botones **Mover** en fichas de fotos, paradas y geometrías.
+
+Los puntos y fotografías con ubicación original GNSS conservan ese origen documental, aunque la ubicación vigente pase a ser **manual-map**. Mover una fotografía individual no arrastra las otras de su punto; mover un punto fotográfico con varias fotos mueve todo el grupo. Mover una parada no arrastra fotografías vinculadas. Mover un tramo desplaza con él su cauce y secciones relacionadas, sin deformar su geometría. Se requiere permiso de edición de la campaña y confirmación antes de guardar.
+
+**Límites:** no modifica la georreferenciación de mapas GeoTIFF ni la geometría original de capas SHP de referencia; estas capas externas no son anotaciones creadas por el usuario. La comprobación física en PWA Android sigue pendiente. No exige SQL ni migraciones en Supabase.
+
+
+## R29 · Fotos unificadas e importador georreferenciado (29/10/2026)
+
+La rama `r29-20261029` incorpora un importador PWA de fotografías JPEG por lotes, lectura EXIF por archivo, previsualización en mapa, puntos CSV/GPX/KML/GeoJSON, SHA-256, galería unificada, correcciones manuales y recuperación frente a fallos. Conserva IndexedDB y el sistema de sincronización incremental existente; no necesita SQL en Supabase para estos cambios. Es una versión de desarrollo pendiente de validación táctil y sincronización real entre dispositivos. Detalles y protocolo de pruebas: [Plan R29](R28_FOTOGRAFIAS_UNIFICADAS_PLAN.md).
+
+## v0.16.38 · punts fotogràfics històrics i selecció SHP directa
+
+Punts fotogràfics amb sèrie temporal i control de visibilitat, més selecció successiva de geometries SHP directament sobre el mapa.
+
+# GeoCauce web assets v0.16.38
+## v0.16.32 · anotacions de mapa i zoom de seccions
+- Capa independent d’anotacions lliures sobre el mapa, amb paleta, color personalitzat, gruix, goma i desfer.
+- Zoom tàctil horitzontal de les seccions amb escala visible dinàmica i botó de vista completa.
+- Referències de conques, cursos/canals i SHP sobre la secció amb punts del color cartogràfic; les etiquetes apareixen en fer zoom i mantenen mida de pantalla.
+
+
+## v0.16.30 · SHP lleuger
+
+Capes SHP grans amb render transparent precalculat, descàrrega de RAM en ocultar-les i conversió de cursos mitjançant ruta per múltiples punts connectats.
+
+
+## v0.16.30 · editor MDT / GeoTIFF
+- Pseudocolor real, classificació (continu, interval igual, quantil), intervals editables i rampes visuals.
+- El render final continua pre-generant teseles per no recalcular simbologia mentre es navega.
+
+## v0.16.28
+- Simbologia vectorial SHP avançada amb editor de línia, polígon i punt.
+- Color avançat: HEX, RGB, HSV, opacitat i paleta.
+- Amplada, unitats, desplaçament, patró de línia, caps/unions, relleno i forma de punts.
+- Estil persistent i respectat a l'exportació.
+- Manté les correccions de modal raster, FITXA III manuscrita i perfils ×1 de la versió anterior.
+
+
+## v0.16.25 · QA
+- S Pen hover/imant corregit a FITXA III.
+- Goma parcial corregida.
+- FIC de FITXA III sense valors implícits.
+- Exportació FITXA III en Esquema, Taula de camp i FIC.
+- CRS dinàmic a FITXA I.
+
+## v0.16.19 · correccions FITXA II
+- Restabliment MDE per tram corregit.
+- FITXA II reduïda a dues pàgines: perfil + FIC.
+- Selectors FIC compatibles amb toc de dit.
+
+# GeoCauce web assets v0.16.18
+
+## Color de capes vectorials
+- Selector de color abans d'importar SHP/ZIP.
+- Color independent i editable després d'importar.
+- El color es conserva al projecte i s'utilitza també a l'exportació.
+
+
+Aquesta versió afegeix ordenació espacial dels fragments desconnectats al perfil longitudinal, representació del buit cartogràfic amb distància aproximada, redefinició de trams per superposició i moviment de límits compartits. Les etiquetes de tram es dibuixen al centre longitudinal real.
+
+V0.11 consolida la PWA antes de cerrar las fichas geológicas y el modelo definitivo de base de datos.
+
+## Novedades
+
+- Nuevo logo de GeoCauce en la portada y nuevos iconos PWA basados en la marca facilitada.
+- Pulido visual general: tamaños máximos coherentes para iconos, botones y textos; menos desbordamientos en tablet; controles de sección más compactos.
+- **Copia completa de proyecto** en un único archivo `.geocauce` desde `Proyecto > Guardar copia completa`.
+  - Incluye metadatos, campañas, geometrías, libreta, secciones, mapas guardados y fotografías.
+  - Los mapas/fotos se guardan como blobs binarios, sin convertirlos a base64.
+- **Importar proyecto** desde `Mis proyectos` o desde el panel del proyecto.
+- **Galería de fotografías por elemento**: ver fotos, fecha, precisión GNSS/dirección cuando está disponible, añadir y eliminar.
+- Fotografías nuevas guardan campaña y una instantánea de la posición GNSS disponible en ese momento.
+- **GNSS mejorado**: precisión, UTM, lat/lon, altitud disponible, hora y dirección cuando el navegador la proporciona. El badge cambia según calidad aproximada.
+- **Buscador** de IDs, materiales, canales, secciones y páginas de libreta.
+- **Leyenda automática** basada en los materiales realmente utilizados en la campaña actual.
+- Se conserva todo lo anterior: proyectos, campañas inmutables, libreta, GeoTIFF, edición de contornos, secciones rectas e inteligentes, etc.
+
+## Sobre SQLite
+
+La PWA sigue usando `localStorage + IndexedDB` porque funciona directamente en navegador y permite iterar muy rápido. Para la APK está previsto migrar el modelo definitivo a **SQLite** (idealmente una capa nativa/Room o equivalente) una vez cerremos las fichas, las operaciones geométricas y el esquema `Project > Campaign > Feature > FeatureVersion`. Los GeoTIFF y fotografías grandes seguirán como archivos; SQLite guardará metadatos, relaciones, geometrías y rutas, evitando inflar la base de datos.
+
+## Ejecutar
+
+```bash
+python -m http.server 8080
+```
+
+Después abre `http://localhost:8080`.
+
+## PWA / caché
+
+La caché de esta versión es `geocauce-v0.16.18`. Si aparece una interfaz anterior, realiza una recarga forzada o elimina una vez los datos del sitio.
+
+## Nota sobre GNSS
+
+La API web estándar no entrega número de satélites ni observaciones GNSS crudas. GeoCauce V0.11 muestra solo datos reales que el navegador expone. En la futura APK se podrá acceder a Android GNSS para añadir satélites/calidad avanzada y receptores externos.
+
+## v0.16.8 · correcciones de tablet
+
+- Exportación FITXA I por bloques hacia el bridge nativo.
+- Targeta universal más compacta y arrastrable.
+- Conca seleccionable solo sobre el contorno.
+- Tipografía de interfaz sans-serif.
+- Snapshot cloud con metadatos de assets y preferencias, sin binarios de fotos/GeoTIFF.
+
+
+## v0.16.8 · importació SHP des de ZIP
+
+- El selector de capes vectorials accepta ara `.zip` directament.
+- El ZIP pot contenir el SHP a l’arrel o dins d’una carpeta.
+- GeoCauce detecta automàticament els fitxers companys `.shp`, `.dbf`, `.shx`, `.prj`, `.cpg` i `.qmd`.
+- Provada l’estructura esperada amb `Drenatges.zip` i `conques hidro.zip`; tots dos utilitzen ETRS89 / UTM 31N i el segon porta els fitxers dins d’una subcarpeta.
+- Continua sent possible seleccionar els fitxers SHP solts si es prefereix.
+
+## v0.16.36 · parades i punts històrics
+- Eliminació de punts de parada i punts fotogràfics històrics.
+- Vinculació magnètica d’un punt històric a una parada tocant-la al mapa.
+- La vinculació encaixa el punt històric exactament sobre la parada i queda persistent al projecte.
