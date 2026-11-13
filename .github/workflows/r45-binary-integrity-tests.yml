@@ -1,0 +1,41 @@
+name: R45 self-hosted cloud binary integrity
+on:
+  push:
+    branches: [fix/r45-cloud-blob-mime-20261113]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frontend-integrity:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check JavaScript syntax
+        run: |
+          node --check frontend/app.js
+          node --check frontend/sw.js
+      - name: Verify binary download integrity and earlier sync fixes
+        run: node --test frontend/tests/selfhosted-blob-integrity.test.cjs frontend/tests/first-selfhosted-sync.test.cjs frontend/tests/project-create-save.test.cjs
+  backend-api:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-test.txt
+        working-directory: backend
+      - run: PYTHONPATH=. pytest -q tests
+        working-directory: backend
+  docker-compose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet
+        env:
+          SITE_ADDRESS: geocauce.example.org
+          POSTGRES_PASSWORD: ci-placeholder
+          JWT_SECRET: ci-placeholder
