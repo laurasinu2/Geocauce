@@ -1,0 +1,38 @@
+name: R44 first self-hosted synchronization regression
+on:
+  push:
+    branches: [fix/r44-first-cloud-sync-20261113]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frontend-sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check frontend/app.js
+      - run: node --check frontend/sw.js
+      - run: node --test frontend/tests/first-selfhosted-sync.test.cjs frontend/tests/project-create-save.test.cjs
+  backend-sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-test.txt
+        working-directory: backend
+      - run: PYTHONPATH=. pytest -q tests
+        working-directory: backend
+  compose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config -q
+        env:
+          SITE_ADDRESS: geocauce.example.org
+          POSTGRES_PASSWORD: placeholder
+          JWT_SECRET: placeholder-ci
