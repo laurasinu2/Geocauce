@@ -121,10 +121,38 @@ docker compose --env-file "$ROOT/.env" -f "$RELEASE/compose.yaml" config --quiet
 
 [[ "$site" =~ ^[a-zA-Z0-9.-]+$ ]] || die "SITE_ADDRESS must be a public DNS hostname."
 
+# Recover a first installation that started healthy Compose containers but
+# failed only the final HTTPS smoke check, leaving volumes without /current.
+# The container labels must prove that every service belongs to the existing
+# Geocauce release. Never adopt arbitrary volumes or replace their credentials.
+if [[ -z "$PREVIOUS" ]] &&
+   docker volume inspect geocauce_postgres_data >/dev/null 2>&1; then
+  echo "Found persistent PostgreSQL data without a finalized /current release."
+  for service in db api web; do
+    container="geocauce-$service-1"
+    identity="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}:{{index .Config.Labels "com.docker.compose.service"}}:{{.State.Running}}:{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container" 2>/dev/null || true)"
+    [[ "$identity" == "geocauce:$service:true:healthy" ]] ||
+      die "Existing data is present but $container is not a healthy Geocauce service. Manual recovery required."
+  done
+  previous_compose="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' geocauce-db-1)"
+  [[ "$previous_compose" =~ ^/opt/geocauce/releases/[0-9a-f]{40}/compose\.yaml$ ]] ||
+    die "Cannot verify the Compose file of the existing containers. Manual recovery required."
+  [[ -f "$previous_compose" ]] ||
+    die "The previous Compose file is missing. Manual recovery required."
+  for service in db api web; do
+    container="geocauce-$service-1"
+    container_compose="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$container")"
+    [[ "$container_compose" == "$previous_compose" ]] ||
+      die "Existing containers came from different releases. Manual recovery required."
+  done
+  PREVIOUS="${previous_compose%/compose.yaml}"
+  echo "Verified healthy interrupted initial installation; backing up before retry."
+fi
+
 # Backups are mandatory whenever an existing database volume is found.
 if docker volume inspect geocauce_postgres_data >/dev/null 2>&1; then
   [[ -n "$PREVIOUS" ]] ||
-    die "Persistent data exists without a previous release. No automatic overwrite allowed."
+    die "Persistent data exists without a verified previous release. No automatic overwrite allowed."
   docker volume inspect geocauce_files_data >/dev/null ||
     die "The private-file volume is missing. Deployment halted."
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -154,11 +182,15 @@ docker compose --env-file "$ROOT/.env" -f "$RELEASE/compose.yaml" \
   up -d --build --wait --wait-timeout 180
 
 url="https://$site"
-echo "Checking API and frontend through HTTPS..."
-curl --noproxy "*" --resolve "$site:443:127.0.0.1" --fail --silent --show-error --retry 10 --retry-delay 3 \
-  --retry-connrefused --max-time 15 "$url/health" >/dev/null
-curl --noproxy "*" --resolve "$site:443:127.0.0.1" --fail --silent --show-error --retry 5 --retry-delay 3 \
-  --retry-connrefused --max-time 15 "$url/" >/dev/null
+echo "Checking API and frontend through HTTPS (allowing Caddy time to issue TLS certificate)..."
+# Caddy's container becomes healthy before an ACME certificate is necessarily
+# available. Retrying only connection-refused does not catch TLS error 35.
+curl --noproxy "*" --resolve "$site:443:127.0.0.1" --fail --silent --show-error \
+  --retry 15 --retry-all-errors --retry-delay 3 --connect-timeout 5 --max-time 15 \
+  "$url/health" >/dev/null
+curl --noproxy "*" --resolve "$site:443:127.0.0.1" --fail --silent --show-error \
+  --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 5 --max-time 15 \
+  "$url/" >/dev/null
 curl --noproxy "*" --resolve "$site:443:127.0.0.1" --fail --silent --show-error --max-time 15 "$url/supabase-config.js" |
   grep -q 'window.location.origin' || die "Frontend is not configured for the local API."
 
