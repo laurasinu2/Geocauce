@@ -20,7 +20,7 @@ de sesión de la PWA.
 
 Para inspeccionar el nombre de la variable sin revelar su valor:
 ```bash
-grep '^POSTGRES_PASSWORD=' /opt/geocauce/.env | cut -d= -f1
+test -f /opt/geocauce/db-password && echo 'El archivo privado de contraseña existe'
 ```
 Para leer el secreto, abre el archivo de manera privada en el VPS; no
 lo pegues en terminales compartidas, capturas, issues o GitHub.
@@ -54,7 +54,7 @@ En el formulario de Adminer:
 - **System:** PostgreSQL
 - **Server:** `db` (hostname dentro de la red Docker)
 - **Username:** valor de `POSTGRES_USER` en `/opt/geocauce/.env`
-- **Password:** valor de `POSTGRES_PASSWORD` en el `.env` privado del VPS
+- **Password:** valor del secret de GitHub `DB_PASSWORD` (sin compartirlo)
 - **Database:** `geocauce`
 
 Adminer no tiene una contraseña de administrador independiente en esta
