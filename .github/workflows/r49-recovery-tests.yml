@@ -48,6 +48,17 @@ jobs:
           assert 'Verified healthy interrupted initial installation' in deploy
           assert 'Backing up PostgreSQL before deployment' in deploy
           assert 'docker volume rm' not in deploy
+          # R49 DB credentials must be provided by repository secrets, never regenerated
+          # for a pre-existing volume or sent in an SSH command argument.
+          assert 'secrets.DB_USERNAME' in raw
+          assert 'secrets.DB_PASSWORD' in raw
+          assert 'db-credentials-' in raw
+          assert 'POSTGRES_USER: ${POSTGRES_USER:' in compose
+          assert 'POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:' in compose
+          assert 'DB_USERNAME differs from the initialized PostgreSQL role' in deploy
+          assert 'DB_PASSWORD differs from the initialized PostgreSQL password' in deploy
+          assert 'POSTGRES_USER=%s' in deploy
+          assert 'openssl rand -hex 32' in deploy  # JWT secret only
           assert 'docker compose down -v' not in deploy
           print('Repository-scoped secrets and R49 workflow guardrails verified')
           PY
