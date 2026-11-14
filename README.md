@@ -7,6 +7,10 @@ Esta rama **r42-20261113-monorepo** parte de **r41-20261111** y contiene la PWA,
 - `infra/Caddyfile`: HTTPS, frontend estático y proxy hacia la API.
 - `scripts/`: copias de seguridad. `compose.yaml`: servicios Docker.
 
+## Adminer (R49, solo por túnel SSH)
+
+El Compose incluye Adminer en `127.0.0.1:8081` del VPS, sin acceso público ni cambios de credenciales. Instrucciones de despliegue, túnel SSH y acceso a PostgreSQL: [docs/R49_ADMINER.md](docs/R49_ADMINER.md). No importar dumps de Supabase directamente en la base `geocauce`.
+
 ## Uso en el VPS
 
 ```bash
