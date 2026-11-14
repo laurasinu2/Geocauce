@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from typing import Generator
 
 from sqlalchemy import DateTime, ForeignKey, JSON, String, create_engine
+from sqlalchemy.engine import URL
+from pathlib import Path
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, Session
 
@@ -73,7 +75,21 @@ class ProjectMember(Base):
 
 
 def make_engine():
-    url = os.getenv("DATABASE_URL", "sqlite:///./geocauce-dev.sqlite")
+    password_file = os.getenv("DB_PASSWORD_FILE")
+    if password_file:
+        password = Path(password_file).read_text(encoding="utf-8")
+        # SQLAlchemy URL.create handles @, %, :, /, # and Unicode without
+        # interpreting password characters as URL delimiters.
+        url = URL.create(
+            "postgresql+psycopg",
+            username=os.environ["DB_USER"],
+            password=password,
+            host=os.getenv("DB_HOST", "db"),
+            port=5432,
+            database=os.getenv("DB_NAME", "geocauce"),
+        )
+    else:
+        url = os.getenv("DATABASE_URL", "sqlite:///./geocauce-dev.sqlite")
     kwargs = {"pool_pre_ping": True}
     if url.startswith("sqlite:"):
         kwargs["connect_args"] = {"check_same_thread": False}
