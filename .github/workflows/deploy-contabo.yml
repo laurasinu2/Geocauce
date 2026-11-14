@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Confirma el despliegue de R47 al VPS'
+        description: 'Confirma el despliegue de R48 al VPS'
         required: true
         type: choice
         default: 'NO'
@@ -24,7 +24,7 @@ jobs:
     name: Verify exact branch and source
     runs-on: ubuntu-24.04
     steps:
-      - name: Require explicit confirmation and R47 branch
+      - name: Require explicit confirmation and R48 branch
         shell: bash
         env:
           CONFIRM: ${{ inputs.confirm }}
@@ -34,8 +34,8 @@ jobs:
             echo "::error::Selecciona DESPLEGAR para confirmar el despliegue."
             exit 1
           fi
-          if [[ "$GITHUB_REF" != "refs/heads/fix/r47-repository-secrets-deploy-20261114" ]]; then
-            echo "::error::Elige la rama fix/r47-repository-secrets-deploy-20261114 en Run workflow (no main)."
+          if [[ "$GITHUB_REF" != "refs/heads/fix/r48-first-deploy-tls-recovery-20261114" ]]; then
+            echo "::error::Elige la rama fix/r48-first-deploy-tls-recovery-20261114 en Run workflow (no main)."
             exit 1
           fi
       - uses: actions/checkout@v4
