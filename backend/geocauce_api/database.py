@@ -91,7 +91,7 @@ def make_engine():
     else:
         url = os.getenv("DATABASE_URL", "sqlite:///./geocauce-dev.sqlite")
     kwargs = {"pool_pre_ping": True}
-    if url.startswith("sqlite:"):
+    if isinstance(url, str) and url.startswith("sqlite:"):
         kwargs["connect_args"] = {"check_same_thread": False}
     return create_engine(url, **kwargs)
 
