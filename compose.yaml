@@ -5,12 +5,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB: geocauce
-      POSTGRES_USER: geocauce
+      POSTGRES_USER: ${POSTGRES_USER:?Define POSTGRES_USER en .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U geocauce -d geocauce"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:?Falta usuario} -d geocauce"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -19,7 +19,7 @@ services:
     build: ./backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+psycopg://geocauce:${POSTGRES_PASSWORD:?Falta contraseña}@db:5432/geocauce
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?Falta usuario}:${POSTGRES_PASSWORD:?Falta contraseña}@db:5432/geocauce
       JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en .env}
       ALLOW_SIGNUP: ${ALLOW_SIGNUP:-false}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-16777216}
