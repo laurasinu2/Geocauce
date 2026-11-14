@@ -8,6 +8,22 @@ ROOT=/opt/geocauce
 SHA="${1:-}"
 ARCHIVE="${2:-}"
 DESIRED_SITE="${3:-}"
+CREDENTIAL_FILE="${4:-}"
+# One-time SSH-transferred file, outside Git and the release archive.
+[[ "$CREDENTIAL_FILE" =~ ^/opt/geocauce/incoming/db-credentials-[0-9]+-[0-9]+-[0-9a-f]{12}\.txt$ ]] ||
+  { echo "ERROR: Unexpected database credential path." >&2; exit 1; }
+[[ -f "$CREDENTIAL_FILE" && ! -L "$CREDENTIAL_FILE" ]] ||
+  { echo "ERROR: Database credentials missing on VPS." >&2; exit 1; }
+chmod 600 "$CREDENTIAL_FILE"
+DB_USERNAME="$(sed -n '1p' "$CREDENTIAL_FILE")"
+DB_PASSWORD="$(sed -n '2p' "$CREDENTIAL_FILE")"
+[[ "$DB_USERNAME" =~ ^[a-z_][a-z0-9_]{0,62}$ ]] ||
+  { rm -f "$CREDENTIAL_FILE"; echo "ERROR: Invalid DB_USERNAME." >&2; exit 1; }
+# Hex prevents shell / SQL / URL / dotenv escaping problems.
+[[ "$DB_PASSWORD" =~ ^[a-fA-F0-9]{64}$ ]] ||
+  { rm -f "$CREDENTIAL_FILE"; echo "ERROR: DB_PASSWORD must be 64 hexadecimal characters." >&2; exit 1; }
+rm -f "$CREDENTIAL_FILE"
+unset CREDENTIAL_FILE
 STARTED=0
 PREVIOUS=""
 
@@ -39,10 +55,11 @@ if [[ ! -e "$ROOT/.env" ]]; then
      docker volume inspect geocauce_files_data >/dev/null 2>&1; then
     die "There are existing Geocauce Docker volumes but no .env. Restore its credentials before retrying."
   fi
-  command -v openssl >/dev/null || die "openssl is required for first-time secret generation."
+  command -v openssl >/dev/null || die "openssl is required for JWT_SECRET generation."
   env_tmp="$(mktemp "$ROOT/.env.XXXXXXXX")"
   {
-    printf 'POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 32)"
+    printf 'POSTGRES_USER=%s\n' "$DB_USERNAME"
+    printf 'POSTGRES_PASSWORD=%s\n' "$DB_PASSWORD"
     printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)"
     printf 'SITE_ADDRESS=%s\n' "$DESIRED_SITE"
     printf 'ALLOW_SIGNUP=false\n'
@@ -57,6 +74,25 @@ fi
 
 # Existing secrets are immutable: an accidental changed site parameter must not
 # silently rewrite the production configuration.
+# Existing installations require an explicit credential reconciliation.
+# Never silently change the PostgreSQL role or password of a live volume.
+EXISTING_USER="$(sed -n 's/^POSTGRES_USER=//p' "$ROOT/.env" | tail -n1)"
+EXISTING_USER="${EXISTING_USER:-geocauce}"
+EXISTING_PASSWORD="$(sed -n 's/^POSTGRES_PASSWORD=//p' "$ROOT/.env" | tail -n1)"
+if docker volume inspect geocauce_postgres_data >/dev/null 2>&1; then
+  [[ "$EXISTING_USER" == "$DB_USERNAME" ]] ||
+    die "DB_USERNAME differs from the initialized PostgreSQL role. Refusing automatic role replacement. Keep the current user or plan a manual migration."
+  [[ "$EXISTING_PASSWORD" == "$DB_PASSWORD" ]] ||
+    die "DB_PASSWORD differs from the initialized PostgreSQL password. Refusing automatic password rotation. Copy the existing password into GitHub Secrets or perform a coordinated database credential rotation."
+fi
+# Safe for already-initialized environments when secrets match.
+# Ensure older .env files gain POSTGRES_USER without changing their original password.
+if ! grep -q '^POSTGRES_USER=' "$ROOT/.env"; then
+  env_tmp="$(mktemp "$ROOT/.env.XXXXXXXX")"
+  { cat "$ROOT/.env"; printf '\nPOSTGRES_USER=%s\n' "$DB_USERNAME"; } > "$env_tmp"
+  chmod 600 "$env_tmp"
+  mv "$env_tmp" "$ROOT/.env"
+fi
 site="$(sed -n 's/^SITE_ADDRESS=//p' "$ROOT/.env" | tail -n1 | tr -d '\r')"
 site="${site%\"}"; site="${site#\"}"; site="${site%\'}"; site="${site#\'}"
 site="${site#https://}"
@@ -168,7 +204,7 @@ if docker volume inspect geocauce_postgres_data >/dev/null 2>&1; then
   file_backup="$ROOT/backups/files-${stamp}-${SHA:0:8}.tar.gz"
   echo "Backing up PostgreSQL before deployment..."
   docker compose --env-file "$ROOT/.env" -f "$PREVIOUS/compose.yaml" \
-    exec -T db pg_dump -U geocauce -d geocauce -Fc > "$db_backup"
+    exec -T db pg_dump -U "$DB_USERNAME" -d geocauce -Fc > "$db_backup"
   [[ -s "$db_backup" ]] || die "PostgreSQL backup is empty."
   echo "Backing up the private file volume..."
   # The container needs root to read private blobs; make the encrypted-backup candidate
