@@ -16,8 +16,9 @@ El Compose incluye Adminer en `127.0.0.1:8081` del VPS, sin acceso público ni c
 El despliegue manual requiere los **repository secrets** `DB_USERNAME` y `DB_PASSWORD`.
 En una base existente deben coincidir con los valores de `POSTGRES_USER`
 (si falta: `geocauce`) y `POSTGRES_PASSWORD` de `/opt/geocauce/.env`.
-La contraseña debe tener 64 caracteres hexadecimales (generar con
-`openssl rand -hex 32` **solo para una instalación nueva**). **No cambies
+La contraseña puede contener caracteres especiales, espacios y Unicode,
+siempre que no incluya saltos de línea. Se guarda como archivo privado
+fuera de GitHub y no se inserta en una URL de conexión. **No cambies
 las credenciales de una base existente simplemente editando GitHub Secrets**.
 Consulta [docs/R49_DB_GITHUB_SECRETS.md](docs/R49_DB_GITHUB_SECRETS.md).
 
