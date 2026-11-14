@@ -9,6 +9,7 @@ SHA="${1:-}"
 ARCHIVE="${2:-}"
 DESIRED_SITE="${3:-}"
 CREDENTIAL_FILE="${4:-}"
+DB_PASSWORD_ACTION="${5:-KEEP}"
 # One-time SSH-transferred file, outside Git and the release archive.
 [[ "$CREDENTIAL_FILE" =~ ^/opt/geocauce/incoming/db-credentials-[0-9]+-[0-9]+-[0-9a-f]{12}\.txt$ ]] ||
   { echo "ERROR: Unexpected database credential path." >&2; exit 1; }
@@ -27,8 +28,31 @@ rm -f "$CREDENTIAL_FILE"
 unset CREDENTIAL_FILE
 STARTED=0
 PREVIOUS=""
+ROTATE_PASSWORD=0
+ROTATED_PASSWORD=0
+OLD_DB_PASSWORD=""
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+[[ "$DB_PASSWORD_ACTION" == "KEEP" || "$DB_PASSWORD_ACTION" == "ROTATE_EXISTING" ]] ||
+  die "Unexpected database password action."
+
+# Passwords are never supplied as SQL command arguments. PostgreSQL identifiers
+# are restricted to a safe regex above; single quotes are escaped as SQL literals.
+write_password_file() {
+  local tmp
+  tmp="$(mktemp "$ROOT/.db-password.XXXXXXXX")"
+  printf '%s' "$1" > "$tmp"
+  chmod 0444 "$tmp"  # API runs as UID 10001; /opt/geocauce is private on the host.
+  mv -f "$tmp" "$ROOT/db-password"
+}
+change_pg_password() {
+  local quoted
+  quoted="${1//\'/\'\'}"
+  # Suppress SQL on errors so a password is never echoed in deployment logs.
+  printf "SET standard_conforming_strings = on;\nALTER ROLE \"%s\" PASSWORD '%s';\n" "$DB_USERNAME" "$quoted" |
+    docker exec -i geocauce-db-1 psql -X -q -U "$DB_USERNAME" -d postgres -v ON_ERROR_STOP=1 >/dev/null 2>&1
+}
+
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || die "Invalid commit SHA."
 [[ "$ARCHIVE" =~ ^/opt/geocauce/incoming/geocauce-release-[0-9]+-[0-9]+-[0-9a-f]{12}\.tar\.gz$ ]] ||
   die "Unexpected upload path."
@@ -86,19 +110,23 @@ fi
 if docker volume inspect geocauce_postgres_data >/dev/null 2>&1; then
   [[ "$EXISTING_USER" == "$DB_USERNAME" ]] ||
     die "DB_USERNAME differs from the initialized PostgreSQL role. Refusing automatic role replacement. Keep the current user or plan a manual migration."
-  [[ "$EXISTING_PASSWORD" == "$DB_PASSWORD" ]] ||
-    die "DB_PASSWORD differs from the initialized PostgreSQL password. Refusing automatic password rotation. Copy the existing password into GitHub Secrets or perform a coordinated database credential rotation."
+  if [[ "$EXISTING_PASSWORD" != "$DB_PASSWORD" ]]; then
+    [[ "$DB_PASSWORD_ACTION" == "ROTATE_EXISTING" ]] ||
+      die "DB_PASSWORD differs from the initialized PostgreSQL password. Select ROTATE_EXISTING in the manual workflow to back up and rotate it, or use the current database password."
+    [[ -n "$EXISTING_PASSWORD" ]] ||
+      die "Existing DB password is missing. Manual recovery required."
+    ROTATE_PASSWORD=1
+    OLD_DB_PASSWORD="$EXISTING_PASSWORD"
+    echo "PostgreSQL password rotation requested. Backup and verification required before change."
+  fi
 fi
 # Once verified, keep the password in a private bind-mounted file rather than
 # injecting it into Compose interpolation or a URL. API runs as UID 10001.
 if [[ -e "$ROOT/db-password" && ! -f "$ROOT/db-password" ]]; then
   die "Database password path is not a regular file."
 fi
-if [[ ! -e "$ROOT/db-password" ]]; then
-  password_tmp="$(mktemp "$ROOT/.db-password.XXXXXXXX")"
-  printf '%s' "$DB_PASSWORD" > "$password_tmp"
-  chmod 0444 "$password_tmp"  # parent /opt/geocauce must be private (0700); API UID 10001 must read mount
-  mv "$password_tmp" "$ROOT/db-password"
+if [[ ! -e "$ROOT/db-password" && "$ROTATE_PASSWORD" -eq 0 ]]; then
+  write_password_file "$DB_PASSWORD"
 fi
 # Safe for already-initialized environments when secrets match.
 # Ensure older .env files gain POSTGRES_USER without changing their original password.
@@ -141,6 +169,16 @@ cleanup() {
   result=$?
   trap - EXIT
   rm -f "$ARCHIVE" || true
+  if [[ "$result" -ne 0 && "$ROTATED_PASSWORD" -eq 1 ]]; then
+    echo "Deployment failed after password rotation: restoring original PostgreSQL password..." >&2
+    if change_pg_password "$OLD_DB_PASSWORD"; then
+      if ! write_password_file "$OLD_DB_PASSWORD"; then
+        echo "WARNING: Failed to restore password file. Manual recovery required." >&2
+      fi
+    else
+      echo "WARNING: Failed to restore the database role password. Manual recovery required." >&2
+    fi
+  fi
   if [[ "$result" -ne 0 && "$STARTED" -eq 1 ]]; then
     if [[ -n "$PREVIOUS" ]]; then
       echo "Deployment failed: restoring previous containers..." >&2
@@ -235,10 +273,33 @@ elif [[ -n "$PREVIOUS" ]]; then
   die "Existing release has no PostgreSQL volume. Possible data loss."
 fi
 
+# Only rotate after backups have completed. A running app may briefly lose
+# database access between ALTER ROLE and replacement of its API containers.
+if [[ "$ROTATE_PASSWORD" -eq 1 ]]; then
+  docker exec -e PGPASSWORD="$OLD_DB_PASSWORD" geocauce-db-1 \
+    psql -X -h 127.0.0.1 -U "$DB_USERNAME" -d geocauce -tAc 'SELECT 1' >/dev/null 2>&1 ||
+    die "Existing PostgreSQL credentials failed direct TCP authentication. No rotation performed."
+  echo "Rotating existing PostgreSQL password (backups completed)..."
+  STARTED=1
+  if ! change_pg_password "$DB_PASSWORD"; then
+    die "PostgreSQL role password rotation failed. Check DB health; secrets not changed."
+  fi
+  ROTATED_PASSWORD=1
+  write_password_file "$DB_PASSWORD"
+  docker exec -e PGPASSWORD="$DB_PASSWORD" geocauce-db-1 \
+    psql -X -h 127.0.0.1 -U "$DB_USERNAME" -d geocauce -tAc 'SELECT 1' | grep -qx '1' ||
+    die "PostgreSQL rejected the new password. Restoring previous password."
+fi
+
 echo "Deploying commit ${SHA:0:12}..."
 STARTED=1
 docker compose --env-file "$ROOT/.env" -f "$RELEASE/compose.yaml" \
   up -d --build --wait --wait-timeout 180
+
+# The /health endpoint alone does not prove that SQLAlchemy can authenticate.
+docker compose --env-file "$ROOT/.env" -f "$RELEASE/compose.yaml" \
+  exec -T api python -c 'from geocauce_api.database import engine; from sqlalchemy import text; connection = engine.connect(); print(connection.execute(text("SELECT 1")).scalar()); connection.close()' |
+  grep -qx '1' || die "New API cannot authenticate to PostgreSQL."
 
 url="https://$site"
 echo "Checking API and frontend through HTTPS (allowing Caddy time to issue TLS certificate)..."
