@@ -1,4 +1,8 @@
-# GeoCauce · Monorepo R42 (FastAPI + Docker)
+# GeoCauce · Monorepo (rama R50 de migración)
+
+**R50: análisis de migración sin cambios de producción.** Consulta [docs/R50_SUPABASE_MIGRATION.md](docs/R50_SUPABASE_MIGRATION.md) y el preflight de solo lectura `scripts/r50-dump-preflight.py`. La importación real de Supabase aún NO está implementada; no restaures un dump directamente en la base de la API.
+
+## Documentación histórica R42
 
 Esta rama **r42-20261113-monorepo** parte de **r41-20261111** y contiene la PWA, el backend FastAPI y Docker Compose en un mismo repositorio. **No sustituye R41 ni modifica Supabase.**
 
