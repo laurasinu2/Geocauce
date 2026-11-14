@@ -47,6 +47,14 @@ jobs:
           assert 'Existing containers came from different releases' in deploy
           assert 'Verified healthy interrupted initial installation' in deploy
           assert 'Backing up PostgreSQL before deployment' in deploy
+          # bash -s runs from SSH stdin; Compose exec -T alone is still interactive.
+          # Without --interactive=false and </dev/null, pg_dump can swallow the
+          # remainder of the deployment script and falsely report success.
+          assert 'exec --interactive=false -T db pg_dump' in deploy
+          assert 'pg_dump -U "$DB_USERNAME" -d geocauce -Fc </dev/null' in deploy
+          assert 'exec --interactive=false -T api python -c' in deploy
+          assert 'connection.close()' in deploy and ' </dev/null |' in deploy
+
           assert 'docker volume rm' not in deploy
           # R49 DB credentials must be provided by repository secrets, never regenerated
           # for a pre-existing volume or sent in an SSH command argument.
