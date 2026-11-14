@@ -121,7 +121,7 @@ docker compose --env-file "$ROOT/.env" -f "$RELEASE/compose.yaml" config --quiet
 
 [[ "$site" =~ ^[a-zA-Z0-9.-]+$ ]] || die "SITE_ADDRESS must be a public DNS hostname."
 
-# Recover a first installation that started healthy Compose containers but
+# Recover a first installation that started a healthy database and running Compose services but
 # failed only the final HTTPS smoke check, leaving volumes without /current.
 # The container labels must prove that every service belongs to the existing
 # Geocauce release. Never adopt arbitrary volumes or replace their credentials.
@@ -131,8 +131,16 @@ if [[ -z "$PREVIOUS" ]] &&
   for service in db api web; do
     container="geocauce-$service-1"
     identity="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}:{{index .Config.Labels "com.docker.compose.service"}}:{{.State.Running}}:{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container" 2>/dev/null || true)"
-    [[ "$identity" == "geocauce:$service:true:healthy" ]] ||
-      die "Existing data is present but $container is not a healthy Geocauce service. Manual recovery required."
+    # db has a Docker healthcheck; api and web have none in compose.yaml.
+    # If any service later gains one, it must pass before adoption.
+    if [[ "$service" == "db" ]]; then
+      [[ "$identity" == "geocauce:db:true:healthy" ]] ||
+        die "Existing PostgreSQL container is not healthy. Manual recovery required."
+    else
+      [[ "$identity" == "geocauce:$service:true:missing" ||
+         "$identity" == "geocauce:$service:true:healthy" ]] ||
+        die "Existing $container is not running or reports an unhealthy status. Manual recovery required."
+    fi
   done
   previous_compose="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' geocauce-db-1)"
   [[ "$previous_compose" =~ ^/opt/geocauce/releases/[0-9a-f]{40}/compose\.yaml$ ]] ||
