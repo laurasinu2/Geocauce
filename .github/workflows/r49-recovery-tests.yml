@@ -59,6 +59,15 @@ jobs:
           assert 'URL.create(' in Path('backend/geocauce_api/database.py').read_text()
           assert 'DB_USERNAME differs from the initialized PostgreSQL role' in deploy
           assert 'DB_PASSWORD differs from the initialized PostgreSQL password' in deploy
+          assert "db_password_action:" in raw
+          assert "ROTATE_EXISTING" in raw
+          assert "DB_PASSWORD_ACTION" in raw
+          assert "ROTATE_PASSWORD=1" in deploy
+          assert "Rotating existing PostgreSQL password (backups completed)" in deploy
+          assert "restoring original PostgreSQL password" in deploy
+          assert "New API cannot authenticate to PostgreSQL" in deploy
+          assert 'if isinstance(url, str) and url.startswith("sqlite:")' in Path('backend/geocauce_api/database.py').read_text()
+
           assert 'POSTGRES_USER=%s' in deploy
           assert 'openssl rand -hex 32' in deploy  # JWT secret only
           assert 'docker compose down -v' not in deploy
