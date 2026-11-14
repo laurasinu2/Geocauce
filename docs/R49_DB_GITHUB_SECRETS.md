@@ -40,10 +40,16 @@ credentials) and `JWT_SECRET` (application tokens).
 - On **an already-initialized database**, the deploy verifies that both
   credentials agree with existing values. It adds the missing
   `POSTGRES_USER` line to older `.env` files when safe.
-- If the user or password differs on an existing Docker database volume,
-  it **stops before replacing running containers or restoring data**.
-  PostgreSQL's `POSTGRES_USER`/`POSTGRES_PASSWORD` variables are
-  initialization parameters, not a way to rotate an existing role.
+- If the username differs on an existing database volume, deployment **always
+  stops**: changing a role requires a separate role/privilege migration.
+- If only the password differs, deployment **stops by default** (`KEEP`).
+  The manual workflow now offers an explicit opt-in `ROTATE_EXISTING`:
+  it validates the existing TCP login, backs up PostgreSQL and the binary
+  volume, updates the existing PostgreSQL role password, writes the new
+  private password file, checks authentication and deploys. On failure
+  after rotation it attempts to restore the old password and previous
+  containers. This is a potentially service-interrupting operation.
+  PostgreSQL's initialization variables alone never rotate an existing role.
 - The old `JWT_SECRET` is preserved. The remote credentials transfer file
   is removed after reading (and the workflow also attempts cleanup on error).
 - The `geocauce` database name, project data, and Docker volumes are
@@ -68,8 +74,14 @@ never make it public.
 
 ## If you actually want a different username or password
 
-**Do not simply replace the GitHub secret and deploy.** For an existing
-volume you must plan the database-side change first:
+**Do not replace GitHub Secrets and run with the default KEEP option:** that
+intentionally fails on a credential mismatch. If **only the password** changes,
+you can use the explicit `ROTATE_EXISTING` option in the manual deployment,
+with backup-first and rollback safeguards. The API might briefly lose
+database access during the rotation.
+
+For a **username change** or a manual password rotation, follow a separate
+database migration plan:
 1. Back up PostgreSQL and the binary-file volume, and verify backup recovery.
 2. If changing the username, create a PostgreSQL role with the correct
    ownership, schema privileges, grants and extension access; verify it in a
@@ -80,8 +92,29 @@ volume you must plan the database-side change first:
    the database login has been tested. Then redeploy and test login,
    synchronization, API and Adminer.
 
-The current automated R49 workflow deliberately does **not** implement
-live role replacement or password rotation.
+The R49 workflow **does not** change usernames or PostgreSQL role ownership.
+It only rotates the existing role's password when explicitly requested with
+`ROTATE_EXISTING`. Password rotation is not a substitute for a verified,
+off-server backup and recovery drill.
+
+## How to deploy with the new DB_PASSWORD
+
+1. Keep `DB_USERNAME` equal to the *existing* PostgreSQL role, typically
+   `geocauce`.
+2. Set the **new** desired `DB_PASSWORD` in GitHub Repository Secrets.
+3. Go to **Actions → Deploy Geocauce to Contabo (manual) → Run workflow**.
+4. Choose branch `fix/r49-recovery-healthcheck-20261114`, set
+   `confirm=DESPLEGAR` and `db_password_action=ROTATE_EXISTING`.
+5. Review the logs for successful backup, password rotation, SQLAlchemy DB
+   connection check and HTTPS smoke check. After success, use the new password
+   to log in through Adminer.
+
+The existing database data and UUIDs are not deleted. After successful
+password rotation, the legacy `.env` may still contain the *old*
+`POSTGRES_PASSWORD` value for rollback compatibility; the new Compose release
+uses the private `db-password` file instead. Manually rolling back to old
+releases that still use a URL-based database password would require reverting
+the database password as well.
 
 ## How to verify without revealing secrets
 
