@@ -19,8 +19,10 @@ DB_USERNAME="$(sed -n '1p' "$CREDENTIAL_FILE")"
 DB_PASSWORD="$(sed -n '2p' "$CREDENTIAL_FILE")"
 [[ "$DB_USERNAME" =~ ^[a-z_][a-z0-9_]{0,62}$ ]] ||
   { rm -f "$CREDENTIAL_FILE"; echo "ERROR: Invalid DB_USERNAME." >&2; exit 1; }
-# Any non-empty single-line password is accepted (special chars and Unicode).
-[[ -n "$DB_PASSWORD" && "$DB_PASSWORD" != *
+# Accept non-empty passwords including punctuation, spaces and Unicode.
+# The SSH transfer format is exactly two lines, so newline/CR is unsupported.
+[[ -n "$DB_PASSWORD" && "$DB_PASSWORD" != *$'\r'* ]] ||
+  { rm -f "$CREDENTIAL_FILE"; echo "ERROR: DB_PASSWORD must be non-empty and single-line."; exit 1; }
 rm -f "$CREDENTIAL_FILE"
 unset CREDENTIAL_FILE
 STARTED=0
@@ -95,8 +97,7 @@ fi
 if [[ ! -e "$ROOT/db-password" ]]; then
   password_tmp="$(mktemp "$ROOT/.db-password.XXXXXXXX")"
   printf '%s' "$DB_PASSWORD" > "$password_tmp"
-  chmod 0400 "$password_tmp"
-  chown 10001:10001 "$password_tmp"
+  chmod 0444 "$password_tmp"  # parent /opt/geocauce must be private (0700); API UID 10001 must read mount
   mv "$password_tmp" "$ROOT/db-password"
 fi
 # Safe for already-initialized environments when secrets match.
