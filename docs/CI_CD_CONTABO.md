@@ -1,5 +1,7 @@
 # CI/CD manual: GitHub Actions → VPS Contabo
 
+> **Actualización R46 (14/11/2026):** el despliegue manual ya utiliza usuario y contraseña SSH guardados como GitHub Secrets, no la clave privada descrita en esta guía histórica. Sigue la [guía R46 de despliegue por contraseña](R46_PASSWORD_DEPLOY.md). Las instrucciones de claves SSH que aparecen debajo se conservan solo como referencia de la variante anterior.
+
 Workflow: [Deploy Geocauce to Contabo (manual)](../.github/workflows/deploy-contabo.yml).
 
 **Rama de aplicación:** `fix/r45-cloud-blob-mime-20261113`.
