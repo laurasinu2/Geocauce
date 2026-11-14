@@ -61,6 +61,8 @@ jobs:
           assert 'secrets.DB_USERNAME' in raw
           assert 'secrets.DB_PASSWORD' in raw
           assert 'db-credentials-' in raw
+          assert "grep -Fq 'Deployment successful:'" in raw
+          assert 'Remote script returned without finalizing deployment' in raw
           assert 'POSTGRES_USER: ${POSTGRES_USER:' in compose
           assert 'POSTGRES_PASSWORD_FILE: /run/secrets/db_password' in compose
           assert 'DB_PASSWORD_FILE: /run/secrets/db_password' in compose
