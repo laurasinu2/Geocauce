@@ -31,6 +31,18 @@ services:
         condition: service_healthy
     networks: [private]
     security_opt: [no-new-privileges:true]
+  adminer:
+    image: adminer:5
+    restart: unless-stopped
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [private]
+    security_opt: [no-new-privileges:true]
   web:
     image: caddy:2-alpine
     restart: unless-stopped
