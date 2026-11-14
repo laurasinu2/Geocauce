@@ -34,12 +34,12 @@ def inventory(text: str) -> dict:
         tokens = match.group(1).split()
         if len(tokens) < 3:
             continue
-        if tokens[0] in ("TABLE", "SCHEMA", "EXTENSION", "FUNCTION", "TYPE", "INDEX", "TRIGGER", "POLICY", "FK", "CONSTRAINT"):
-            kind = tokens[0]
-            offset = 1
-        elif len(tokens) > 3 and tokens[0] == "TABLE" and tokens[1] == "DATA":
+        if len(tokens) > 3 and tokens[0] == "TABLE" and tokens[1] == "DATA":
             kind = "TABLE DATA"
             offset = 2
+        elif tokens[0] in ("TABLE", "SCHEMA", "EXTENSION", "FUNCTION", "TYPE", "INDEX", "TRIGGER", "POLICY", "FK", "CONSTRAINT"):
+            kind = tokens[0]
+            offset = 1
         else:
             # pg_restore TOC has many different object kinds; only table entries
             # are needed for the compatibility gate.
