@@ -60,8 +60,24 @@ fi
 site="$(sed -n 's/^SITE_ADDRESS=//p' "$ROOT/.env" | tail -n1 | tr -d '\r')"
 site="${site%\"}"; site="${site#\"}"; site="${site%\'}"; site="${site#\'}"
 site="${site#https://}"
-[[ "$site" == "$DESIRED_SITE" ]] ||
-  die "SITE_ADDRESS in the existing .env differs from GEOCAUCE_SITE_ADDRESS. Check DNS and the server configuration."
+if [[ "$site" != "$DESIRED_SITE" ]]; then
+  # Permit correcting a placeholder in an unused, first-install .env, while
+  # retaining its generated database and JWT secrets. Never rewrite the site
+  # for an installed release or a database that already contains user data.
+  if [[ ! -e "$ROOT/current" && ! -L "$ROOT/current" ]] &&
+     ! docker volume inspect geocauce_postgres_data >/dev/null 2>&1 &&
+     { [[ "$site" == "geocauce.example.org" ]] ||
+       [[ "$site" == "localhost" ]] || [[ "$site" == "http://localhost" ]]; }; then
+    env_tmp="$(mktemp "$ROOT/.env.XXXXXXXX")"
+    sed "s|^SITE_ADDRESS=.*$|SITE_ADDRESS=$DESIRED_SITE|" "$ROOT/.env" > "$env_tmp"
+    chmod 600 "$env_tmp"
+    mv "$env_tmp" "$ROOT/.env"
+    site="$DESIRED_SITE"
+    echo "Updated first-install placeholder hostname; database and JWT secrets retained."
+  else
+    die "SITE_ADDRESS in the existing .env differs from GEOCAUCE_SITE_ADDRESS. Check DNS and the server configuration."
+  fi
+fi
 
 if [[ -L "$ROOT/current" ]]; then
   PREVIOUS="$(readlink -f "$ROOT/current")"
