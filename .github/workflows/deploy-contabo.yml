@@ -120,7 +120,153 @@ jobs:
             fi
           done
           [[ "$DB_USERNAME" =~ ^[a-z_][a-z0-9_]{0,62}$ ]] || { echo "::error::DB_USERNAME must be a lowercase PostgreSQL identifier."; exit 1; }
-          [[ "$DB_PASSWORD" =~ ^[a-fA-F0-9]{64}$ ]] || { echo "::error::DB_PASSWORD must be a 64-character hex value (openssl rand -hex 32)."; exit 1; }
+          [[ -n "$DB_PASSWORD" && "$DB_PASSWORD" != *
+          [[ "$CONTABO_HOST" =~ ^[a-zA-Z0-9.-]+$ ]] || { echo "::error::Host SSH no válido"; exit 1; }
+          [[ "$CONTABO_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "::error::Usuario SSH no válido"; exit 1; }
+          [[ "$CONTABO_SSH_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "::error::Puerto SSH no válido"; exit 1; }
+          # Accept hostname, https://hostname or https://hostname/ from a
+          # repository secret or a repository variable. Never print its value.
+          site="$GEOCAUCE_SITE_ADDRESS"
+          site="${site#https://}"
+          site="${site#http://}"
+          site="${site%/}"
+          [[ "$site" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ && "$site" == *.* ]] || {
+            echo "::error::GEOCAUCE_SITE_ADDRESS debe ser un hostname DNS sin ruta, por ejemplo geocauce.duckdns.org."
+            exit 1
+          }
+          GEOCAUCE_SITE_ADDRESS="$site"
+          [[ "$CONTABO_SSH_FINGERPRINT" =~ ^SHA256:[a-zA-Z0-9+/]{43}$ ]] || {
+            echo "::error::El fingerprint SSH debe tener formato SHA256:..."; exit 1;
+          }
+
+          ssh_dir="$RUNNER_TEMP/geocauce-ssh"
+          install -d -m 700 "$ssh_dir"
+          known_hosts="$ssh_dir/known_hosts"
+          # SSH public host key is fetched, but trusted ONLY if it matches the
+          # independently verified, pinned fingerprint saved in GitHub Secrets.
+          ssh-keyscan -T 15 -t ed25519 -p "$CONTABO_SSH_PORT" "$CONTABO_HOST" \
+            2>/dev/null > "$known_hosts"
+          [[ -s "$known_hosts" ]] || { echo "::error::SSH no responde o no publica Ed25519"; exit 1; }
+          actual="$(ssh-keygen -lf "$known_hosts" -E sha256 | awk '{print $2}' | head -n1)"
+          [[ "$actual" == "$CONTABO_SSH_FINGERPRINT" ]] || {
+            echo "::error::La huella SSH del VPS NO coincide. Se cancela el despliegue."; exit 1;
+          }
+          chmod 600 "$known_hosts"
+
+          ssh_args=(-o BatchMode=no -o PreferredAuthentications=password,keyboard-interactive
+                    -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1
+                    -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts"
+                    -o ConnectTimeout=20)
+          target="${CONTABO_USER}@${CONTABO_HOST}"
+          # sshpass -e reads the masked password from the environment, never from
+          # a command-line argument, release archive or shell transcript.
+          export SSHPASS="$CONTABO_PASSWORD"
+          short_sha="${GITHUB_SHA:0:12}"
+          archive="$RUNNER_TEMP/geocauce-${short_sha}.tar.gz"
+          remote_archive="/opt/geocauce/incoming/geocauce-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${short_sha}.tar.gz"
+          remote_creds="/opt/geocauce/incoming/db-credentials-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${short_sha}.txt"
+
+          # Whitelist: never transfer .env, local backups, IndexedDB, credentials or git internals.
+          tar -czf "$archive" \
+            compose.yaml frontend backend infra scripts docs README.md .env.example
+          sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
+            "install -d -m 700 /opt/geocauce/incoming"
+          sshpass -e scp "${ssh_args[@]}" -P "$CONTABO_SSH_PORT" "$archive" "$target:$remote_archive"
+          # Create a temporary private credentials file on the VPS via verified SSH.
+          # Never put DB secrets into command arguments, logs, Git or the release tar.
+          # A failed deploy must remove it as well.
+          cleanup_secret() {
+            sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
+              "rm -f '$remote_creds'" >/dev/null 2>&1 || true
+          }
+          trap cleanup_secret EXIT
+          printf '%s\n%s\n' "$DB_USERNAME" "$DB_PASSWORD" | \
+            sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
+            "umask 077; cat > '$remote_creds'; chmod 600 '$remote_creds'"
+          sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
+            "bash -s -- '$GITHUB_SHA' '$remote_archive' '$GEOCAUCE_SITE_ADDRESS' '$remote_creds'" < scripts/deploy-contabo.sh
+          trap - EXIT
+          cleanup_secret
+          unset SSHPASS
+
+          echo "### Contabo deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Branch: $GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Result: deployment and HTTPS health checks completed" >> "$GITHUB_STEP_SUMMARY"
+\n'* && "$DB_PASSWORD" != *
+          [[ "$CONTABO_HOST" =~ ^[a-zA-Z0-9.-]+$ ]] || { echo "::error::Host SSH no válido"; exit 1; }
+          [[ "$CONTABO_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "::error::Usuario SSH no válido"; exit 1; }
+          [[ "$CONTABO_SSH_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "::error::Puerto SSH no válido"; exit 1; }
+          # Accept hostname, https://hostname or https://hostname/ from a
+          # repository secret or a repository variable. Never print its value.
+          site="$GEOCAUCE_SITE_ADDRESS"
+          site="${site#https://}"
+          site="${site#http://}"
+          site="${site%/}"
+          [[ "$site" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ && "$site" == *.* ]] || {
+            echo "::error::GEOCAUCE_SITE_ADDRESS debe ser un hostname DNS sin ruta, por ejemplo geocauce.duckdns.org."
+            exit 1
+          }
+          GEOCAUCE_SITE_ADDRESS="$site"
+          [[ "$CONTABO_SSH_FINGERPRINT" =~ ^SHA256:[a-zA-Z0-9+/]{43}$ ]] || {
+            echo "::error::El fingerprint SSH debe tener formato SHA256:..."; exit 1;
+          }
+
+          ssh_dir="$RUNNER_TEMP/geocauce-ssh"
+          install -d -m 700 "$ssh_dir"
+          known_hosts="$ssh_dir/known_hosts"
+          # SSH public host key is fetched, but trusted ONLY if it matches the
+          # independently verified, pinned fingerprint saved in GitHub Secrets.
+          ssh-keyscan -T 15 -t ed25519 -p "$CONTABO_SSH_PORT" "$CONTABO_HOST" \
+            2>/dev/null > "$known_hosts"
+          [[ -s "$known_hosts" ]] || { echo "::error::SSH no responde o no publica Ed25519"; exit 1; }
+          actual="$(ssh-keygen -lf "$known_hosts" -E sha256 | awk '{print $2}' | head -n1)"
+          [[ "$actual" == "$CONTABO_SSH_FINGERPRINT" ]] || {
+            echo "::error::La huella SSH del VPS NO coincide. Se cancela el despliegue."; exit 1;
+          }
+          chmod 600 "$known_hosts"
+
+          ssh_args=(-o BatchMode=no -o PreferredAuthentications=password,keyboard-interactive
+                    -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1
+                    -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts"
+                    -o ConnectTimeout=20)
+          target="${CONTABO_USER}@${CONTABO_HOST}"
+          # sshpass -e reads the masked password from the environment, never from
+          # a command-line argument, release archive or shell transcript.
+          export SSHPASS="$CONTABO_PASSWORD"
+          short_sha="${GITHUB_SHA:0:12}"
+          archive="$RUNNER_TEMP/geocauce-${short_sha}.tar.gz"
+          remote_archive="/opt/geocauce/incoming/geocauce-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${short_sha}.tar.gz"
+          remote_creds="/opt/geocauce/incoming/db-credentials-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${short_sha}.txt"
+
+          # Whitelist: never transfer .env, local backups, IndexedDB, credentials or git internals.
+          tar -czf "$archive" \
+            compose.yaml frontend backend infra scripts docs README.md .env.example
+          sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
+            "install -d -m 700 /opt/geocauce/incoming"
+          sshpass -e scp "${ssh_args[@]}" -P "$CONTABO_SSH_PORT" "$archive" "$target:$remote_archive"
+          # Create a temporary private credentials file on the VPS via verified SSH.
+          # Never put DB secrets into command arguments, logs, Git or the release tar.
+          # A failed deploy must remove it as well.
+          cleanup_secret() {
+            sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
+              "rm -f '$remote_creds'" >/dev/null 2>&1 || true
+          }
+          trap cleanup_secret EXIT
+          printf '%s\n%s\n' "$DB_USERNAME" "$DB_PASSWORD" | \
+            sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
+            "umask 077; cat > '$remote_creds'; chmod 600 '$remote_creds'"
+          sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
+            "bash -s -- '$GITHUB_SHA' '$remote_archive' '$GEOCAUCE_SITE_ADDRESS' '$remote_creds'" < scripts/deploy-contabo.sh
+          trap - EXIT
+          cleanup_secret
+          unset SSHPASS
+
+          echo "### Contabo deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Branch: $GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Result: deployment and HTTPS health checks completed" >> "$GITHUB_STEP_SUMMARY"
+\r'* ]] || { echo "::error::DB_PASSWORD must be a non-empty single-line value."; exit 1; }
           [[ "$CONTABO_HOST" =~ ^[a-zA-Z0-9.-]+$ ]] || { echo "::error::Host SSH no válido"; exit 1; }
           [[ "$CONTABO_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "::error::Usuario SSH no válido"; exit 1; }
           [[ "$CONTABO_SSH_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "::error::Puerto SSH no válido"; exit 1; }
