@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Invoked over SSH by .github/workflows/deploy-contabo.yml.
-# Persistent Docker volumes and /opt/geocauce/.env are never replaced.
+# Persistent Docker volumes are never deleted; an existing .env is never replaced.
 set -Eeuo pipefail
 umask 077
 
 ROOT=/opt/geocauce
 SHA="${1:-}"
 ARCHIVE="${2:-}"
+DESIRED_SITE="${3:-}"
 STARTED=0
 PREVIOUS=""
 
@@ -15,8 +16,12 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 [[ "$ARCHIVE" =~ ^/opt/geocauce/incoming/geocauce-release-[0-9]+-[0-9]+-[0-9a-f]{12}\.tar\.gz$ ]] ||
   die "Unexpected upload path."
 [[ -f "$ARCHIVE" ]] || die "Uploaded release archive not found."
-[[ -d "$ROOT" && -f "$ROOT/.env" ]] ||
-  die "Prepare /opt/geocauce/.env on the VPS before deployment."
+[[ "$DESIRED_SITE" =~ ^[a-zA-Z0-9.-]+$ ]] ||
+  die "A public DNS hostname is required as the third argument."
+[[ "$DESIRED_SITE" != "localhost" && "$DESIRED_SITE" != "geocauce.example.org" ]] ||
+  die "Configure a real, public DNS hostname before deployment."
+[[ -d "$ROOT" && -w "$ROOT" ]] ||
+  die "/opt/geocauce must exist and be writable by the SSH user."
 command -v docker >/dev/null || die "Docker is not installed."
 docker compose version >/dev/null || die "Docker Compose v2 is required."
 command -v flock >/dev/null || die "flock is required."
@@ -26,6 +31,37 @@ mkdir -p "$ROOT/releases" "$ROOT/backups"
 chmod 700 "$ROOT/backups"
 exec 9>"$ROOT/.deploy.lock"
 flock -n 9 || die "Another deployment is running."
+
+# First installation only: generate secrets on the VPS without logging or
+# transferring their values. Never regenerate credentials for existing volumes.
+if [[ ! -e "$ROOT/.env" ]]; then
+  if docker volume inspect geocauce_postgres_data >/dev/null 2>&1 ||
+     docker volume inspect geocauce_files_data >/dev/null 2>&1; then
+    die "There are existing Geocauce Docker volumes but no .env. Restore its credentials before retrying."
+  fi
+  command -v openssl >/dev/null || die "openssl is required for first-time secret generation."
+  env_tmp="$(mktemp "$ROOT/.env.XXXXXXXX")"
+  {
+    printf 'POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 32)"
+    printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)"
+    printf 'SITE_ADDRESS=%s\n' "$DESIRED_SITE"
+    printf 'ALLOW_SIGNUP=false\n'
+    printf 'MAX_UPLOAD_BYTES=16777216\n'
+  } > "$env_tmp"
+  chmod 600 "$env_tmp"
+  mv "$env_tmp" "$ROOT/.env"
+  echo "Created private first-install configuration in /opt/geocauce/.env."
+elif [[ ! -f "$ROOT/.env" ]]; then
+  die "The /opt/geocauce/.env path exists but is not a regular file."
+fi
+
+# Existing secrets are immutable: an accidental changed site parameter must not
+# silently rewrite the production configuration.
+site="$(sed -n 's/^SITE_ADDRESS=//p' "$ROOT/.env" | tail -n1 | tr -d '\r')"
+site="${site%\"}"; site="${site#\"}"; site="${site%\'}"; site="${site#\'}"
+site="${site#https://}"
+[[ "$site" == "$DESIRED_SITE" ]] ||
+  die "SITE_ADDRESS in the existing .env differs from GEOCAUCE_SITE_ADDRESS. Check DNS and the server configuration."
 
 if [[ -L "$ROOT/current" ]]; then
   PREVIOUS="$(readlink -f "$ROOT/current")"
@@ -67,12 +103,7 @@ fi
 # Validate before modifying running containers.
 docker compose --env-file "$ROOT/.env" -f "$RELEASE/compose.yaml" config --quiet
 
-site="$(sed -n 's/^SITE_ADDRESS=//p' "$ROOT/.env" | tail -n1 | tr -d '\r')"
-site="${site%\"}"; site="${site#\"}"; site="${site%\'}"; site="${site#\'}"
-site="${site#https://}"
 [[ "$site" =~ ^[a-zA-Z0-9.-]+$ ]] || die "SITE_ADDRESS must be a public DNS hostname."
-[[ "$site" != "localhost" && "$site" != "geocauce.example.org" ]] ||
-  die "Configure the public DNS domain in SITE_ADDRESS before deploying."
 
 # Backups are mandatory whenever an existing database volume is found.
 if docker volume inspect geocauce_postgres_data >/dev/null 2>&1; then
