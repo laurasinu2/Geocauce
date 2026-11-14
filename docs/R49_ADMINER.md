@@ -6,11 +6,15 @@ No expongas Adminer en `0.0.0.0` ni en un dominio público.
 
 ## Credenciales actuales
 
-La base del Compose es `geocauce` y el usuario de PostgreSQL es `geocauce`.
-La contraseña se carga de `POSTGRES_PASSWORD` en el fichero privado
-`/opt/geocauce/.env`, generado en el primer despliegue. **No vuelvas a
-generarla:** cambiar esa variable no modifica automáticamente la contraseña
-de un volumen PostgreSQL ya inicializado, y puede dejar la API sin conexión.
+La base del Compose es `geocauce`. El nombre de usuario PostgreSQL se configura
+mediante `POSTGRES_USER` y la contraseña mediante `POSTGRES_PASSWORD` en
+`/opt/geocauce/.env`. El workflow recibe sus valores desde los **GitHub
+repository secrets** `DB_USERNAME` y `DB_PASSWORD` por SSH verificado.
+En una instalación existente, ambos secretos **deben coincidir con el usuario
+y contraseña ya inicializados**: el despliegue se detiene sin cambiar la base
+si son distintos. Para cambiar usuario o contraseña hace falta una rotación
+planificada por separado. El antiguo nombre de usuario por defecto es
+`geocauce`.
 No confundas estas credenciales con la contraseña SSH, Supabase ni el inicio
 de sesión de la PWA.
 
@@ -49,7 +53,7 @@ Abre **http://127.0.0.1:8081** en el navegador de Windows.
 En el formulario de Adminer:
 - **System:** PostgreSQL
 - **Server:** `db` (hostname dentro de la red Docker)
-- **Username:** `geocauce`
+- **Username:** valor de `POSTGRES_USER` en `/opt/geocauce/.env`
 - **Password:** valor de `POSTGRES_PASSWORD` en el `.env` privado del VPS
 - **Database:** `geocauce`
 
