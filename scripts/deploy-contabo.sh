@@ -256,8 +256,11 @@ if docker volume inspect geocauce_postgres_data >/dev/null 2>&1; then
   db_backup="$ROOT/backups/postgres-${stamp}-${SHA:0:8}.dump"
   file_backup="$ROOT/backups/files-${stamp}-${SHA:0:8}.tar.gz"
   echo "Backing up PostgreSQL before deployment..."
+  # This script is streamed through SSH to bash -s. Compose exec defaults to
+  # interactive stdin and can swallow all subsequent script lines! Disabling
+  # its stdin is essential so the remainder of the deploy always executes.
   docker compose --env-file "$ROOT/.env" -f "$PREVIOUS/compose.yaml" \
-    exec -T db pg_dump -U "$DB_USERNAME" -d geocauce -Fc > "$db_backup"
+    exec --interactive=false -T db pg_dump -U "$DB_USERNAME" -d geocauce -Fc </dev/null > "$db_backup"
   [[ -s "$db_backup" ]] || die "PostgreSQL backup is empty."
   echo "Backing up the private file volume..."
   # The container needs root to read private blobs; make the encrypted-backup candidate
@@ -298,7 +301,7 @@ docker compose --env-file "$ROOT/.env" -f "$RELEASE/compose.yaml" \
 
 # The /health endpoint alone does not prove that SQLAlchemy can authenticate.
 docker compose --env-file "$ROOT/.env" -f "$RELEASE/compose.yaml" \
-  exec -T api python -c 'from geocauce_api.database import engine; from sqlalchemy import text; connection = engine.connect(); print(connection.execute(text("SELECT 1")).scalar()); connection.close()' |
+  exec --interactive=false -T api python -c 'from geocauce_api.database import engine; from sqlalchemy import text; connection = engine.connect(); print(connection.execute(text("SELECT 1")).scalar()); connection.close()' </dev/null |
   grep -qx '1' || die "New API cannot authenticate to PostgreSQL."
 
 url="https://$site"
