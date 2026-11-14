@@ -193,8 +193,15 @@ jobs:
           printf '%s\n%s\n' "$DB_USERNAME" "$DB_PASSWORD" | \
             sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
             "umask 077; cat > '$remote_creds'; chmod 600 '$remote_creds'"
+          # A remote SSH process can return 0 even if a subprocess swallowed
+          # the remaining stdin of bash -s. Require the script's final receipt.
           sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
-            "bash -s -- '$GITHUB_SHA' '$remote_archive' '$GEOCAUCE_SITE_ADDRESS' '$remote_creds' '$DB_PASSWORD_ACTION'" < scripts/deploy-contabo.sh
+            "bash -s -- '$GITHUB_SHA' '$remote_archive' '$GEOCAUCE_SITE_ADDRESS' '$remote_creds' '$DB_PASSWORD_ACTION'" < scripts/deploy-contabo.sh | \
+            tee "$RUNNER_TEMP/geocauce-deploy-output.txt"
+          grep -Fq 'Deployment successful:' "$RUNNER_TEMP/geocauce-deploy-output.txt" || {
+            echo "::error::Remote script returned without finalizing deployment. Check missing /opt/geocauce/current."
+            exit 1
+          }
           trap - EXIT
           cleanup_secret
           unset SSHPASS
