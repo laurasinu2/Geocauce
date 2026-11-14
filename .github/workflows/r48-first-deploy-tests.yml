@@ -1,0 +1,68 @@
+name: R48 repository secrets deploy regression
+on:
+  push:
+    branches: [fix/r48-first-deploy-tls-recovery-20261114]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate workflow reads repository secrets, not environment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q pyyaml
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          raw=Path('.github/workflows/deploy-contabo.yml').read_text()
+          data=yaml.safe_load(raw)
+          assert 'environment' not in data['jobs']['deploy']
+          assert 'secrets.CONTABO_HOST' in raw
+          assert 'secrets.CONTABO_USER' in raw
+          assert 'secrets.CONTABO_PASSWORD' in raw
+          assert 'secrets.CONTABO_SSH_FINGERPRINT' in raw
+          assert 'secrets.GEOCAUCE_SITE_ADDRESS || vars.GEOCAUCE_SITE_ADDRESS' in raw
+          assert 'secrets.CONTABO_SSH_PORT || vars.CONTABO_SSH_PORT' in raw
+          assert 'sshpass -e' in raw and 'StrictHostKeyChecking=yes' in raw
+          assert 'fix/r48-first-deploy-tls-recovery-20261114' in raw
+          deploy = Path('scripts/deploy-contabo.sh').read_text()
+          assert '--retry-all-errors' in deploy
+          assert 'com.docker.compose.project.config_files' in deploy
+          assert 'Existing containers came from different releases' in deploy
+          assert 'Verified healthy interrupted initial installation' in deploy
+          assert 'Backing up PostgreSQL before deployment' in deploy
+          assert 'docker volume rm' not in deploy
+          assert 'docker compose down -v' not in deploy
+          print('Repository-scoped secrets and R48 workflow guardrails verified')
+          PY
+      - name: Validate deployment script and app
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/deploy-contabo.sh
+          node --check frontend/app.js
+          node --check frontend/sw.js
+          node --test frontend/tests/api-auth.test.cjs frontend/tests/project-create-save.test.cjs frontend/tests/first-selfhosted-sync.test.cjs frontend/tests/selfhosted-blob-integrity.test.cjs
+      - name: Test API compatibility
+        shell: bash
+        run: |
+          python -m pip install -q -r backend/requirements-test.txt
+          cd backend
+          PYTHONPATH=. python -m pytest -q tests
+      - name: Verify compose
+        shell: bash
+        env:
+          POSTGRES_PASSWORD: test-only-password
+          JWT_SECRET: test-only-jwt
+          SITE_ADDRESS: geocauce.example.org
+        run: docker compose config -q
