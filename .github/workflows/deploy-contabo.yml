@@ -11,6 +11,14 @@ on:
         options:
           - 'NO'
           - 'DESPLEGAR'
+      db_password_action:
+        description: 'Password mismatch: KEEP stops; ROTATE_EXISTING backs up and changes the existing PostgreSQL role password'
+        required: true
+        type: choice
+        default: 'KEEP'
+        options:
+          - 'KEEP'
+          - 'ROTATE_EXISTING'
 
 permissions:
   contents: read
@@ -105,6 +113,7 @@ jobs:
         env:
           DB_USERNAME: ${{ secrets.DB_USERNAME }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_PASSWORD_ACTION: ${{ inputs.db_password_action }}
           CONTABO_HOST: ${{ secrets.CONTABO_HOST }}
           CONTABO_USER: ${{ secrets.CONTABO_USER }}
           CONTABO_PASSWORD: ${{ secrets.CONTABO_PASSWORD }}
@@ -119,6 +128,7 @@ jobs:
               exit 1
             fi
           done
+          [[ "$DB_PASSWORD_ACTION" == "KEEP" || "$DB_PASSWORD_ACTION" == "ROTATE_EXISTING" ]] || { echo "::error::Unexpected database password action."; exit 1; }
           [[ "$DB_USERNAME" =~ ^[a-z_][a-z0-9_]{0,62}$ ]] || { echo "::error::DB_USERNAME must be a lowercase PostgreSQL identifier."; exit 1; }
           [[ -n "$DB_PASSWORD" && "$(printf '%s' "$DB_PASSWORD" | wc -l)" -eq 0 ]] || { echo "::error::DB_PASSWORD must not be empty or multiline."; exit 1; }
           [[ "$CONTABO_HOST" =~ ^[a-zA-Z0-9.-]+$ ]] || { echo "::error::Host SSH no válido"; exit 1; }
@@ -184,7 +194,7 @@ jobs:
             sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
             "umask 077; cat > '$remote_creds'; chmod 600 '$remote_creds'"
           sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
-            "bash -s -- '$GITHUB_SHA' '$remote_archive' '$GEOCAUCE_SITE_ADDRESS' '$remote_creds'" < scripts/deploy-contabo.sh
+            "bash -s -- '$GITHUB_SHA' '$remote_archive' '$GEOCAUCE_SITE_ADDRESS' '$remote_creds' '$DB_PASSWORD_ACTION'" < scripts/deploy-contabo.sh
           trap - EXIT
           cleanup_secret
           unset SSHPASS
