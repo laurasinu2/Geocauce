@@ -78,6 +78,7 @@ jobs:
       - name: Docker Compose configuration
         shell: bash
         env:
+          POSTGRES_USER: geocauce
           POSTGRES_PASSWORD: ci-placeholder-password
           JWT_SECRET: ci-placeholder-signing-key
           SITE_ADDRESS: geocauce.example.org
@@ -102,6 +103,8 @@ jobs:
       - name: Transfer source and deploy on VPS
         shell: bash
         env:
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           CONTABO_HOST: ${{ secrets.CONTABO_HOST }}
           CONTABO_USER: ${{ secrets.CONTABO_USER }}
           CONTABO_PASSWORD: ${{ secrets.CONTABO_PASSWORD }}
@@ -110,12 +113,14 @@ jobs:
           CONTABO_SSH_PORT: ${{ secrets.CONTABO_SSH_PORT || vars.CONTABO_SSH_PORT || '22' }}
         run: |
           set -euo pipefail
-          for name in CONTABO_HOST CONTABO_USER CONTABO_PASSWORD CONTABO_SSH_FINGERPRINT GEOCAUCE_SITE_ADDRESS; do
+          for name in CONTABO_HOST CONTABO_USER CONTABO_PASSWORD CONTABO_SSH_FINGERPRINT GEOCAUCE_SITE_ADDRESS DB_USERNAME DB_PASSWORD; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Falta $name. Configúralo en Settings > Secrets and variables > Actions del repositorio."
               exit 1
             fi
           done
+          [[ "$DB_USERNAME" =~ ^[a-z_][a-z0-9_]{0,62}$ ]] || { echo "::error::DB_USERNAME must be a lowercase PostgreSQL identifier."; exit 1; }
+          [[ "$DB_PASSWORD" =~ ^[a-fA-F0-9]{64}$ ]] || { echo "::error::DB_PASSWORD must be a 64-character hex value (openssl rand -hex 32)."; exit 1; }
           [[ "$CONTABO_HOST" =~ ^[a-zA-Z0-9.-]+$ ]] || { echo "::error::Host SSH no válido"; exit 1; }
           [[ "$CONTABO_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "::error::Usuario SSH no válido"; exit 1; }
           [[ "$CONTABO_SSH_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "::error::Puerto SSH no válido"; exit 1; }
@@ -159,6 +164,7 @@ jobs:
           short_sha="${GITHUB_SHA:0:12}"
           archive="$RUNNER_TEMP/geocauce-${short_sha}.tar.gz"
           remote_archive="/opt/geocauce/incoming/geocauce-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${short_sha}.tar.gz"
+          remote_creds="/opt/geocauce/incoming/db-credentials-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${short_sha}.txt"
 
           # Whitelist: never transfer .env, local backups, IndexedDB, credentials or git internals.
           tar -czf "$archive" \
@@ -166,8 +172,21 @@ jobs:
           sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
             "install -d -m 700 /opt/geocauce/incoming"
           sshpass -e scp "${ssh_args[@]}" -P "$CONTABO_SSH_PORT" "$archive" "$target:$remote_archive"
+          # Create a temporary private credentials file on the VPS via verified SSH.
+          # Never put DB secrets into command arguments, logs, Git or the release tar.
+          # A failed deploy must remove it as well.
+          cleanup_secret() {
+            sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
+              "rm -f '$remote_creds'" >/dev/null 2>&1 || true
+          }
+          trap cleanup_secret EXIT
+          printf '%s\n%s\n' "$DB_USERNAME" "$DB_PASSWORD" | \
+            sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
+            "umask 077; cat > '$remote_creds'; chmod 600 '$remote_creds'"
           sshpass -e ssh "${ssh_args[@]}" -p "$CONTABO_SSH_PORT" "$target" \
-            "bash -s -- '$GITHUB_SHA' '$remote_archive' '$GEOCAUCE_SITE_ADDRESS'" < scripts/deploy-contabo.sh
+            "bash -s -- '$GITHUB_SHA' '$remote_archive' '$GEOCAUCE_SITE_ADDRESS' '$remote_creds'" < scripts/deploy-contabo.sh
+          trap - EXIT
+          cleanup_secret
           unset SSHPASS
 
           echo "### Contabo deployment" >> "$GITHUB_STEP_SUMMARY"
