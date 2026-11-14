@@ -54,7 +54,9 @@ jobs:
           assert 'secrets.DB_PASSWORD' in raw
           assert 'db-credentials-' in raw
           assert 'POSTGRES_USER: ${POSTGRES_USER:' in compose
-          assert 'POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:' in compose
+          assert 'POSTGRES_PASSWORD_FILE: /run/secrets/db_password' in compose
+          assert 'DB_PASSWORD_FILE: /run/secrets/db_password' in compose
+          assert 'URL.create(' in Path('backend/geocauce_api/database.py').read_text()
           assert 'DB_USERNAME differs from the initialized PostgreSQL role' in deploy
           assert 'DB_PASSWORD differs from the initialized PostgreSQL password' in deploy
           assert 'POSTGRES_USER=%s' in deploy
@@ -79,7 +81,6 @@ jobs:
       - name: Verify compose
         shell: bash
         env:
-          POSTGRES_PASSWORD: test-only-password
           JWT_SECRET: test-only-jwt
           SITE_ADDRESS: geocauce.example.org
         run: docker compose config -q
