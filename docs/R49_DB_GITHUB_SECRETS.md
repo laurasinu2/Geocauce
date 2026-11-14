@@ -9,9 +9,20 @@ Create both:
 - `DB_USERNAME`: PostgreSQL login name (lowercase letters, digits and
   underscores; must start with a letter or underscore). For existing R49
   installations this is normally **`geocauce`**.
-- `DB_PASSWORD`: exactly 64 hexadecimal characters. For a **new** database,
-  generate once using `openssl rand -hex 32`. For the **existing** Geocauce
-  database, **copy the exact current password** from the private
+- `DB_PASSWORD`: any non-empty single-line password, including Unicode,
+  spaces, and special characters such as `@`, `#`, `# R49 · Database credentials managed with GitHub repository secrets
+
+## Configure GitHub (not Environment secrets)
+
+Open **laurasinu2/Geocauce → Settings → Secrets and variables → Actions
+→ Repository secrets → New repository secret**.
+
+Create both:
+- `DB_USERNAME`: PostgreSQL login name (lowercase letters, digits and
+  underscores; must start with a letter or underscore). For existing R49
+  installations this is normally **`geocauce`**.
+- , `:` and `/`.
+  For the **existing** Geocauce database, **copy the exact current password** from the private
   `/opt/geocauce/.env` file on Contabo, without posting it online.
 
 These are distinct from `CONTABO_USER` and `CONTABO_PASSWORD` (SSH
@@ -24,8 +35,8 @@ credentials) and `JWT_SECRET` (application tokens).
   GitHub, release source archives, and container logs.
 - On **first installation with no existing Docker database volume**, the
   deployment creates `/opt/geocauce/.env` with
-  `POSTGRES_USER=DB_USERNAME`, `POSTGRES_PASSWORD=DB_PASSWORD`,
-  and a distinct randomly generated `JWT_SECRET`.
+  `POSTGRES_USER=DB_USERNAME` and a distinct randomly generated `JWT_SECRET`,
+  and stores the DB password in `/opt/geocauce/db-password` (outside Git).
 - On **an already-initialized database**, the deploy verifies that both
   credentials agree with existing values. It adds the missing
   `POSTGRES_USER` line to older `.env` files when safe.
@@ -40,13 +51,16 @@ credentials) and `JWT_SECRET` (application tokens).
 
 ## Docker Compose / Adminer
 
-Compose reads `POSTGRES_USER` and `POSTGRES_PASSWORD` from the private VPS
-`.env` and uses them for PostgreSQL and the FastAPI `DATABASE_URL`.
+Compose reads `POSTGRES_USER` from the private VPS `.env` and bind-mounts
+`/opt/geocauce/db-password` into PostgreSQL and FastAPI. SQLAlchemy constructs
+its connection with `URL.create`, so special characters are safe. For existing
+installations, the old `POSTGRES_PASSWORD` line in `.env` may remain for
+rollback compatibility.
 Adminer uses PostgreSQL authentication directly; enter:
 - System: PostgreSQL
 - Server: `db`
 - Username: `POSTGRES_USER`
-- Password: `POSTGRES_PASSWORD`
+- Password: exact value of GitHub `DB_PASSWORD` / VPS `db-password` file
 - Database: `geocauce`
 
 Adminer is reachable only through the configured SSH tunnel on port 8081;
@@ -75,7 +89,7 @@ On the VPS:
 
 ```bash
 grep '^POSTGRES_USER=' /opt/geocauce/.env
-grep '^POSTGRES_PASSWORD=' /opt/geocauce/.env | cut -d= -f1
+test -f /opt/geocauce/db-password && echo 'Private password file exists'
 docker compose --env-file /opt/geocauce/.env -f /opt/geocauce/current/compose.yaml ps
 ```
 
